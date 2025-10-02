@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    
+    - name: Extract Version from Tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    
+    - name: Create Release Archive
+      run: |
+        mkdir -p release
+        cp prototype/prototype.py release/
+        cp README.md CHANGELOG.md LICENSE AGENTS.md WORKFLOW_STANDFLAECHEN.md release/
+        cd release
+        zip -r ../wind-turbine-earthwork-calculator-v${{ steps.get_version.outputs.VERSION }}.zip .
+        cd ..
+    
+    - name: Generate Release Notes from CHANGELOG
+      id: changelog
+      run: |
+        # Extract release notes for this version from CHANGELOG.md
+        VERSION=${{ steps.get_version.outputs.VERSION }}
+        awk "/## \[$VERSION\]/,/## \[/" CHANGELOG.md | head -n -1 > release_notes.md
+        cat release_notes.md
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        body_path: release_notes.md
+        files: |
+          wind-turbine-earthwork-calculator-v${{ steps.get_version.outputs.VERSION }}.zip
+          prototype/prototype.py
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Notify Success
+      run: |
+        echo "✅ Release v${{ steps.get_version.outputs.VERSION }} created successfully!"

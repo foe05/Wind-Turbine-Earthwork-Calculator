@@ -1,0 +1,59 @@
+# Wind Turbine Earthwork Calculator - Python Dependencies
+#
+# Hinweis: Dieses Tool ist ein QGIS Processing Script.
+# Die meisten Dependencies sind bereits in QGIS enthalten.
+#
+# Für QGIS-Nutzung: Keine separate Installation nötig!
+# Für Standalone/Testing: Installation mit `pip install -r requirements.txt`
+
+# ===== Core Dependencies (bereits in QGIS) =====
+# Diese Pakete werden von QGIS bereitgestellt und müssen
+# normalerweise NICHT separat installiert werden
+
+numpy>=1.20.0          # Array-Operationen für DEM-Verarbeitung
+                       # In QGIS: meist vorinstalliert
+
+# ===== QGIS & PyQt (NUR für Standalone-Testing) =====
+# Diese werden NUR benötigt, wenn du das Script außerhalb
+# von QGIS testen möchtest (sehr selten)
+
+# PyQt5>=5.15.0        # Qt-Bindings (in QGIS enthalten)
+                       # Auskommentiert, da in QGIS verfügbar
+
+# ===== Development Dependencies (Optional) =====
+# Nur für Entwickler, die Unit-Tests schreiben wollen
+
+pytest>=7.0.0          # Testing framework
+pytest-cov>=4.0.0      # Code coverage
+pytest-mock>=3.10.0    # Mocking für Tests
+
+# ===== Linting & Formatting (Optional) =====
+# Für Code-Qualität
+
+flake8>=6.0.0          # PEP 8 Linter
+black>=23.0.0          # Code formatter
+mypy>=1.0.0            # Type checker
+pylint>=2.17.0         # Code analyzer
+
+# ===== Documentation (Optional) =====
+# Für Entwickler, die Dokumentation generieren wollen
+
+sphinx>=5.0.0          # Dokumentations-Generator
+sphinx-rtd-theme>=1.2.0  # ReadTheDocs Theme
+
+# ===== HINWEISE =====
+#
+# Installation für Entwicklung:
+#   pip install -r requirements.txt
+#
+# Installation nur für Testing:
+#   pip install pytest pytest-cov pytest-mock
+#
+# Installation für QGIS-Nutzung:
+#   NICHT NÖTIG! Einfach prototype.py in QGIS-Scripts-Ordner kopieren
+#
+# QGIS Python-Umgebung nutzen (Linux):
+#   /usr/bin/python3 -m pip install <package>
+#
+# QGIS Python-Umgebung nutzen (Windows):
+#   "C:\Program Files\QGIS 3.x\bin\python-qgis.bat" -m pip install <package>
