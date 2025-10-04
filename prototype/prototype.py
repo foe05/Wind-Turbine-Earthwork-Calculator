@@ -806,7 +806,10 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             'saving_pct': cost_result['saving_pct'],
             'gravel_vol': cost_result['gravel_vol'],
             'cost_total_without_reuse': cost_result['cost_total_without_reuse'],
-            'cost_total_with_reuse': cost_result['cost_total_with_reuse']
+            'cost_total_with_reuse': cost_result['cost_total_with_reuse'],
+            # Koordinaten für Report (v5.5)
+            'coord_x': round(point.x(), 2),
+            'coord_y': round(point.y(), 2)
         }
         
         return result
@@ -2193,19 +2196,23 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         for i, r in enumerate(results_list, 1):
             # Profile-PNGs suchen (wenn vorhanden)
             profile_html = ""
-            if profile_output_folder:
+            if profile_output_folder and os.path.exists(profile_output_folder):
                 profiles = self._find_profiles_for_site(i, profile_output_folder, os.path.dirname(output_path))
                 if profiles:
-                    profile_html = '<h4>Geländeschnitte:</h4><div class="profile-grid">'
+                    profile_html = f'<h4>Geländeschnitte ({len(profiles)} gefunden):</h4><div class="profile-grid">'
                     for p in profiles:
-                        profile_html += f'<img src="{p}" class="profile-img" alt="Profil">'
+                        profile_html += f'<div><img src="{p}" class="profile-img" alt="Profil"><p style="text-align:center; font-size:12px; color:#7f8c8d;">{os.path.basename(p)}</p></div>'
                     profile_html += '</div>'
+                else:
+                    profile_html = f'<p style="color: #95a5a6;">ℹ️ Keine Geländeschnitte gefunden in: {profile_output_folder}</p>'
+            elif profile_output_folder:
+                profile_html = f'<p style="color: #e74c3c;">⚠️ Profil-Ordner existiert nicht: {profile_output_folder}</p>'
             
             html += f"""
         <h3>Standort {i}</h3>
         <table>
             <tr><th>Eigenschaft</th><th>Wert</th></tr>
-            <tr><td>Koordinaten</td><td>X: {r.get('terr_mean', 0):.1f} / Y: (aus Punkt-Layer)</td></tr>
+            <tr><td>Koordinaten (UTM)</td><td>X: {r.get('coord_x', 0):,.2f} m / Y: {r.get('coord_y', 0):,.2f} m</td></tr>
             <tr><td>Plattform-Fläche</td><td>{r.get('platform_area', 0):.1f} m²</td></tr>
             <tr><td>Böschungs-Fläche</td><td>{r.get('total_area', 0) - r.get('platform_area', 0):.1f} m²</td></tr>
             <tr><td>Fundament-Volumen</td><td class="cut">{r.get('foundation_volume', 0):.1f} m³</td></tr>
@@ -2234,14 +2241,19 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         return output_path
     
     def _find_profiles_for_site(self, site_id, profile_folder, html_folder):
-        """Sucht Profile-PNGs für einen Standort"""
+        """Sucht Profile-PNGs für einen Standort (mit Debug-Logging)"""
         profiles = []
+        
+        if not profile_folder or not os.path.exists(profile_folder):
+            return profiles
+        
         types = ['Foundation_NS', 'Foundation_EW', 'Crane_Longitudinal', 'Crane_Cross',
                  'Crane_Edge_N', 'Crane_Edge_E', 'Crane_Edge_S', 'Crane_Edge_W']
         
         for ptype in types:
             filename = f"Site_{site_id}_{ptype}.png"
             filepath = os.path.join(profile_folder, filename)
+            
             if os.path.exists(filepath):
                 rel_path = os.path.relpath(filepath, html_folder).replace('\\', '/')
                 profiles.append(rel_path)
