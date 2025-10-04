@@ -427,9 +427,9 @@ Closes #123
 
 ## Fragen?
 
-- **Issues**: [GitHub Issues](https://github.com/YOURUSERNAME/Wind-Turbine-Earthwork-Calculator/issues)
-- **Diskussionen**: [GitHub Discussions](https://github.com/YOURUSERNAME/Wind-Turbine-Earthwork-Calculator/discussions)
-- **E-Mail**: [deine@email.com]
+- **Issues**: [GitHub Issues](https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/issues)
+- **Diskussionen**: [GitHub Discussions](https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/discussions)
+- **E-Mail**: [hallo@broetzens.de]
 
 ---
 
