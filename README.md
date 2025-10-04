@@ -408,7 +408,7 @@ Kosten = Fundament-Aushub-Kosten
 
 ## 🗺️ Workflow: Standflächen-Optimierung
 
-Siehe detaillierte Anleitung: [WORKFLOW_STANDFLAECHEN.md](WORKFLOW_STANDFLAECHEN.md)
+Siehe detaillierte Anleitung: [WORKFLOW_STANDFLAECHEN.md](prototype/WORKFLOW_STANDFLAECHEN.md)
 
 **Kurzversion**:
 
@@ -427,7 +427,7 @@ Siehe detaillierte Anleitung: [WORKFLOW_STANDFLAECHEN.md](WORKFLOW_STANDFLAECHEN
 Wind-Turbine-Earthwork-Calculator/
 ├── prototype/
 │   └── prototype.py              # Haupt-Processing-Script
-├── WORKFLOW_STANDFLAECHEN.md     # Workflow-Dokumentation
+│   └── WORKFLOW_STANDFLAECHEN.md # Workflow-Dokumentation
 ├── AGENTS.md                     # Entwickler-Informationen
 ├── README.md                     # Diese Datei
 └── LICENSE                       # MIT-Lizenz
@@ -444,22 +444,6 @@ cd Wind-Turbine-Earthwork-Calculator
 ```
 
 Siehe [AGENTS.md](AGENTS.md) für detaillierte Entwickler-Informationen.
-
----
-
-## 📅 Roadmap
-
-### v5.0 (geplant Q1 2026)
-
-- [ ] **Constraint-basierte Platzierung**: Buffer um Gebäude/Straßen, Konflikt-Vermeidung
-- [ ] **Batch-Optimierung**: Materialfluss zwischen Standorten optimieren
-- [ ] **3D-Visualisierung**: Export für 3D-Viewer (Cesium, Three.js)
-
-### v4.1 (Bugfixes)
-
-- [ ] Support für projektierte vs. geographische CRS
-- [ ] Performance-Optimierung für große DEMs
-- [ ] Mehr Bodentyp-Presets
 
 ---
 
@@ -486,8 +470,8 @@ MIT License - siehe [LICENSE](LICENSE) Datei.
 
 **Windkraft-Standortplanung**
 
-- GitHub: [@YOURUSERNAME](https://github.com/YOURUSERNAME)
-- Projekt: [Wind Turbine Earthwork Calculator](https://github.com/YOURUSERNAME/Wind-Turbine-Earthwork-Calculator)
+- GitHub: [@foe05](https://github.com/foe05)
+- Projekt: [Wind Turbine Earthwork Calculator](https://github.com/foe05/Wind-Turbine-Earthwork-Calculator)
 
 ---
 
