@@ -1485,12 +1485,14 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         if np.any(slope_mask):
             slope_tan = math.tan(math.radians(slope_angle))
             height_change = distance[slope_mask] / slope_tan
-            target_dem[slope_mask] = platform_height + np.sign(
-                original_dem[slope_mask] - platform_height) * height_change
+            # Fix: Explizit float arrays verwenden, nicht boolean
+            slope_elevations = original_dem[slope_mask].astype(float)
+            height_diff = slope_elevations - platform_height
+            target_dem[slope_mask] = platform_height + np.sign(height_diff) * height_change
             target_dem[slope_mask] = np.where(
-                original_dem[slope_mask] > platform_height,
-                np.minimum(target_dem[slope_mask], original_dem[slope_mask]),
-                np.maximum(target_dem[slope_mask], original_dem[slope_mask]))
+                slope_elevations > platform_height,
+                np.minimum(target_dem[slope_mask], slope_elevations),
+                np.maximum(target_dem[slope_mask], slope_elevations))
         return target_dem
     
     def _optimize_balanced_cutfill(self, elevations):
