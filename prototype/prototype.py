@@ -2267,13 +2267,14 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         if not profile_folder or not os.path.exists(profile_folder):
             return profiles
         
-        types = ['Foundation_NS', 'Foundation_EW', 'Crane_Longitudinal', 'Crane_Cross',
-                 'Crane_Edge_N', 'Crane_Edge_E', 'Crane_Edge_S', 'Crane_Edge_W']
+        # FIX: Lowercase names (wie sie tatsächlich erstellt werden!)
+        types = ['foundation_ns', 'foundation_ew', 'crane_longitudinal', 'crane_cross',
+                 'crane_edge_n', 'crane_edge_e', 'crane_edge_s', 'crane_edge_w']
         
         # Alle Dateien im Ordner auflisten (für Debug)
         try:
             actual_files = os.listdir(profile_folder)
-            debug_info.append(f"Dateien im Ordner: {', '.join(actual_files) if actual_files else 'LEER'}")
+            debug_info.append(f"Dateien im Ordner: {', '.join(actual_files[:5])}... ({len(actual_files)} total)")
         except:
             debug_info.append("Ordner nicht lesbar")
         
