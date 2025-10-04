@@ -10,21 +10,19 @@
 
 ## 🚀 Installationsschritte
 
-### 1. Script-Dateien kopieren
+### 1. Script-Datei kopieren
 
-Kopiere **beide Dateien** in den QGIS Processing Scripts Ordner:
+Kopiere **eine Datei** in den QGIS Processing Scripts Ordner:
 
 ```bash
 # Linux/Mac
 cp prototype/prototype.py ~/.local/share/QGIS/QGIS3/profiles/default/processing/scripts/
-cp prototype/html_report_generator.py ~/.local/share/QGIS/QGIS3/profiles/default/processing/scripts/
 
 # Windows (PowerShell)
 Copy-Item prototype\prototype.py -Destination "$env:APPDATA\QGIS\QGIS3\profiles\default\processing\scripts\"
-Copy-Item prototype\html_report_generator.py -Destination "$env:APPDATA\QGIS\QGIS3\profiles\default\processing\scripts\"
 ```
 
-**Wichtig:** `html_report_generator.py` MUSS im gleichen Ordner wie `prototype.py` liegen!
+**Hinweis:** Ab v5.5 ist der Professional HTML Report direkt integriert - kein externes Modul mehr nötig!
 
 ---
 
@@ -152,38 +150,21 @@ Falls PNGs extern erstellt wurden:
 
 ## 🐛 Troubleshooting
 
-### Import-Fehler: "html_report_generator could not be resolved"
+### Report zeigt alten Stil (sollte nicht mehr vorkommen ab v5.5)
 
-**Ursache:** Modul nicht im gleichen Ordner wie `prototype.py`
+**Hinweis:** Ab v5.5 ist der Professional HTML Report direkt integriert. Der alte Stil wird nicht mehr verwendet.
+
+Falls doch der alte Stil erscheint, prüfen:
+- QGIS-Log: Steht dort "✅ Professional Report erstellt!"?
+- Falls nicht: Möglicherweise alte Script-Version im Cache
 
 **Lösung:**
 ```bash
-# Prüfen ob beide Dateien vorhanden sind:
-ls ~/.local/share/QGIS/QGIS3/profiles/default/processing/scripts/
+# Datei erneut kopieren (überschreibt alte Version)
+cp prototype/prototype.py ~/.local/share/QGIS/QGIS3/profiles/default/processing/scripts/
 
-# Sollte zeigen:
-# prototype.py
-# html_report_generator.py
-```
-
-Falls `html_report_generator.py` fehlt → nochmal kopieren (siehe Schritt 1)
-
----
-
-### Report zeigt alten Stil (kein White Template)
-
-**Ursache:** Fallback auf Legacy-Methode (Import fehlgeschlagen)
-
-**Debug in Python-Console:**
-```python
-import sys
-sys.path.append('/pfad/zu/processing/scripts')
-
-try:
-    from html_report_generator import HTMLReportGenerator
-    print("✅ Modul geladen")
-except Exception as e:
-    print(f"❌ Fehler: {e}")
+# In QGIS: Scripts neu laden
+# Processing → Toolbox → Rechtsklick → Reload Scripts
 ```
 
 ---
