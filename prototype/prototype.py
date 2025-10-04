@@ -1052,7 +1052,10 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             x_coords, y_coords, point, length, width,
             platform_height, slope_angle, slope_width, dem_data, rotation_angle)
         
-        diff_dem = dem_data - target_dem
+        # Fix: Explizit float arrays verwenden (NumPy 1.20+ compatibility)
+        dem_data_float = dem_data.astype(float)
+        target_dem_float = target_dem.astype(float)
+        diff_dem = dem_data_float - target_dem_float
         slope_mask = self._create_slope_mask(x_coords, y_coords, point, length, width, slope_width, rotation_angle)
         
         platform_cut = np.sum(np.maximum(diff_dem[platform_mask], 0)) * pixel_area
