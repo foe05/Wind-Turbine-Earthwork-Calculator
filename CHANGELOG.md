@@ -7,6 +7,86 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ---
 
+## [5.5.0] - 2025-10-04
+
+### 🚀 Hauptrelease - Polygon-basierte Berechnungen & Professional Reports
+
+#### Hinzugefügt
+- **Beliebige Polygon-Formen für Kranstellflächen**
+  - Exakte Volumenberechnung für L-Form, Trapez, Kreis, Freiform
+  - `_sample_dem_polygon()`: Universelles DEM-Sampling für beliebige Polygone
+  - `_create_slope_polygon()`: Böschungen folgen Polygon-Kontur
+  - `_calculate_slope_height()`: Höhen-Interpolation auf Böschung
+  - `_calculate_crane_pad_polygon()`: Cut/Fill für beliebige Formen
+  - Multi-Polygon und Polygon-mit-Loch Support
+
+- **Polygon-Fundamente** (optional)
+  - Neue Parameter: `USE_CIRCULAR_FOUNDATIONS`, `FOUNDATION_POLYGONS`
+  - `_calculate_foundation_polygon()`: Fundamente in beliebiger Form
+  - `_get_foundation_polygon_for_site()`: Site-ID-basierte Zuordnung
+  - Individuelle Tiefe pro Standort (Attribut `depth_m`)
+  - Oktagon, Quadrat, Freiform unterstützt
+
+- **Professional HTML-Report**
+  - Minimalistisches, funktionales Design
+  - Eingangspara meter-Tabelle
+  - Gesamt-Übersicht (Cut, Fill, Kosten)
+  - Details pro Standort mit Koordinaten (UTM)
+  - Geländeschnitt-Integration mit Debug-Info
+  - PDF-Export-Button
+  - Responsive Design
+
+- **Koordinaten im Report**
+  - `coord_x`, `coord_y` im Result-Dict
+  - UTM-Koordinaten mit Tausender-Trennung
+
+- **Dokumentation**
+  - `INSTALLATION_QGIS.md`: Schritt-für-Schritt-Anleitung
+  - Single-File-Deployment (nur prototype.py nötig)
+
+#### Geändert
+- `_calculate_foundation()` → `_calculate_foundation_circular()` (umbenannt)
+- `_calculate_complete_earthwork()`: Unterstützt jetzt Polygon- und Kreis-Modus
+- HTML-Report-Generator komplett überarbeitet (inline integriert)
+- Version: 4.0 → **5.5**
+
+#### Behoben
+- **CRITICAL**: NumPy boolean subtract Fehler
+  - Root Cause: `provider.sample()` Tuple-Reihenfolge falsch
+  - Fix in `_sample_dem_polygon()`: `val, ok = provider.sample()` statt `sample_result[0/1]`
+  - Fix in `_create_target_dem()`: `slope_elevations.astype(float)`
+  - Fix in `_calculate_crane_pad()`: Alle Arrays explizit `dtype=float`
+  - Fix in `_optimize_balanced_cutfill()`: `elevations.astype(float)`
+  - Kompatibel mit NumPy 1.20+ und 2.0+
+
+- **Geländeschnitt-Dateinamen**
+  - Problem: CamelCase vs. lowercase Mismatch
+  - Fix: Suche auf lowercase umgestellt (`foundation_ns` statt `Foundation_NS`)
+
+#### Rückwärtskompatibilität
+- ✅ Bestehende Punkt-basierte Workflows funktionieren unverändert
+- ✅ Kreisförmige Fundamente bleiben DEFAULT
+- ✅ Alte Rechteck-Funktionen bleiben für Punkt-Modus erhalten
+
+---
+
+## [5.0.0] - 2025-10-03
+
+### 🚀 Geländeschnitt-Modul
+
+#### Hinzugefügt
+- **Automatische Profil-Generierung**
+  - 8 Schnitte pro Standort (2 Fundament, 6 Kranfläche)
+  - Matplotlib-basierte 2D-Visualisierung
+  - PNG-Export mit 300 DPI
+  - Konfigurierbare Höhenübertreibung (1.0-5.0x)
+
+- **2-stufiger Workflow**
+  - Auto-generierte Schnittlinien ODER
+  - Benutzerdefinierte Schnittlinien
+
+---
+
 ## [4.0.0] - 2025-10-02
 
 ### 🚀 Hauptrelease - Polygon-Input-Modus & Rotations-Support

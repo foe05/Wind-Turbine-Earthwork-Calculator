@@ -1,7 +1,8 @@
 # AGENTS.md - Developer & AI Assistant Guide
 
 **Projekt**: Wind Turbine Earthwork Calculator  
-**Version**: 3.0  
+**Version**: 5.5 (Polygon-based Sampling + Professional Reports)
+**Datum**: Oktober 2025
 **Zweck**: Informationen für AI-Assistenten (Amp, Cursor, etc.) und Entwickler
 
 ---
@@ -11,9 +12,11 @@
 ```
 Wind-Turbine-Earthwork-Calculator/
 ├── prototype/
-│   └── prototype.py              # Haupt-QGIS-Processing-Tool (1200+ Zeilen)
-├── WORKFLOW_STANDFLAECHEN.md     # Workflow-Dokumentation für User
+│   ├── prototype.py              # Haupt-QGIS-Processing-Tool (3600+ Zeilen)
+│   └── html_report_generator.py  # Standalone HTML Generator (optional, veraltet)
+├── INSTALLATION_QGIS.md          # Installationsanleitung
 ├── AGENTS.md                     # Diese Datei
+├── CHANGELOG.md                  # Versions-Historie
 ├── README.md                     # Projekt-README
 └── LICENSE                       # MIT-Lizenz
 ```
@@ -23,6 +26,7 @@ Wind-Turbine-Earthwork-Calculator/
 **Typ**: QGIS Processing Algorithm (Python)  
 **Klasse**: `WindTurbineEarthworkCalculatorV3`  
 **Framework**: QGIS Processing Framework 3.0+
+**Größe**: ~3600 Zeilen (v5.5)
 
 **Kern-Dependencies**:
 - `qgis.core.*` - QGIS-API

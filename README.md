@@ -1,6 +1,6 @@
 # 🌬️ Wind Turbine Earthwork Calculator
 
-**Version 4.0** | QGIS Processing Tool für präzise Erdarbeitsberechnungen bei Windkraftanlagen-Standorten
+**Version 5.5** | QGIS Processing Tool für präzise Erdarbeitsberechnungen bei Windkraftanlagen-Standorten
 
 [![QGIS](https://img.shields.io/badge/QGIS-3.0+-green.svg)](https://qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.7+-blue.svg)](https://python.org)
@@ -16,15 +16,40 @@ Der **Wind Turbine Earthwork Calculator** ist ein leistungsstarkes QGIS-Processi
 - 🏗️ **Kranstellflächen** (Cut/Fill mit Böschungen)
 - ♻️ **Material-Wiederverwendung** (Fundament-Aushub → Kranflächen-Auftrag)
 - 💰 **Detaillierte Kostenberechnung**
-- 📊 **Automatische HTML-Reports**
+- 📊 **Automatische HTML-Reports** mit PDF-Export
 - 🗺️ **Standflächen-Polygon-Export**
-- 🔄 **Polygon-Input-Modus** (v4.0)
+- 🔄 **Beliebige Polygon-Formen** (v5.5)
+- 📈 **Geländeschnitt-Modul** (v5.0)
 
 ---
 
-## ✨ Features v4.0
+## ✨ Features v5.5
 
-### 🆕 NEU: Polygon-Input-Modus
+### 🆕 NEU: Polygon-basierte Berechnungen
+
+- **Beliebige Kranstellflächen-Formen**:
+  - L-Form, Trapez, Kreis, Freiform
+  - Exakte Volumen-Berechnung entlang Polygon-Kontur
+  - Böschungen folgen der Polygon-Form
+  - Multi-Polygon und Polygon-mit-Loch Support
+
+- **Polygon-Fundamente** (optional):
+  - Oktagon, Quadrat, beliebige Formen
+  - Alternative zu kreisförmigen Fundamenten
+  - Site-ID-basierte Zuordnung
+  - Individuelle Tiefe pro Standort
+
+### Features v5.0
+
+- **Geländeschnitt-Modul**:
+  - 8 automatische Profile pro Standort
+  - Matplotlib-basierte Visualisierung
+  - PNG-Export (300 DPI)
+  - Integration in HTML-Report
+
+### Features v4.0
+
+- **Polygon-Input-Modus**:
 
 - **2-Schritt-Workflow**:
   1. **Generieren**: Punkte → Automatische Rechteck-Polygone (Nord-Süd)
