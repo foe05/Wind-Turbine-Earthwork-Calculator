@@ -2204,13 +2204,26 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             profile_html = ""
             if profile_output_folder and os.path.exists(profile_output_folder):
                 profiles = self._find_profiles_for_site(i, profile_output_folder, os.path.dirname(output_path))
-                if profiles:
-                    profile_html = f'<h4>Geländeschnitte ({len(profiles)} gefunden):</h4><div class="profile-grid">'
-                    for p in profiles:
+                
+                # Separate Debug-Info und Bilder
+                debug_comments = [p for p in profiles if p.startswith('<!--')]
+                image_profiles = [p for p in profiles if not p.startswith('<!--')]
+                
+                if image_profiles:
+                    profile_html = f'<h4>Geländeschnitte ({len(image_profiles)} gefunden):</h4><div class="profile-grid">'
+                    for p in image_profiles:
                         profile_html += f'<div><img src="{p}" class="profile-img" alt="Profil"><p style="text-align:center; font-size:12px; color:#7f8c8d;">{os.path.basename(p)}</p></div>'
                     profile_html += '</div>'
                 else:
-                    profile_html = f'<p style="color: #95a5a6;">ℹ️ Keine Geländeschnitte gefunden in: {profile_output_folder}</p>'
+                    profile_html = f'<p style="color: #e74c3c;">⚠️ Keine Geländeschnitte gefunden in: {profile_output_folder}</p>'
+                    # Debug-Info anzeigen
+                    if debug_comments:
+                        profile_html += f'<details style="margin-top: 10px;"><summary style="cursor:pointer; color:#7f8c8d; font-size:12px;">🔍 Debug-Info anzeigen</summary><pre style="font-size:11px; background:#f8f9fa; padding:10px; border-radius:4px;">'
+                        for dc in debug_comments:
+                            # HTML-Kommentar extrahieren
+                            info = dc.replace('<!-- DEBUG: ', '').replace(' -->', '')
+                            profile_html += f'{info}\n'
+                        profile_html += '</pre></details>'
             elif profile_output_folder:
                 profile_html = f'<p style="color: #e74c3c;">⚠️ Profil-Ordner existiert nicht: {profile_output_folder}</p>'
             
@@ -2247,14 +2260,22 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         return output_path
     
     def _find_profiles_for_site(self, site_id, profile_folder, html_folder):
-        """Sucht Profile-PNGs für einen Standort (mit Debug-Logging)"""
+        """Sucht Profile-PNGs für einen Standort"""
         profiles = []
+        debug_info = []
         
         if not profile_folder or not os.path.exists(profile_folder):
             return profiles
         
         types = ['Foundation_NS', 'Foundation_EW', 'Crane_Longitudinal', 'Crane_Cross',
                  'Crane_Edge_N', 'Crane_Edge_E', 'Crane_Edge_S', 'Crane_Edge_W']
+        
+        # Alle Dateien im Ordner auflisten (für Debug)
+        try:
+            actual_files = os.listdir(profile_folder)
+            debug_info.append(f"Dateien im Ordner: {', '.join(actual_files) if actual_files else 'LEER'}")
+        except:
+            debug_info.append("Ordner nicht lesbar")
         
         for ptype in types:
             filename = f"Site_{site_id}_{ptype}.png"
@@ -2263,6 +2284,13 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             if os.path.exists(filepath):
                 rel_path = os.path.relpath(filepath, html_folder).replace('\\', '/')
                 profiles.append(rel_path)
+                debug_info.append(f"✓ {filename}")
+            else:
+                debug_info.append(f"✗ {filename} nicht gefunden")
+        
+        # Speichere Debug-Info im ersten Profil als Kommentar
+        if not profiles and debug_info:
+            profiles.append(f"<!-- DEBUG: {'; '.join(debug_info)} -->")
         
         return profiles
     
