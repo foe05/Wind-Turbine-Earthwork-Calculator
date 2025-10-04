@@ -66,6 +66,13 @@ import math
 import numpy as np
 import os
 
+# HTML Report Generator (v5.5)
+try:
+    from html_report_generator import HTMLReportGenerator
+    HTML_REPORT_AVAILABLE = True
+except ImportError:
+    HTML_REPORT_AVAILABLE = False
+
 try:
     import matplotlib
     matplotlib.use('Agg')
@@ -666,19 +673,29 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                 
                 feedback.pushInfo(f'✅ Profile erstellt in: {profile_output_folder}')
         
-        html_content = self._create_html_report(
-            results, swell_factor, compaction_factor, material_reuse,
-            foundation_diameter, foundation_depth,
-            foundation_type_names[foundation_type],
-            platform_length, platform_width,
-            slope_angle, slope_width,
-            cost_excavation, cost_transport,
-            cost_fill_import, cost_gravel,
-            cost_compaction, gravel_thickness)
-        
-        # Report speichern (report_file wurde oben initialisiert)
-        with open(report_file, 'w', encoding='utf-8') as f:
-            f.write(html_content)
+        # HTML-Report generieren (v5.5: Neues Modul)
+        if HTML_REPORT_AVAILABLE:
+            report_generator = HTMLReportGenerator()
+            report_generator.create_report(
+                results_list=results,
+                output_path=report_file,
+                project_name="Windpark-Projekt",  # TODO: Als Parameter hinzufügen
+                profile_output_folder=profile_output_folder if generate_profiles else None
+            )
+        else:
+            # Fallback: Alte Methode (Legacy)
+            html_content = self._create_html_report(
+                results, swell_factor, compaction_factor, material_reuse,
+                foundation_diameter, foundation_depth,
+                foundation_type_names[foundation_type],
+                platform_length, platform_width,
+                slope_angle, slope_width,
+                cost_excavation, cost_transport,
+                cost_fill_import, cost_gravel,
+                cost_compaction, gravel_thickness)
+            
+            with open(report_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
         
         feedback.pushInfo(f'\n✅ Fertig! Report: {report_file}')
         
