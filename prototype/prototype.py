@@ -663,6 +663,12 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                                 pdata, site_id, pline['type'], plot_path,
                                 vertical_exaggeration,
                                 {'cut': result.get('total_cut', 0), 'fill': result.get('total_fill', 0)})
+                            
+                            # Erfolgsmeldung
+                            if os.path.exists(plot_path):
+                                feedback.pushInfo(f'  ✓ {plot_filename} erstellt')
+                            else:
+                                feedback.pushWarning(f'  ✗ {plot_filename} NICHT erstellt!')
                         except Exception as e:
                             feedback.pushWarning(f'⚠️ Profil {pline["type"]} für Standort {site_id} fehlgeschlagen: {str(e)}')
                             continue
