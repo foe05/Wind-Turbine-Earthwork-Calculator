@@ -669,15 +669,15 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                 
                 feedback.pushInfo(f'✅ Profile erstellt in: {profile_output_folder}')
         
-        # HTML-Report generieren (v5.5: Professional White Template)
-        feedback.pushInfo('📄 Generiere HTML-Report (Professional White Template)...')
-        html_content = self._create_html_report_v5(
+        # HTML-Report generieren (v5.5: Simple Functional Report)
+        feedback.pushInfo('📄 Generiere HTML-Report...')
+        self._create_simple_html_report(
             results, report_file,
-            profile_output_folder if generate_profiles else None
+            profile_output_folder if generate_profiles else None,
+            platform_length, platform_width, foundation_diameter, foundation_depth,
+            slope_angle, slope_width, swell_factor, compaction_factor
         )
-        with open(report_file, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        feedback.pushInfo('✅ Professional Report erstellt!')
+        feedback.pushInfo('✅ HTML-Report erstellt!')
         
         feedback.pushInfo(f'\n✅ Fertig! Report: {report_file}')
         
@@ -2120,31 +2120,147 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         if material_reuse and result["cost_saving"] > 0:
             feedback.pushInfo(f'     💚 Einsparung:   {result["cost_saving"]:>10,.2f} € ({result["saving_pct"]:.1f}%)')
     
-    # =========================================================================
-    # HTML REPORT GENERATOR v5.5 (Professional White-Paper-Design)
-    # =========================================================================
-    
-    def _create_html_report_v5(self, results_list, output_path, project_name="Windpark-Projekt",
-                                profile_output_folder=None, **kwargs):
-        """
-        Erstellt kompletten HTML-Report im White-Paper-Design
+    def _create_simple_html_report(self, results_list, output_path, profile_output_folder,
+                                   platform_length, platform_width, foundation_diameter, 
+                                   foundation_depth, slope_angle, slope_width, 
+                                   swell_factor, compaction_factor):
+        """Erstellt einfachen, funktionalen HTML-Report"""
         
-        Args:
-            results_list: Liste von Dicts mit Berechnungsergebnissen
-            output_path: Pfad zur HTML-Ausgabedatei
-            project_name: Name des Projekts
-            profile_output_folder: Ordner mit Geländeschnitt-PNGs (optional)
-            **kwargs: Zusätzliche Parameter (swell_factor, compaction_factor, etc.)
-        
-        Returns:
-            str: Pfad zur erstellten HTML-Datei
-        """
-        # Meta-Daten (Feld-Namen aus prototype.py)
         total_sites = len(results_list)
         total_cut = sum(r.get('total_cut', 0) for r in results_list)
         total_fill = sum(r.get('total_fill', 0) for r in results_list)
-        total_balance = total_cut - total_fill
+        total_cost = sum(r.get('cost_total', 0) for r in results_list)
+        
+        now = datetime.now()
+        
+        html = f"""<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>WKA Erdarbeits-Bericht</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
+        .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+        h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 15px; }}
+        h2 {{ color: #34495e; margin-top: 40px; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }}
+        h3 {{ color: #2c3e50; margin-top: 30px; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+        th {{ background: #3498db; color: white; padding: 12px; text-align: left; }}
+        td {{ padding: 10px; border-bottom: 1px solid #ecf0f1; }}
+        tr:nth-child(even) {{ background: #f8f9fa; }}
+        .summary-box {{ background: #e8f4fd; padding: 20px; border-left: 4px solid #3498db; margin: 20px 0; }}
+        .cut {{ color: #e74c3c; font-weight: bold; }}
+        .fill {{ color: #27ae60; font-weight: bold; }}
+        .cost {{ color: #f39c12; font-weight: bold; }}
+        .param-table {{ background: #f8f9fa; }}
+        .profile-grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin: 30px 0; }}
+        .profile-img {{ width: 100%; border: 1px solid #ddd; border-radius: 4px; }}
+        button {{ background: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; }}
+        button:hover {{ background: #2980b9; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌬️ Windkraftanlagen - Erdarbeitsberechnung</h1>
+        <p><strong>Erstellt:</strong> {now.strftime('%d.%m.%Y %H:%M')} Uhr | <strong>Standorte:</strong> {total_sites}</p>
+        <button onclick="window.print()">📄 Als PDF drucken</button>
+        
+        <h2>1. Eingangspara meter</h2>
+        <table class="param-table">
+            <tr><th>Parameter</th><th>Wert</th></tr>
+            <tr><td>Plattform (L × B)</td><td>{platform_length}m × {platform_width}m</td></tr>
+            <tr><td>Fundament (Ø × Tiefe)</td><td>Ø {foundation_diameter}m × {foundation_depth}m</td></tr>
+            <tr><td>Böschung (Winkel / Breite)</td><td>{slope_angle}° / {slope_width}m</td></tr>
+            <tr><td>Swell-Faktor</td><td>{swell_factor:.2f}</td></tr>
+            <tr><td>Compaction-Faktor</td><td>{compaction_factor:.2f}</td></tr>
+        </table>
+        
+        <h2>2. Gesamt-Übersicht</h2>
+        <div class="summary-box">
+            <table>
+                <tr><th>Komponente</th><th>Volumen</th></tr>
+                <tr><td>Gesamt-Aushub (Cut)</td><td class="cut">{total_cut:,.1f} m³</td></tr>
+                <tr><td>Gesamt-Auftrag (Fill)</td><td class="fill">{total_fill:,.1f} m³</td></tr>
+                <tr><td>Aufgelockert (Transport)</td><td>{total_cut * swell_factor:,.1f} m³</td></tr>
+                <tr><td><strong>Gesamtkosten</strong></td><td class="cost"><strong>{total_cost:,.2f} €</strong></td></tr>
+            </table>
+        </div>
+        
+        <h2>3. Standort-Details</h2>
+"""
+        
+        # Pro Standort
+        for i, r in enumerate(results_list, 1):
+            # Profile-PNGs suchen (wenn vorhanden)
+            profile_html = ""
+            if profile_output_folder:
+                profiles = self._find_profiles_for_site(i, profile_output_folder, os.path.dirname(output_path))
+                if profiles:
+                    profile_html = '<h4>Geländeschnitte:</h4><div class="profile-grid">'
+                    for p in profiles:
+                        profile_html += f'<img src="{p}" class="profile-img" alt="Profil">'
+                    profile_html += '</div>'
+            
+            html += f"""
+        <h3>Standort {i}</h3>
+        <table>
+            <tr><th>Eigenschaft</th><th>Wert</th></tr>
+            <tr><td>Koordinaten</td><td>X: {r.get('terr_mean', 0):.1f} / Y: (aus Punkt-Layer)</td></tr>
+            <tr><td>Plattform-Fläche</td><td>{r.get('platform_area', 0):.1f} m²</td></tr>
+            <tr><td>Böschungs-Fläche</td><td>{r.get('total_area', 0) - r.get('platform_area', 0):.1f} m²</td></tr>
+            <tr><td>Fundament-Volumen</td><td class="cut">{r.get('foundation_volume', 0):.1f} m³</td></tr>
+            <tr><td>Kranfläche Cut</td><td class="cut">{r.get('crane_total_cut', 0):.1f} m³</td></tr>
+            <tr><td>Kranfläche Fill</td><td class="fill">{r.get('crane_total_fill', 0):.1f} m³</td></tr>
+            <tr><td><strong>Gesamt Cut</strong></td><td class="cut"><strong>{r.get('total_cut', 0):,.1f} m³</strong></td></tr>
+            <tr><td><strong>Gesamt Fill</strong></td><td class="fill"><strong>{r.get('total_fill', 0):,.1f} m³</strong></td></tr>
+            <tr><td><strong>Kosten</strong></td><td class="cost"><strong>{r.get('cost_total', 0):,.2f} €</strong></td></tr>
+        </table>
+        {profile_html}
+"""
+        
+        html += f"""
+        <hr style="margin: 40px 0;">
+        <p style="text-align: center; color: #7f8c8d; font-size: 12px;">
+            Wind Turbine Earthwork Calculator v5.5 | {now.strftime('%d.%m.%Y %H:%M')}
+        </p>
+    </div>
+</body>
+</html>
+"""
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+        
+        return output_path
+    
+    def _find_profiles_for_site(self, site_id, profile_folder, html_folder):
+        """Sucht Profile-PNGs für einen Standort"""
+        profiles = []
+        types = ['Foundation_NS', 'Foundation_EW', 'Crane_Longitudinal', 'Crane_Cross',
+                 'Crane_Edge_N', 'Crane_Edge_E', 'Crane_Edge_S', 'Crane_Edge_W']
+        
+        for ptype in types:
+            filename = f"Site_{site_id}_{ptype}.png"
+            filepath = os.path.join(profile_folder, filename)
+            if os.path.exists(filepath):
+                rel_path = os.path.relpath(filepath, html_folder).replace('\\', '/')
+                profiles.append(rel_path)
+        
+        return profiles
+    
+    # =========================================================================
+    # LEGACY HTML REPORT (v5.0 und älter) - Wird nicht mehr verwendet
+    # =========================================================================
+    
+    def _create_html_report_v5(self, results_list, output_path, profile_output_folder=None):
+        """Erstellt minimalistischen, funktionalen HTML-Report"""
+        
+        # Summen berechnen
+        total_sites = len(results_list)
+        total_cut = sum(r.get('total_cut', 0) for r in results_list)
+        total_fill = sum(r.get('total_fill', 0) for r in results_list)
         total_excavated = sum(r.get('excavated_volume', 0) for r in results_list)
+        total_cost = sum(r.get('cost_total', 0) for r in results_list)
         
         now = datetime.now()
         report_date = now.strftime('%d.%m.%Y')
