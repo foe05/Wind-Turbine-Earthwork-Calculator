@@ -970,8 +970,8 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         if len(platform_points) == 0:
             raise QgsProcessingException('Keine DEM-Daten in Kranstellflächen-Polygon!')
         
-        # 2. Plattform-Höhe optimieren
-        elevations = np.array([z for (x, y, z) in platform_points])
+        # 2. Plattform-Höhe optimieren (FIX: explizit float dtype!)
+        elevations = np.asarray([float(z) for (_, _, z) in platform_points], dtype=float)
         
         if optimization_method == 0:  # Mittelwert
             platform_height = np.mean(elevations)
@@ -1003,6 +1003,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         slope_fill = 0.0
         
         for (x, y, existing_z) in slope_points:
+            existing_z = float(existing_z)  # FIX: explizit float!
             point = QgsPointXY(x, y)
             target_z = self._calculate_slope_height(
                 point, crane_polygon, platform_height, slope_angle, slope_width
@@ -1054,7 +1055,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             raise QgsProcessingException('Keine DEM-Daten!')
         
         platform_mask = self._create_platform_mask(x_coords, y_coords, point, length, width, rotation_angle)
-        platform_elevations = dem_data[platform_mask]
+        platform_elevations = np.asarray(dem_data[platform_mask], dtype=float)  # FIX: explizit float!
         
         if len(platform_elevations) == 0:
             raise QgsProcessingException('Keine Plattform-Daten!')
@@ -1325,11 +1326,11 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                 point_geom = QgsGeometry.fromPointXY(QgsPointXY(x, y))
                 
                 if polygon_geom.contains(point_geom):
-                    # DEM-Höhe sampeln
-                    sample_result = provider.sample(QgsPointXY(x, y), 1)
+                    # DEM-Höhe sampeln (FIX: korrekte Tuple-Reihenfolge!)
+                    val, ok = provider.sample(QgsPointXY(x, y), 1)
                     
-                    if sample_result[0]:  # Wenn valider Wert
-                        z = sample_result[1]
+                    if ok and val is not None:
+                        z = float(val)
                         if not math.isnan(z):
                             sample_points.append((x, y, z))
         
@@ -1535,6 +1536,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
     
     def _optimize_balanced_cutfill(self, elevations):
         """Optimiert Cut/Fill-Balance"""
+        elevations = np.asarray(elevations, dtype=float)  # FIX: explizit float!
         heights = np.linspace(np.min(elevations), np.max(elevations), 50)
         best_height = np.mean(elevations)
         best_balance = float('inf')
