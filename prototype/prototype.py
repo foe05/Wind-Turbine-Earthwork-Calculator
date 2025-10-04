@@ -675,14 +675,32 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         
         # HTML-Report generieren (v5.5: Neues Modul)
         if HTML_REPORT_AVAILABLE:
-            report_generator = HTMLReportGenerator()
-            report_generator.create_report(
-                results_list=results,
-                output_path=report_file,
-                project_name="Windpark-Projekt",  # TODO: Als Parameter hinzufügen
-                profile_output_folder=profile_output_folder if generate_profiles else None
-            )
+            feedback.pushInfo('📄 Generiere HTML-Report (Professional White Template)...')
+            try:
+                report_generator = HTMLReportGenerator()
+                report_generator.create_report(
+                    results_list=results,
+                    output_path=report_file,
+                    project_name="Windpark-Projekt",
+                    profile_output_folder=profile_output_folder if generate_profiles else None
+                )
+                feedback.pushInfo('✅ Professional Report erstellt!')
+            except Exception as e:
+                feedback.pushWarning(f'⚠️ Neuer Report fehlgeschlagen: {e}')
+                feedback.pushInfo('→ Fallback auf Legacy-Report...')
+                html_content = self._create_html_report(
+                    results, swell_factor, compaction_factor, material_reuse,
+                    foundation_diameter, foundation_depth,
+                    foundation_type_names[foundation_type],
+                    platform_length, platform_width,
+                    slope_angle, slope_width,
+                    cost_excavation, cost_transport,
+                    cost_fill_import, cost_gravel,
+                    cost_compaction, gravel_thickness)
+                with open(report_file, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
         else:
+            feedback.pushInfo('📄 HTML Report Generator nicht verfügbar - nutze Legacy-Report')
             # Fallback: Alte Methode (Legacy)
             html_content = self._create_html_report(
                 results, swell_factor, compaction_factor, material_reuse,

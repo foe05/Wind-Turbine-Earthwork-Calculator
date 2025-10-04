@@ -33,11 +33,12 @@ class HTMLReportGenerator:
         Returns:
             str: Pfad zur erstellten HTML-Datei
         """
-        # Meta-Daten
+        # Meta-Daten (Feld-Namen aus prototype.py)
         total_sites = len(results_list)
         total_cut = sum(r.get('total_cut', 0) for r in results_list)
         total_fill = sum(r.get('total_fill', 0) for r in results_list)
         total_balance = total_cut - total_fill
+        total_excavated = sum(r.get('excavated_volume', 0) for r in results_list)
         
         now = datetime.now()
         report_date = now.strftime('%d.%m.%Y')
@@ -794,7 +795,7 @@ class HTMLReportGenerator:
         return sites_html
     
     def _create_site_detail_html(self, site_id, result):
-        """Erstellt HTML für Standort-Details"""
+        """Erstellt HTML für Standort-Details (Feld-Namen aus prototype.py)"""
         total_cut = result.get('total_cut', 0)
         total_fill = result.get('total_fill', 0)
         balance = total_cut - total_fill
@@ -803,6 +804,7 @@ class HTMLReportGenerator:
         balance_action = 'Abtransport' if balance > 0 else 'Anlieferung'
         
         excavated = result.get('excavated_volume', total_cut * 1.25)
+        platform_area = result.get('platform_area', 0)
         
         return f"""
     <div class="report-section site-section">
@@ -821,6 +823,10 @@ class HTMLReportGenerator:
                     <tr>
                         <td>Tiefe:</td>
                         <td>{result.get('foundation_depth_avg', 0):.2f} m</td>
+                    </tr>
+                    <tr>
+                        <td>Fläche:</td>
+                        <td>{platform_area:.1f} m²</td>
                     </tr>
                 </table>
             </div>
@@ -843,6 +849,10 @@ class HTMLReportGenerator:
                     <tr>
                         <td>Slope Fill:</td>
                         <td>{result.get('slope_fill', 0):.1f} m³</td>
+                    </tr>
+                    <tr>
+                        <td>Fläche:</td>
+                        <td>{platform_area:.1f} m²</td>
                     </tr>
                 </table>
             </div>
