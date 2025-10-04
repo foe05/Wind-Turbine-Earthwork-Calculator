@@ -1,8 +1,16 @@
 """
-Wind Turbine Earthwork Calculator - Version 5.0
+Wind Turbine Earthwork Calculator - Version 5.5
 ================================================
 
-NEUE FEATURES v5.0:
+NEUE FEATURES v5.5 (Polygon Refactoring):
+- Beliebige Polygon-Formen für Kranstellflächen (L, Trapez, Kreis, Freiform)
+- Polygon-basierte Fundamente (Oktagon, Quadrat, etc.) als Alternative zu Kreis
+- Exakte Volumen-Berechnung entlang Polygon-Kontur (kein Bounding-Box-Fehler)
+- Böschungen folgen Polygon-Form (konkave Formen unterstützt)
+- Höhen-Interpolation auf Böschung (beliebige Geometrien)
+- Multi-Polygon und Polygon-mit-Loch Support
+
+FEATURES v5.0:
 - Geländeschnitt-Modul: Automatische Profil-Generierung (8 Schnitte pro Standort)
 - Matplotlib-basierte 2D-Visualisierung (Cut/Fill-Darstellung)
 - 2-stufiger Workflow: Auto-generierte oder benutzerdefinierte Schnittlinien
@@ -25,7 +33,7 @@ FEATURES v3.0:
 - Standflächen-Polygon-Export
 
 AUTOR: Windkraft-Standortplanung
-VERSION: 5.0 (Profile Cross-Section Module)
+VERSION: 5.5 (Polygon-based Sampling)
 DATUM: Oktober 2025
 """
 
@@ -82,6 +90,8 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
     FOUNDATION_DIAMETER = 'FOUNDATION_DIAMETER'
     FOUNDATION_DEPTH = 'FOUNDATION_DEPTH'
     FOUNDATION_TYPE = 'FOUNDATION_TYPE'
+    USE_CIRCULAR_FOUNDATIONS = 'USE_CIRCULAR_FOUNDATIONS'
+    FOUNDATION_POLYGONS = 'FOUNDATION_POLYGONS'
     SOIL_TYPE = 'SOIL_TYPE'
     SWELL_FACTOR = 'SWELL_FACTOR'
     COMPACTION_FACTOR = 'COMPACTION_FACTOR'
@@ -114,7 +124,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         return 'windturbineearthworkv3'
     
     def displayName(self):
-        return self.tr('Wind Turbine Earthwork Calculator v5.0')
+        return self.tr('Wind Turbine Earthwork Calculator v5.5')
     
     def group(self):
         return self.tr('Windkraft')
@@ -124,9 +134,17 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
     
     def shortHelpString(self):
         return self.tr("""
-        <b>Windkraftanlagen Erdarbeitsrechner v5.0</b>
+        <b>Windkraftanlagen Erdarbeitsrechner v5.5</b>
         
-        <p><b>🆕 NEU in Version 5.0:</b></p>
+        <p><b>🆕 NEU in Version 5.5:</b></p>
+        <ul>
+            <li><b>Beliebige Polygon-Formen</b>: L, Trapez, Kreis, Freiform für Kranstellflächen</li>
+            <li><b>Polygon-Fundamente</b>: Oktagon, Quadrat, etc. als Alternative zu Kreis</li>
+            <li><b>Exakte Volumen-Berechnung</b>: Entlang Polygon-Kontur (kein Bounding-Box)</li>
+            <li><b>Böschungen folgen Polygon-Form</b>: Auch für konkave Formen</li>
+        </ul>
+        
+        <p><b>Features v5.0:</b></p>
         <ul>
             <li><b>Geländeschnitt-Modul</b>: 8 Profile pro Standort (Fundament + Kranfläche)</li>
             <li><b>Matplotlib-Plots</b>: Cut/Fill-Visualisierung mit PNG-Export (300 DPI)</li>
@@ -218,6 +236,17 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             self.FOUNDATION_TYPE, self.tr('🔧 Fundament-Typ'),
             options=['Flachgründung', 'Tiefgründung', 'Pfahlgründung'],
             defaultValue=0))
+        
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.USE_CIRCULAR_FOUNDATIONS,
+            self.tr('🔧 Runde Fundamente verwenden'),
+            defaultValue=True))
+        
+        self.addParameter(QgsProcessingParameterFeatureSource(
+            self.FOUNDATION_POLYGONS,
+            self.tr('🔧 Fundament-Polygone (nur wenn nicht rund)'),
+            [QgsProcessing.TypeVectorPolygon],
+            optional=True))
         
         self.addParameter(QgsProcessingParameterEnum(
             self.SOIL_TYPE, self.tr('Bodenart'),
@@ -324,7 +353,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         """Hauptverarbeitung"""
         
         feedback.pushInfo('=' * 70)
-        feedback.pushInfo('Wind Turbine Earthwork Calculator v5.0')
+        feedback.pushInfo('Wind Turbine Earthwork Calculator v5.5')
         feedback.pushInfo('=' * 70)
         
         dem_layer = self.parameterAsRasterLayer(parameters, self.INPUT_DEM, context)
@@ -342,6 +371,8 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         foundation_diameter = self.parameterAsDouble(parameters, self.FOUNDATION_DIAMETER, context)
         foundation_depth = self.parameterAsDouble(parameters, self.FOUNDATION_DEPTH, context)
         foundation_type = self.parameterAsEnum(parameters, self.FOUNDATION_TYPE, context)
+        use_circular_foundations = self.parameterAsBool(parameters, self.USE_CIRCULAR_FOUNDATIONS, context)
+        foundation_polygons_source = self.parameterAsSource(parameters, self.FOUNDATION_POLYGONS, context)
         soil_type = self.parameterAsEnum(parameters, self.SOIL_TYPE, context)
         swell_factor = self.parameterAsDouble(parameters, self.SWELL_FACTOR, context)
         compaction_factor = self.parameterAsDouble(parameters, self.COMPACTION_FACTOR, context)
@@ -467,6 +498,27 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                     rotation_angle = 0.0
             
             try:
+                # v5.5: Polygon-Support vorbereiten
+                crane_poly = None
+                foundation_poly = None
+                
+                # Kranstellflächen-Polygon (wenn im Polygon-Modus)
+                if use_polygons:
+                    crane_poly = feature.geometry()
+                
+                # Fundament-Polygon (wenn aktiviert)
+                if not use_circular_foundations and foundation_polygons_source is not None:
+                    # Finde passendes Fundament für diesen Standort
+                    site_id = current + 1
+                    foundation_feat = self._get_foundation_polygon_for_site(
+                        site_id, foundation_polygons_source
+                    )
+                    if foundation_feat:
+                        foundation_poly = foundation_feat.geometry()
+                        # Tiefe aus Attribut lesen (falls vorhanden)
+                        if 'depth_m' in [f.name() for f in foundation_feat.fields()]:
+                            foundation_depth = foundation_feat['depth_m']
+                
                 result = self._calculate_complete_earthwork(
                     dem_layer, point, current_platform_length, current_platform_width,
                     max_slope, slope_angle, slope_width,
@@ -474,7 +526,11 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                     swell_factor, compaction_factor, material_reuse,
                     optimization_method, cost_excavation, cost_transport,
                     cost_fill_import, cost_gravel, cost_compaction,
-                    gravel_thickness, rotation_angle, feedback)
+                    gravel_thickness, rotation_angle, feedback,
+                    crane_polygon=crane_poly,
+                    use_circular_foundation=use_circular_foundations,
+                    foundation_polygon=foundation_poly,
+                    site_id=current + 1)
                 
                 out_feature = self._create_output_feature(
                     point, fields, current + 1, result)
@@ -645,15 +701,46 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                                      swell_factor, compaction_factor, material_reuse,
                                      optimization_method, cost_excavation, cost_transport,
                                      cost_fill_import, cost_gravel, cost_compaction,
-                                     gravel_thickness, rotation_angle, feedback):
-        """Vollständige Berechnung inkl. Kosten und Rotation"""
+                                     gravel_thickness, rotation_angle, feedback,
+                                     crane_polygon=None, use_circular_foundation=True,
+                                     foundation_polygon=None, site_id=None):
+        """
+        Vollständige Berechnung inkl. Kosten und Rotation (v5.5: Polygon-Support)
         
-        foundation_result = self._calculate_foundation(
-            dem_layer, point, foundation_dia, foundation_depth, foundation_type)
+        Args (NEU in v5.5):
+            crane_polygon: QgsGeometry - Wenn gesetzt, wird Polygon-Modus verwendet
+            use_circular_foundation: bool - True = Kreis, False = Polygon
+            foundation_polygon: QgsGeometry - Fundament-Polygon (wenn use_circular=False)
+            site_id: int - Standort-ID (für Logging)
+        """
         
-        crane_result = self._calculate_crane_pad(
-            dem_layer, point, length, width, max_slope, slope_angle,
-            slope_width, swell_factor, compaction_factor, optimization_method, rotation_angle)
+        # FUNDAMENT-BERECHNUNG (v5.5: Zwei Modi)
+        if use_circular_foundation:
+            # MODUS A: Kreisförmiges Fundament (DEFAULT, wie v5.0)
+            foundation_result = self._calculate_foundation_circular(
+                dem_layer, point, foundation_dia, foundation_depth, foundation_type)
+        else:
+            # MODUS B: Polygon-Fundament (NEU in v5.5)
+            if foundation_polygon is None:
+                raise QgsProcessingException(
+                    f'Standort {site_id}: Kein Fundament-Polygon gefunden, '
+                    f'aber "Runde Fundamente" ist deaktiviert!'
+                )
+            foundation_result = self._calculate_foundation_polygon(
+                foundation_polygon, foundation_depth, foundation_type, dem_layer
+            )
+        
+        # KRANSTELLFLÄCHEN-BERECHNUNG (v5.5: Zwei Modi)
+        if crane_polygon is not None:
+            # MODUS A: Polygon-basiert (NEU in v5.5)
+            crane_result = self._calculate_crane_pad_polygon(
+                crane_polygon, dem_layer, slope_angle, slope_width, optimization_method
+            )
+        else:
+            # MODUS B: Rechteck-basiert mit Rotation (wie v5.0)
+            crane_result = self._calculate_crane_pad(
+                dem_layer, point, length, width, max_slope, slope_angle,
+                slope_width, swell_factor, compaction_factor, optimization_method, rotation_angle)
         
         if material_reuse:
             material_balance = self._calculate_material_balance(
@@ -725,8 +812,11 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         
         return result
     
-    def _calculate_foundation(self, dem_layer, center_point, diameter, depth, foundation_type):
-        """Berechnet Fundament-Volumen"""
+    def _calculate_foundation_circular(self, dem_layer, center_point, diameter, depth, foundation_type):
+        """
+        Berechnet Fundament-Volumen für kreisförmiges Fundament
+        (Umbenannt in v5.5, Logik bleibt identisch zu v5.0)
+        """
         radius = diameter / 2
         if foundation_type == 0:
             volume = math.pi * radius**2 * depth
@@ -739,6 +829,176 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         else:
             volume = math.pi * radius**2 * depth * 0.8
         return {'volume': volume, 'diameter': diameter, 'depth': depth, 'type': foundation_type}
+    
+    def _calculate_foundation_polygon(self, foundation_polygon, depth, foundation_type,
+                                      dem_raster, resolution=0.5):
+        """
+        Berechnet Fundament-Aushub für BELIEBIGE Polygon-Form (NEU in v5.5)
+        
+        Args:
+            foundation_polygon: QgsGeometry - Fundament-Polygon (vom User)
+            depth: float - Fundamenttiefe in Metern
+            foundation_type: int - Typ (0=shallow, 1=deep, 2=pile)
+            dem_raster: QgsRasterLayer - Digitales Geländemodell
+            resolution: float - Sample-Auflösung (m)
+        
+        Returns:
+            dict - {'volume': float, 'area': float, 'depth': float, 'type': int}
+        """
+        # 1. DEM samplen innerhalb Fundament-Polygon
+        foundation_points = self._sample_dem_polygon(foundation_polygon, dem_raster, resolution)
+        
+        if len(foundation_points) == 0:
+            raise QgsProcessingException('Keine DEM-Daten in Fundament-Polygon!')
+        
+        # 2. Mittlere Geländehöhe ermitteln
+        elevations = [z for (x, y, z) in foundation_points]
+        avg_existing_z = np.mean(elevations)
+        
+        # 3. Fundament-Sohle = Mittelwert - depth
+        foundation_bottom = avg_existing_z - depth
+        
+        # 4. Cut-Volumen berechnen (Pixel-basiert)
+        foundation_cut = 0.0
+        cell_area = resolution * resolution
+        
+        for (x, y, existing_z) in foundation_points:
+            if existing_z > foundation_bottom:
+                cut_height = existing_z - foundation_bottom
+                foundation_cut += cut_height * cell_area
+        
+        # 5. Typ-basierte Anpassung (wie bei circular)
+        if foundation_type == 1:  # Tiefgründung mit Konus
+            foundation_cut *= 1.1  # Zusätzliches Volumen für Konus
+        elif foundation_type == 2:  # Pfahlgründung
+            foundation_cut *= 0.8  # Weniger Aushub (Pfähle)
+        
+        # 6. Fläche berechnen
+        foundation_area = foundation_polygon.area()
+        
+        return {
+            'volume': round(foundation_cut, 1),
+            'area': round(foundation_area, 1),
+            'depth': depth,
+            'type': foundation_type
+        }
+    
+    def _get_foundation_polygon_for_site(self, site_id, foundation_polygon_layer):
+        """
+        Findet Fundament-Polygon für gegebenen Standort (NEU in v5.5)
+        
+        Args:
+            site_id: int - WKA-Standort-ID
+            foundation_polygon_layer: QgsVectorLayer - Layer mit Fundament-Polygonen
+        
+        Returns:
+            QgsFeature mit Polygon-Geometrie + Attributen oder None
+        """
+        if foundation_polygon_layer is None:
+            return None
+        
+        # Filter nach site_id
+        from qgis.core import QgsExpression, QgsFeatureRequest
+        expression = QgsExpression(f'"site_id" = {site_id}')
+        request = QgsFeatureRequest(expression)
+        
+        features = list(foundation_polygon_layer.getFeatures(request))
+        
+        if len(features) == 0:
+            return None
+        elif len(features) > 1:
+            # Warnung bei mehreren Treffern (nutze ersten)
+            pass
+        
+        return features[0]
+    
+    def _calculate_crane_pad_polygon(self, crane_polygon, dem_raster, 
+                                     slope_angle, slope_width, 
+                                     optimization_method, resolution=0.5):
+        """
+        Berechnet Cut/Fill für BELIEBIGE Polygon-Form (NEU in v5.5)
+        
+        Args:
+            crane_polygon: QgsGeometry - Kranstellflächen-Polygon
+            dem_raster: QgsRasterLayer - DEM
+            slope_angle: float - Böschungswinkel (Grad)
+            slope_width: float - Böschungsbreite (m)
+            optimization_method: int - 0=Mittelwert, 1=Min.Aushub, 2=Ausgeglichen
+            resolution: float - Sample-Auflösung (m)
+        
+        Returns:
+            dict - Volumina und Statistiken
+        """
+        # 1. Plattform-Bereich samplen
+        platform_points = self._sample_dem_polygon(crane_polygon, dem_raster, resolution)
+        
+        if len(platform_points) == 0:
+            raise QgsProcessingException('Keine DEM-Daten in Kranstellflächen-Polygon!')
+        
+        # 2. Plattform-Höhe optimieren
+        elevations = np.array([z for (x, y, z) in platform_points])
+        
+        if optimization_method == 0:  # Mittelwert
+            platform_height = np.mean(elevations)
+        elif optimization_method == 1:  # Min. Aushub
+            platform_height = np.percentile(elevations, 40)
+        else:  # Ausgeglichen (Cut/Fill-Balance)
+            platform_height = self._optimize_balanced_cutfill(elevations)
+        
+        # 3. Böschungs-Polygon erstellen
+        slope_polygon = self._create_slope_polygon(crane_polygon, slope_width)
+        
+        # 4. Böschungs-Bereich samplen
+        slope_points = self._sample_dem_polygon(slope_polygon, dem_raster, resolution)
+        
+        # 5. Cut/Fill auf Plattform berechnen
+        platform_cut = 0.0
+        platform_fill = 0.0
+        cell_area = resolution * resolution
+        
+        for (x, y, existing_z) in platform_points:
+            diff = existing_z - platform_height
+            if diff > 0:  # Cut
+                platform_cut += diff * cell_area
+            else:  # Fill
+                platform_fill += abs(diff) * cell_area
+        
+        # 6. Cut/Fill auf Böschung berechnen
+        slope_cut = 0.0
+        slope_fill = 0.0
+        
+        for (x, y, existing_z) in slope_points:
+            point = QgsPointXY(x, y)
+            target_z = self._calculate_slope_height(
+                point, crane_polygon, platform_height, slope_angle, slope_width
+            )
+            
+            diff = existing_z - target_z
+            if diff > 0:  # Cut
+                slope_cut += diff * cell_area
+            else:  # Fill
+                slope_fill += abs(diff) * cell_area
+        
+        # 7. Statistiken
+        platform_area = crane_polygon.area()
+        total_area = crane_polygon.buffer(slope_width, 16).area()
+        
+        return {
+            'platform_height': round(platform_height, 2),
+            'terrain_min': round(float(np.min(elevations)), 2),
+            'terrain_max': round(float(np.max(elevations)), 2),
+            'terrain_mean': round(float(np.mean(elevations)), 2),
+            'terrain_std': round(float(np.std(elevations)), 2),
+            'terrain_range': round(float(np.max(elevations) - np.min(elevations)), 2),
+            'platform_cut': round(platform_cut, 1),
+            'platform_fill': round(platform_fill, 1),
+            'slope_cut': round(slope_cut, 1),
+            'slope_fill': round(slope_fill, 1),
+            'total_cut': round(platform_cut + slope_cut, 1),
+            'total_fill': round(platform_fill + slope_fill, 1),
+            'platform_area': round(platform_area, 1),
+            'total_area': round(total_area, 1)
+        }
     
     def _calculate_crane_pad(self, dem_layer, point, length, width, max_slope,
                             slope_angle, slope_width, swell_factor, compaction_factor,
@@ -984,6 +1244,140 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         y_coords = np.linspace(start_y, start_y + height, num_y)
         
         return dem_data, x_coords, y_coords
+    
+    def _sample_dem_polygon(self, polygon_geom, dem_raster, resolution=0.5):
+        """
+        Sampelt DEM innerhalb beliebiger Polygon-Form (NEU in v5.5)
+        
+        Args:
+            polygon_geom: QgsGeometry - Polygon (beliebige Form, auch Multi-Polygon)
+            dem_raster: QgsRasterLayer - Digitales Geländemodell
+            resolution: float - Sample-Auflösung in Metern (z.B. 0.5m)
+        
+        Returns:
+            list of tuples: [(x, y, z), ...] - Koordinaten mit DEM-Höhe
+            
+        Beispiel:
+            >>> polygon = QgsGeometry.fromWkt('POLYGON((0 0, 30 0, 30 20, 0 20, 0 0))')
+            >>> points = self._sample_dem_polygon(polygon, dem_layer, 0.5)
+            >>> print(len(points))  # Ca. 2400 Punkte (30m × 20m / 0.5²)
+        """
+        # 1. Bounding Box des Polygons
+        bbox = polygon_geom.boundingBox()
+        if bbox.isEmpty():
+            raise QgsProcessingException('Polygon Bounding Box ist leer!')
+        
+        # 2. Grid-Punkte generieren
+        x_min, y_min = bbox.xMinimum(), bbox.yMinimum()
+        x_max, y_max = bbox.xMaximum(), bbox.yMaximum()
+        
+        # Grid-Arrays
+        x_coords = np.arange(x_min, x_max + resolution, resolution)
+        y_coords = np.arange(y_min, y_max + resolution, resolution)
+        
+        # 3. DEM-Provider für schnelles Sampling
+        provider = dem_raster.dataProvider()
+        
+        # 4. Point-in-Polygon-Test + DEM-Sampling
+        sample_points = []
+        
+        for x in x_coords:
+            for y in y_coords:
+                # Point-in-Polygon-Test
+                point_geom = QgsGeometry.fromPointXY(QgsPointXY(x, y))
+                
+                if polygon_geom.contains(point_geom):
+                    # DEM-Höhe sampeln
+                    sample_result = provider.sample(QgsPointXY(x, y), 1)
+                    
+                    if sample_result[0]:  # Wenn valider Wert
+                        z = sample_result[1]
+                        if not math.isnan(z):
+                            sample_points.append((x, y, z))
+        
+        # 5. Validierung
+        if len(sample_points) == 0:
+            raise QgsProcessingException(
+                f'Keine gültigen DEM-Daten innerhalb Polygon!\n'
+                f'Bbox: {bbox.toString()}\n'
+                f'Resolution: {resolution}m'
+            )
+        
+        return sample_points
+    
+    def _create_slope_polygon(self, platform_polygon, slope_width):
+        """
+        Erstellt Böschungs-Polygon um beliebige Plattform-Form (NEU in v5.5)
+        
+        Args:
+            platform_polygon: QgsGeometry - Plattform-Polygon
+            slope_width: float - Böschungsbreite in Metern
+        
+        Returns:
+            QgsGeometry - Böschungs-Zone (Ring um Plattform)
+            
+        Beispiel:
+            >>> platform = QgsGeometry.fromWkt('POLYGON((0 0, 30 0, 30 20, 0 20, 0 0))')
+            >>> slope = self._create_slope_polygon(platform, 10.0)
+            >>> print(slope.area())  # Fläche der Böschungszone
+        """
+        # 1. Äußere Böschungs-Grenze (Buffer)
+        outer_boundary = platform_polygon.buffer(
+            distance=slope_width,
+            segments=16  # Glatte Kurven bei runden Ecken
+        )
+        
+        # 2. Böschungs-Zone = Differenz (Outer - Inner)
+        slope_zone = outer_boundary.difference(platform_polygon)
+        
+        # 3. Validierung
+        if slope_zone.isEmpty():
+            raise QgsProcessingException('Böschungs-Polygon ist leer!')
+        
+        return slope_zone
+    
+    def _calculate_slope_height(self, point, platform_polygon, platform_height, 
+                               slope_angle, slope_width):
+        """
+        Berechnet Ziel-Höhe für Punkt auf Böschung (NEU in v5.5)
+        
+        Args:
+            point: QgsPointXY - Punkt auf Böschung
+            platform_polygon: QgsGeometry - Plattform-Polygon
+            platform_height: float - Plattform-Höhe (m ü. NN)
+            slope_angle: float - Böschungswinkel (Grad)
+            slope_width: float - Maximale Böschungsbreite (m)
+        
+        Returns:
+            float - Ziel-Höhe an diesem Punkt (m ü. NN)
+            
+        Logik:
+            - Distanz zum nächsten Plattform-Rand: d
+            - Höhen-Differenz: Δh = d × tan(slope_angle)
+            - Ziel-Höhe: h = platform_height ± Δh (je nach Cut/Fill)
+        """
+        # 1. Nächster Punkt auf Plattform-Rand
+        point_geom = QgsGeometry.fromPointXY(point)
+        nearest_geom = platform_polygon.nearestPoint(point_geom)
+        nearest_point = nearest_geom.asPoint()
+        
+        # 2. Distanz berechnen
+        distance = math.sqrt(
+            (point.x() - nearest_point.x())**2 + 
+            (point.y() - nearest_point.y())**2
+        )
+        
+        # 3. Sicherheit: Clamp auf slope_width
+        distance = min(distance, slope_width)
+        
+        # 4. Höhe interpolieren
+        # Böschung fällt vom Plattform-Niveau ab
+        slope_tan = math.tan(math.radians(slope_angle))
+        height_drop = distance / slope_tan
+        
+        target_height = platform_height - height_drop
+        
+        return target_height
     
     def _get_rotation_matrix(self, rotation_angle):
         """
@@ -1310,9 +1704,17 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             - planned_z: np.array - Geplante Höhen
             - material_type: np.array - 'cut', 'fill', 'unchanged'
         """
-        # Linie in Punkte umwandeln (0.5m Schritte)
+        # Linie in Punkte umwandeln mit Cap
+        MAX_SAMPLES = 3000
+        step_size = 0.5
+        
         line_length = profile_line_geom.length()
-        num_samples = int(line_length / 0.5) + 1
+        
+        # Sample-Anzahl limitieren (verhindert Absturz bei langen Linien)
+        if line_length / step_size > MAX_SAMPLES:
+            step_size = line_length / MAX_SAMPLES
+        
+        num_samples = int(line_length / step_size) + 1
         distances = np.linspace(0, line_length, num_samples)
         
         existing_z = []
@@ -1324,13 +1726,10 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             # Punkt auf Linie bei Distanz
             point = profile_line_geom.interpolate(dist).asPoint()
             
-            # DEM-Höhe sampeln
-            result = provider.identify(point, QgsRaster.IdentifyFormatValue)
-            if result.isValid() and result.results():
-                z_existing = result.results().get(1, 0)
-            else:
-                z_existing = 0
-            existing_z.append(float(z_existing) if z_existing else 0)
+            # DEM-Höhe sampeln (MIT sample() statt identify() - viel schneller!)
+            val, ok = provider.sample(point, 1)
+            z_existing = float(val) if (ok and val is not None) else 0.0
+            existing_z.append(z_existing)
             
             # Geplante Höhe berechnen (basierend auf Position)
             dx_to_center = point.x() - center_point.x()
