@@ -1,8 +1,16 @@
 """
-Wind Turbine Earthwork Calculator - Version 5.5
+Wind Turbine Earthwork Calculator - Version 5.6
 ================================================
 
-NEUE FEATURES v5.5 (Polygon Refactoring):
+NEUE FEATURES v5.6 (hoehendaten.de API Integration):
+- Automatischer DEM-Download von hoehendaten.de API
+- Keine manuelle DEM-Datei mehr nötig (optional)
+- Multi-Kachel-Support mit automatischem Mosaik
+- Deutschland-weite Abdeckung (1m-Auflösung)
+- Intelligente Bounding-Box-Berechnung aus WKA-Standorten
+- Automatische UTM-Zonen-Erkennung
+
+FEATURES v5.5 (Polygon Refactoring):
 - Beliebige Polygon-Formen für Kranstellflächen (L, Trapez, Kreis, Freiform)
 - Polygon-basierte Fundamente (Oktagon, Quadrat, etc.) als Alternative zu Kreis
 - Exakte Volumen-Berechnung entlang Polygon-Kontur (kein Bounding-Box-Fehler)
@@ -33,8 +41,8 @@ FEATURES v3.0:
 - Standflächen-Polygon-Export
 
 AUTOR: Windkraft-Standortplanung
-VERSION: 5.5 (Polygon-based Sampling)
-DATUM: Oktober 2025
+VERSION: 5.6 (hoehendaten.de API Integration)
+DATUM: November 2025
 """
 
 from qgis.PyQt.QtCore import QCoreApplication
@@ -65,9 +73,19 @@ import processing
 import math
 import numpy as np
 import os
+import json
+import base64
+import tempfile
 
 # HTML Report Generator (v5.5) - Inline für QGIS Processing
 from datetime import datetime
+
+# Optional: requests für API-Aufrufe
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
 
 try:
     import matplotlib
@@ -79,10 +97,356 @@ except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
 
+# =============================================================================
+# hoehendaten.de API Integration
+# =============================================================================
+
+def fetch_dem_tile_from_api(easting, northing, zone=32, feedback=None):
+    """
+    Holt eine einzelne 1x1km DEM-Kachel von der hoehendaten.de API.
+
+    Args:
+        easting: UTM Easting-Koordinate (Zentrum der Kachel)
+        northing: UTM Northing-Koordinate (Zentrum der Kachel)
+        zone: UTM Zone (Standard: 32 für Deutschland)
+        feedback: QgsProcessingFeedback für Logging
+
+    Returns:
+        dict mit 'data' (Base64-String), 'attribution', 'easting', 'northing'
+        oder None bei Fehler
+    """
+    if not REQUESTS_AVAILABLE:
+        if feedback:
+            feedback.reportError('requests-Bibliothek nicht verfügbar! '
+                               'Installation: pip install requests')
+        return None
+
+    # API-Endpoint
+    url = "https://api.hoehendaten.de:14444/v1/rawtif"
+
+    # Kachel auf 1km-Raster ausrichten (untere linke Ecke)
+    tile_easting = int(easting / 1000) * 1000 + 500
+    tile_northing = int(northing / 1000) * 1000 + 500
+
+    # Request-Payload
+    payload = {
+        "Type": "RawTIFRequest",
+        "ID": f"qgis_{zone}_{tile_easting}_{tile_northing}",
+        "Attributes": {
+            "Zone": zone,
+            "Easting": tile_easting,
+            "Northing": tile_northing
+        }
+    }
+
+    if feedback:
+        feedback.pushInfo(f'  → API-Anfrage: Zone {zone}, E={tile_easting}, N={tile_northing}')
+
+    try:
+        response = requests.post(url, json=payload, timeout=30)
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Validierung der Response
+        if 'Attributes' not in data or 'RawTIFs' not in data['Attributes']:
+            if feedback:
+                feedback.reportError(f'Ungültige API-Response: {data}')
+            return None
+
+        raw_tifs = data['Attributes']['RawTIFs']
+        if not raw_tifs or len(raw_tifs) == 0:
+            if feedback:
+                feedback.reportError('Keine DEM-Daten verfügbar für diese Koordinaten')
+            return None
+
+        # Erste Kachel verwenden
+        tile_data = raw_tifs[0]
+
+        result = {
+            'data': tile_data.get('Data'),
+            'attribution': data['Attributes'].get('Attribution', 'hoehendaten.de'),
+            'easting': tile_easting,
+            'northing': tile_northing,
+            'zone': zone
+        }
+
+        if feedback:
+            feedback.pushInfo(f'    ✓ Kachel erfolgreich geladen (Attribution: {result["attribution"]})')
+
+        return result
+
+    except requests.exceptions.RequestException as e:
+        if feedback:
+            feedback.reportError(f'API-Fehler: {str(e)}')
+        return None
+    except Exception as e:
+        if feedback:
+            feedback.reportError(f'Fehler beim Verarbeiten der API-Response: {str(e)}')
+        return None
+
+
+def calculate_required_tiles(features, crs, buffer_m=100, feedback=None):
+    """
+    Berechnet welche 1x1km Kacheln für die gegebenen Features benötigt werden.
+
+    Args:
+        features: Liste von QgsFeature (WKA-Standorte)
+        crs: QgsCoordinateReferenceSystem der Features
+        buffer_m: Puffer um die Standorte (m)
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        Liste von (zone, easting, northing) Tupeln für benötigte Kacheln
+    """
+    # UTM Zone aus CRS extrahieren
+    crs_authid = crs.authid()
+    if 'EPSG:' in crs_authid:
+        epsg_code = int(crs_authid.split(':')[1])
+        # UTM Zone aus EPSG Code ableiten (z.B. 32632 -> Zone 32)
+        if 32601 <= epsg_code <= 32660:  # UTM Nord
+            zone = epsg_code - 32600
+        elif 32701 <= epsg_code <= 32760:  # UTM Süd
+            zone = epsg_code - 32700
+        else:
+            zone = 32  # Default für Deutschland
+    else:
+        zone = 32
+
+    if feedback:
+        feedback.pushInfo(f'\nBerechne benötigte DEM-Kacheln (UTM Zone {zone})...')
+
+    # Bounding Box aller Features ermitteln
+    min_x = float('inf')
+    max_x = float('-inf')
+    min_y = float('inf')
+    max_y = float('-inf')
+
+    for feature in features:
+        geom = feature.geometry()
+        if geom.isEmpty():
+            continue
+
+        bbox = geom.boundingBox()
+        min_x = min(min_x, bbox.xMinimum())
+        max_x = max(max_x, bbox.xMaximum())
+        min_y = min(min_y, bbox.yMinimum())
+        max_y = max(max_y, bbox.yMaximum())
+
+    # Buffer hinzufügen
+    min_x -= buffer_m
+    max_x += buffer_m
+    min_y -= buffer_m
+    max_y += buffer_m
+
+    if feedback:
+        feedback.pushInfo(f'  Bounding Box: X={min_x:.0f}-{max_x:.0f}, Y={min_y:.0f}-{max_y:.0f}')
+
+    # Kacheln berechnen (1km Raster)
+    tile_size = 1000
+    tiles = set()
+
+    # Start- und End-Kacheln
+    tile_x_start = int(min_x / tile_size) * tile_size
+    tile_x_end = int(max_x / tile_size) * tile_size
+    tile_y_start = int(min_y / tile_size) * tile_size
+    tile_y_end = int(max_y / tile_size) * tile_size
+
+    for x in range(tile_x_start, tile_x_end + tile_size, tile_size):
+        for y in range(tile_y_start, tile_y_end + tile_size, tile_size):
+            # Kachel-Zentrum
+            center_x = x + tile_size / 2
+            center_y = y + tile_size / 2
+            tiles.add((zone, center_x, center_y))
+
+    if feedback:
+        feedback.pushInfo(f'  Benötigte Kacheln: {len(tiles)}')
+
+    return list(tiles)
+
+
+def create_dem_mosaic_from_tiles(tiles_data, feedback=None):
+    """
+    Erstellt ein DEM-Mosaik aus mehreren Kacheln.
+
+    Args:
+        tiles_data: Liste von Dictionaries mit Kachel-Daten
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        Pfad zur temporären Mosaik-Datei oder None bei Fehler
+    """
+    if not tiles_data:
+        return None
+
+    if feedback:
+        feedback.pushInfo(f'\nErstelle DEM-Mosaik aus {len(tiles_data)} Kachel(n)...')
+
+    # Temporäre Dateien für einzelne Kacheln
+    temp_files = []
+
+    try:
+        # 1. Base64-Daten in temporäre GeoTIFF-Dateien schreiben
+        for i, tile in enumerate(tiles_data):
+            if not tile or 'data' not in tile:
+                continue
+
+            # Base64 dekodieren
+            geotiff_data = base64.b64decode(tile['data'])
+
+            # Temporäre Datei erstellen
+            temp_file = tempfile.NamedTemporaryFile(
+                delete=False, suffix=f'_tile_{i}.tif', prefix='dem_'
+            )
+            temp_file.write(geotiff_data)
+            temp_file.close()
+            temp_files.append(temp_file.name)
+
+            if feedback:
+                feedback.pushInfo(f'  ✓ Kachel {i+1}/{len(tiles_data)} dekodiert: {temp_file.name}')
+
+        if not temp_files:
+            if feedback:
+                feedback.reportError('Keine gültigen Kacheln zum Verarbeiten')
+            return None
+
+        # 2. Falls nur eine Kachel: Direkt verwenden
+        if len(temp_files) == 1:
+            if feedback:
+                feedback.pushInfo('  → Einzelne Kachel, kein Mosaik nötig')
+            return temp_files[0]
+
+        # 3. Mehrere Kacheln: Mosaik erstellen mit gdal_merge
+        output_mosaic = tempfile.NamedTemporaryFile(
+            delete=False, suffix='_mosaic.tif', prefix='dem_'
+        )
+        output_mosaic.close()
+
+        if feedback:
+            feedback.pushInfo(f'  → Erstelle Mosaik: {output_mosaic.name}')
+
+        # QGIS Processing gdal:merge verwenden
+        import processing
+        params = {
+            'INPUT': temp_files,
+            'PCT': False,
+            'SEPARATE': False,
+            'DATA_TYPE': 5,  # Float32
+            'OUTPUT': output_mosaic.name
+        }
+
+        result = processing.run('gdal:merge', params, feedback=feedback)
+
+        # Temporäre Einzel-Kacheln löschen
+        for temp_file in temp_files:
+            try:
+                os.unlink(temp_file)
+            except:
+                pass
+
+        if feedback:
+            feedback.pushInfo('  ✓ Mosaik erfolgreich erstellt')
+
+        return output_mosaic.name
+
+    except Exception as e:
+        if feedback:
+            feedback.reportError(f'Fehler beim Erstellen des Mosaiks: {str(e)}')
+
+        # Cleanup
+        for temp_file in temp_files:
+            try:
+                os.unlink(temp_file)
+            except:
+                pass
+
+        return None
+
+
+def get_dem_from_hoehendaten_api(features, crs, feedback=None):
+    """
+    Hauptfunktion: Holt DEM von hoehendaten.de API basierend auf Features.
+
+    Args:
+        features: Liste von QgsFeature (WKA-Standorte)
+        crs: QgsCoordinateReferenceSystem
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        QgsRasterLayer oder None bei Fehler
+    """
+    if not REQUESTS_AVAILABLE:
+        if feedback:
+            feedback.reportError('❌ requests-Bibliothek nicht verfügbar!')
+        return None
+
+    if feedback:
+        feedback.pushInfo('\n' + '='*70)
+        feedback.pushInfo('DEM-Download von hoehendaten.de API')
+        feedback.pushInfo('='*70)
+
+    # 1. Benötigte Kacheln berechnen
+    tiles_needed = calculate_required_tiles(features, crs, buffer_m=200, feedback=feedback)
+
+    if not tiles_needed:
+        if feedback:
+            feedback.reportError('Keine Kacheln zu laden')
+        return None
+
+    # 2. Kacheln von API laden
+    if feedback:
+        feedback.pushInfo(f'\nLade {len(tiles_needed)} Kachel(n) von API...')
+
+    tiles_data = []
+    attribution = None
+
+    for zone, easting, northing in tiles_needed:
+        tile = fetch_dem_tile_from_api(easting, northing, zone, feedback)
+        if tile:
+            tiles_data.append(tile)
+            if not attribution:
+                attribution = tile.get('attribution')
+
+    if not tiles_data:
+        if feedback:
+            feedback.reportError('Keine Kacheln erfolgreich geladen')
+        return None
+
+    if feedback:
+        feedback.pushInfo(f'✓ {len(tiles_data)}/{len(tiles_needed)} Kacheln erfolgreich geladen')
+        if attribution:
+            feedback.pushInfo(f'\n📊 Datenquelle: {attribution}')
+
+    # 3. Mosaik erstellen
+    mosaic_path = create_dem_mosaic_from_tiles(tiles_data, feedback)
+
+    if not mosaic_path:
+        if feedback:
+            feedback.reportError('Mosaik-Erstellung fehlgeschlagen')
+        return None
+
+    # 4. Als QgsRasterLayer laden
+    dem_layer = QgsRasterLayer(mosaic_path, 'DEM (hoehendaten.de)')
+
+    if not dem_layer.isValid():
+        if feedback:
+            feedback.reportError('DEM-Layer konnte nicht geladen werden')
+        return None
+
+    if feedback:
+        feedback.pushInfo(f'\n✓ DEM erfolgreich geladen')
+        feedback.pushInfo(f'  Ausdehnung: {dem_layer.extent().toString()}')
+        feedback.pushInfo(f'  CRS: {dem_layer.crs().authid()}')
+        feedback.pushInfo('='*70 + '\n')
+
+    return dem_layer
+
+
 class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
     """Berechnet Cut/Fill-Volumen für WKA inkl. Fundament und Kranstellfläche"""
     
     INPUT_DEM = 'INPUT_DEM'
+    USE_HOEHENDATEN_API = 'USE_HOEHENDATEN_API'
     INPUT_POINTS = 'INPUT_POINTS'
     INPUT_POLYGONS = 'INPUT_POLYGONS'
     PLATFORM_LENGTH = 'PLATFORM_LENGTH'
@@ -127,7 +491,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         return 'windturbineearthworkv3'
     
     def displayName(self):
-        return self.tr('Wind Turbine Earthwork Calculator v5.5')
+        return self.tr('Wind Turbine Earthwork Calculator v5.6')
     
     def group(self):
         return self.tr('Windkraft')
@@ -137,8 +501,16 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
     
     def shortHelpString(self):
         return self.tr("""
-        <b>Windkraftanlagen Erdarbeitsrechner v5.5</b>
-        
+        <b>Windkraftanlagen Erdarbeitsrechner v5.6</b>
+
+        <p><b>🌐 NEU: hoehendaten.de API Integration</b></p>
+        <ul>
+            <li><b>Automatischer DEM-Download</b>: DEM-Daten automatisch von hoehendaten.de beziehen</li>
+            <li><b>Kein manueller Upload nötig</b>: Einfach WKA-Standorte angeben und API aktivieren</li>
+            <li><b>Deutschland-weite Abdeckung</b>: 1m-Auflösung aus Landesvermessung</li>
+            <li><b>Multi-Kachel-Support</b>: Automatisches Mosaik bei mehreren benötigten Kacheln</li>
+        </ul>
+
         <p><b>🆕 NEU in Version 5.5:</b></p>
         <ul>
             <li><b>Beliebige Polygon-Formen</b>: L, Trapez, Kreis, Freiform für Kranstellflächen</li>
@@ -179,18 +551,33 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         
         <p><i>💡 Tipps:</i></p>
         <ul>
+            <li><b>API-Modus</b>: Aktivieren Sie "DEM von API beziehen" für automatischen DEM-Download (benötigt UTM-Koordinaten)</li>
             <li>Aktivieren Sie "Standflächen (Polygone)" Output in Schritt 1!</li>
             <li>Auto-Rotation findet beste Ausrichtung (testet 0°-360° in konfigurierbaren Schritten)</li>
             <li>Im Polygon-Modus wird Rotation automatisch aus Geometrie extrahiert</li>
+        </ul>
+
+        <p><i>⚠️ Hinweise zur API:</i></p>
+        <ul>
+            <li>Benötigt Internetverbindung und requests-Bibliothek (pip install requests)</li>
+            <li>WKA-Standorte müssen in UTM-Koordinaten vorliegen (z.B. EPSG:32632)</li>
+            <li>Funktioniert nur für Koordinaten in Deutschland</li>
+            <li>Datenquelle: hoehendaten.de (Attribution wird im Log angezeigt)</li>
         </ul>
         """)
     
     def initAlgorithm(self, config=None):
         """Definition aller Parameter"""
-        
+
         self.addParameter(QgsProcessingParameterRasterLayer(
-            self.INPUT_DEM, self.tr('Digitales Geländemodell (DEM)')))
-        
+            self.INPUT_DEM, self.tr('Digitales Geländemodell (DEM)'),
+            optional=True))
+
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.USE_HOEHENDATEN_API,
+            self.tr('🌐 DEM von hoehendaten.de API beziehen'),
+            defaultValue=False))
+
         self.addParameter(QgsProcessingParameterFeatureSource(
             self.INPUT_POINTS, self.tr('WKA-Standorte (Punkte)'),
             [QgsProcessing.TypeVectorPoint]))
@@ -356,15 +743,61 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         """Hauptverarbeitung"""
         
         feedback.pushInfo('=' * 70)
-        feedback.pushInfo('Wind Turbine Earthwork Calculator v5.5')
+        feedback.pushInfo('Wind Turbine Earthwork Calculator v5.6')
         feedback.pushInfo('=' * 70)
-        
-        dem_layer = self.parameterAsRasterLayer(parameters, self.INPUT_DEM, context)
+
+        # Parameter auslesen
+        use_hoehendaten_api = self.parameterAsBool(parameters, self.USE_HOEHENDATEN_API, context)
         points_source = self.parameterAsSource(parameters, self.INPUT_POINTS, context)
         polygons_source = self.parameterAsSource(parameters, self.INPUT_POLYGONS, context)
-        
+
         # Modus bestimmen: Polygone überschreiben Punkte
         use_polygons = (polygons_source is not None and polygons_source.featureCount() > 0)
+
+        # DEM-Quelle bestimmen
+        if use_hoehendaten_api:
+            feedback.pushInfo('\n🌐 DEM-Modus: hoehendaten.de API')
+
+            # Features für API sammeln
+            if use_polygons:
+                feature_source_for_api = polygons_source
+                source_crs = polygons_source.sourceCrs()
+            else:
+                feature_source_for_api = points_source
+                source_crs = points_source.sourceCrs()
+
+            # CRS-Validierung vor API-Aufruf
+            if source_crs.isGeographic():
+                raise QgsProcessingException(
+                    f'WKA-Standorte müssen in projiziertem CRS sein (z.B. UTM)!\n'
+                    f'Aktuelles CRS: {source_crs.authid()} ({source_crs.description()})\n'
+                    f'API benötigt UTM-Koordinaten.')
+
+            # Features sammeln
+            features_list = list(feature_source_for_api.getFeatures())
+
+            if not features_list:
+                raise QgsProcessingException('Keine WKA-Standorte gefunden für API-Aufruf!')
+
+            # DEM von API holen
+            dem_layer = get_dem_from_hoehendaten_api(features_list, source_crs, feedback)
+
+            if dem_layer is None:
+                raise QgsProcessingException(
+                    'DEM konnte nicht von API geladen werden!\n'
+                    'Mögliche Ursachen:\n'
+                    '- Keine Internetverbindung\n'
+                    '- Koordinaten außerhalb von Deutschland\n'
+                    '- requests-Bibliothek nicht installiert\n'
+                    'Tipp: Deaktivieren Sie "DEM von API beziehen" und laden Sie ein DEM manuell.')
+        else:
+            feedback.pushInfo('\n📁 DEM-Modus: Manueller Upload')
+            dem_layer = self.parameterAsRasterLayer(parameters, self.INPUT_DEM, context)
+
+            if dem_layer is None:
+                raise QgsProcessingException(
+                    'DEM konnte nicht geladen werden!\n'
+                    'Bitte laden Sie ein DEM oder aktivieren Sie "DEM von API beziehen".')
         
         platform_length = self.parameterAsDouble(parameters, self.PLATFORM_LENGTH, context)
         platform_width = self.parameterAsDouble(parameters, self.PLATFORM_WIDTH, context)
@@ -401,10 +834,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             compaction_factor = 0.95
         
         foundation_type_names = ['Flachgründung', 'Tiefgründung', 'Pfahlgründung']
-        
-        if dem_layer is None:
-            raise QgsProcessingException('DEM konnte nicht geladen werden!')
-        
+
         # DEM CRS-Validierung (CRITICAL für korrekte Berechnungen)
         dem_crs = dem_layer.crs()
         if dem_crs.isGeographic():
