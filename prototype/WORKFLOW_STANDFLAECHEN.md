@@ -1,8 +1,10 @@
 # Workflow: Standflächen-basierte WKA-Planung
 
+**Hinweis**: Dieser Workflow gilt unverändert für v6.0. Die neuen Features (API-Integration, Caching, GeoPackage-Output) ergänzen diesen Workflow, ändern ihn aber nicht.
+
 ## Übersicht
 
-Der Wind Turbine Earthwork Calculator v3.0 unterstützt einen **2-Schritt-Workflow** für die präzise Platzierung von Windkraftanlagen-Standflächen:
+Der Wind Turbine Earthwork Calculator unterstützt einen **2-Schritt-Workflow** für die präzise Platzierung von Windkraftanlagen-Standflächen:
 
 1. **Schritt 1**: Automatische Generierung von Standflächen-Polygonen basierend auf Punkt-Koordinaten
 2. **Schritt 2**: Manuelle Anpassung der Polygone und Neuberechnung (geplant für v4.0)

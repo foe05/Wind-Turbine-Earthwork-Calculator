@@ -1,14 +1,15 @@
 """
-Wind Turbine Earthwork Calculator - Version 5.6
+Wind Turbine Earthwork Calculator - Version 6.0
 ================================================
 
-NEUE FEATURES v5.6 (hoehendaten.de API Integration):
-- Automatischer DEM-Download von hoehendaten.de API
-- Keine manuelle DEM-Datei mehr nötig (optional)
-- Multi-Kachel-Support mit automatischem Mosaik
-- Deutschland-weite Abdeckung (1m-Auflösung)
-- Intelligente Bounding-Box-Berechnung aus WKA-Standorten
-- Automatische UTM-Zonen-Erkennung
+NEUE FEATURES v6.0 (hoehendaten.de API Integration & GeoPackage Output):
+- 🌐 Automatischer DEM-Download von hoehendaten.de API
+- 💾 DEM-Cache mit LRU-Strategie (persistent, max 100 Kacheln ~500MB)
+- 📍 Standort-basierte Kachel-Berechnung (250m Radius pro Standort)
+- 🔄 Manuelle Cache-Aktualisierung (Force-Refresh Parameter)
+- 📦 Ein GeoPackage für alle Outputs (DEM + Vektoren)
+- 🗂️ Automatischer Dateiname aus südwestlichstem Punkt
+- 📄 HTML-Report neben GeoPackage
 
 FEATURES v5.5 (Polygon Refactoring):
 - Beliebige Polygon-Formen für Kranstellflächen (L, Trapez, Kreis, Freiform)

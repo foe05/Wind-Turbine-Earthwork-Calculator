@@ -1,8 +1,8 @@
 # AGENTS.md - Developer & AI Assistant Guide
 
-**Projekt**: Wind Turbine Earthwork Calculator  
-**Version**: 5.5 (Polygon-based Sampling + Professional Reports)
-**Datum**: Oktober 2025
+**Projekt**: Wind Turbine Earthwork Calculator
+**Version**: 6.0 (Hoehendaten.de API Integration & GeoPackage Output)
+**Datum**: November 2025
 **Zweck**: Informationen für AI-Assistenten (Amp, Cursor, etc.) und Entwickler
 
 ---
@@ -12,27 +12,32 @@
 ```
 Wind-Turbine-Earthwork-Calculator/
 ├── prototype/
-│   ├── prototype.py              # Haupt-QGIS-Processing-Tool (3600+ Zeilen)
-│   └── html_report_generator.py  # Standalone HTML Generator (optional, veraltet)
-├── INSTALLATION_QGIS.md          # Installationsanleitung
-├── AGENTS.md                     # Diese Datei
-├── CHANGELOG.md                  # Versions-Historie
-├── README.md                     # Projekt-README
-└── LICENSE                       # MIT-Lizenz
+│   ├── WindTurbine_Earthwork_Calculator.py  # Haupt-QGIS-Processing-Tool (4000+ Zeilen)
+│   ├── installationsanleitung.md            # Schritt-für-Schritt Anleitung
+│   ├── INSTALLATION_QGIS.md                 # QGIS-spezifische Installation
+│   └── WORKFLOW_STANDFLAECHEN.md            # Workflow-Dokumentation
+├── AGENTS.md                                # Diese Datei
+├── CHANGELOG.md                             # Versions-Historie
+├── README.md                                # Projekt-README
+├── requirements.txt                         # Python-Dependencies
+└── LICENSE                                  # MIT-Lizenz
 ```
 
-### Haupt-Datei: `prototype/prototype.py`
+### Haupt-Datei: `prototype/WindTurbine_Earthwork_Calculator.py`
 
-**Typ**: QGIS Processing Algorithm (Python)  
-**Klasse**: `WindTurbineEarthworkCalculatorV3`  
+**Typ**: QGIS Processing Algorithm (Python)
+**Klasse**: `WindTurbineEarthworkCalculatorV3`
 **Framework**: QGIS Processing Framework 3.0+
-**Größe**: ~3600 Zeilen (v5.5)
+**Größe**: ~4000 Zeilen (v6.0)
 
 **Kern-Dependencies**:
 - `qgis.core.*` - QGIS-API
 - `PyQt5.QtCore` - Qt-Framework
 - `numpy` - Array-Operationen
 - `math` - Mathematische Funktionen
+- `requests` - HTTP-API-Kommunikation (v6.0 NEU)
+- `json` - JSON-Parsing für API
+- `base64` - Base64-Dekodierung für GeoTIFF-Daten
 
 ---
 
@@ -66,6 +71,15 @@ QGIS_SCRIPTS: ~/Library/Application Support/QGIS/QGIS3/profiles/default/processi
 - `numpy` ✓
 - `PyQt5` ✓
 - `math`, `sys`, `os` ✓ (stdlib)
+- `json`, `base64` ✓ (stdlib)
+
+**NEU in v6.0 (muss installiert werden)**:
+- `requests` ✓ (für hoehendaten.de API)
+  ```bash
+  # Installation in QGIS Python
+  import subprocess, sys
+  subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+  ```
 
 **NICHT verwenden**:
 - `pandas` ✗ (nicht standardmäßig in QGIS)
@@ -103,7 +117,24 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
     def _create_slope_mask()             # Böschungs-Maske
     def _create_target_dem()             # Ziel-DEM (Soll-Zustand)
     def _optimize_balanced_cutfill()     # Cut/Fill-Optimierung
-    
+
+    # === API-Integration (NEU v6.0) ===
+    def fetch_dem_tile_from_api()        # Lädt 1×1km Kachel von hoehendaten.de
+    def calculate_tiles_for_radius_points()  # Berechnet benötigte Tiles (250m Radius)
+    def create_dem_mosaic_from_tiles()   # Erstellt Mosaik aus mehreren Tiles
+
+    # === Caching-System (NEU v6.0) ===
+    def get_cache_directory()            # Gibt Cache-Pfad zurück
+    def load_cache_metadata()            # Lädt Cache-Index (JSON)
+    def save_cache_metadata()            # Speichert Cache-Index
+    def cleanup_cache_lru()              # Entfernt alte Tiles (LRU)
+
+    # === GeoPackage-Output (NEU v6.0) ===
+    def get_southwest_point_from_features()  # Findet südwestlichsten Punkt
+    def generate_geopackage_path()       # Generiert WKA_{X}_{Y}.gpkg Pfad
+    def save_raster_to_geopackage()      # Speichert Raster in GPKG
+    def save_vector_to_geopackage()      # Speichert Vektor in GPKG
+
     # === Output-Erzeugung ===
     def _create_output_fields()          # Punkt-Layer-Felder
     def _create_platform_fields()        # Polygon-Layer-Felder (NEU v3.0)
@@ -497,20 +528,29 @@ echo "✅ Script installed to $QGIS_SCRIPTS"
 
 **1. In Code aktualisieren**:
 ```python
-# prototype.py Zeile 1-14
-VERSION: 3.1 (Bugfixes)
+# WindTurbine_Earthwork_Calculator.py Zeile 1-46
+VERSION: 6.0 (hoehendaten.de API Integration & GeoPackage Output)
 DATUM: November 2025
 ```
 
 **2. README.md aktualisieren**:
 ```markdown
-**Version 3.1** | QGIS Processing Tool
+**Version 6.0** | QGIS Processing Tool
 ```
 
-**3. Git Tag**:
+**3. CHANGELOG.md aktualisieren**:
+```markdown
+## [6.0.0] - 2025-11-04
+### Hinzugefügt
+- Hoehendaten.de API Integration
+- DEM-Caching-System
+- GeoPackage Output
+```
+
+**4. Git Tag**:
 ```bash
-git tag -a v3.1 -m "Version 3.1: Bugfixes und Performance-Verbesserungen"
-git push origin v3.1
+git tag -a v6.0 -m "Version 6.0: Hoehendaten.de API Integration & GeoPackage Output"
+git push origin v6.0
 ```
 
 ---
@@ -535,9 +575,25 @@ git push origin v3.1
 
 ---
 
-## 🔮 Zukünftige Features (v4.0)
+## 🔮 Zukünftige Features (v7.0+)
 
-### Polygon-Input-Modus
+### Erweiterte Caching-Strategien
+
+**Geplante Verbesserungen**:
+- Automatische Cache-Vorwärmung basierend auf Projekt-Historie
+- Shared Cache zwischen mehreren Nutzern (Netzwerk-Share)
+- Differentielle Updates (nur neue/geänderte Standorte)
+- Cache-Statistiken im Report (Hit-Rate, Speichernutzung)
+
+### Multi-Provider DEM-Support
+
+**Konzept**: Unterstützung weiterer DEM-APIs
+- OpenTopography API (international)
+- NASA SRTM (weltweit, 30m)
+- Copernicus DEM (EU, 30m)
+- Automatische Provider-Auswahl basierend auf Koordinaten
+
+### Polygon-Input-Modus (bereits in v4.0 teilweise implementiert)
 
 **Geplante Änderungen**:
 
@@ -627,5 +683,5 @@ A: Nein, nicht standardmäßig in QGIS. Nur NumPy ist sicher verfügbar.
 
 ---
 
-**Letzte Aktualisierung**: Oktober 2025  
-**Version dieses Dokuments**: 1.0
+**Letzte Aktualisierung**: November 2025
+**Version dieses Dokuments**: 2.0 (v6.0 Release)

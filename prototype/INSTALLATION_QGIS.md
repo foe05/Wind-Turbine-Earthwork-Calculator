@@ -4,29 +4,41 @@
 
 - **QGIS 3.22+** (Python 3.9+)
 - **NumPy** (in QGIS enthalten)
+- **Requests** (für hoehendaten.de API, siehe Installation)
 - **Matplotlib** (optional, für Geländeschnitte)
 
 ---
 
 ## 🚀 Installationsschritte
 
-### 1. Script-Datei kopieren
+### 1. Python-Paket installieren (NEU v6.0)
+
+Installiere die `requests` Bibliothek in QGIS Python:
+
+```python
+# In QGIS Python-Console (Plugins → Python-Konsole)
+import subprocess
+import sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+```
+
+### 2. Script-Datei kopieren
 
 Kopiere **eine Datei** in den QGIS Processing Scripts Ordner:
 
 ```bash
 # Linux/Mac
-cp prototype/prototype.py ~/.local/share/QGIS/QGIS3/profiles/default/processing/scripts/
+cp prototype/WindTurbine_Earthwork_Calculator.py ~/.local/share/QGIS/QGIS3/profiles/default/processing/scripts/
 
 # Windows (PowerShell)
-Copy-Item prototype\prototype.py -Destination "$env:APPDATA\QGIS\QGIS3\profiles\default\processing\scripts\"
+Copy-Item prototype\WindTurbine_Earthwork_Calculator.py -Destination "$env:APPDATA\QGIS\QGIS3\profiles\default\processing\scripts\"
 ```
 
-**Hinweis:** Ab v5.5 ist der Professional HTML Report direkt integriert - kein externes Modul mehr nötig!
+**Hinweis:** Ab v6.0 mit integrierter API, Caching und GeoPackage-Output!
 
 ---
 
-### 2. QGIS-Scripts neu laden
+### 3. QGIS-Scripts neu laden
 
 #### Option A: Über Menü
 1. QGIS öffnen
@@ -44,7 +56,7 @@ Copy-Item prototype\prototype.py -Destination "$env:APPDATA\QGIS\QGIS3\profiles\
 
 ---
 
-### 3. Tool finden
+### 4. Tool finden
 
 Das Tool erscheint in der **Processing Toolbox** unter:
 
@@ -52,33 +64,41 @@ Das Tool erscheint in der **Processing Toolbox** unter:
 Processing Toolbox
 └── Scripts
     └── Windkraft
-        └── Wind Turbine Earthwork Calculator v5.5
+        └── Wind Turbine Earthwork Calculator v6.0
 ```
 
 ---
 
 ## 🧪 Funktionstest
 
-### Minimaler Test (ohne Geländeschnitte)
+### Minimaler Test mit API (NEU v6.0)
 
 1. **Input vorbereiten:**
-   - DEM (Raster, projiziert, z.B. UTM)
-   - WKA-Standorte (Punkt-Layer, mindestens 1 Punkt)
+   - WKA-Standorte (Punkt-Layer, mindestens 1 Punkt, UTM32N empfohlen)
+   - DEM wird automatisch von hoehendaten.de API geladen
+   - Optional: Eigenes DEM (Raster, projiziert, z.B. UTM)
 
 2. **Tool öffnen:**
-   - Processing Toolbox → Windkraft → "Wind Turbine Earthwork Calculator v5.5"
+   - Processing Toolbox → Windkraft → "Wind Turbine Earthwork Calculator v6.0"
 
 3. **Parameter einstellen:**
-   - INPUT DEM: Dein Raster
-   - INPUT Points: Dein Punkt-Layer
-   - OUTPUT Report: Pfad zur HTML-Datei (z.B. `~/test_report.html`)
+   - ✓ DEM von hoehendaten.de API beziehen: Aktiviert (NEU!)
+   - INPUT Points: Dein Punkt-Layer (UTM32N)
+   - INPUT DEM: Leer lassen (API lädt automatisch)
    - Alle anderen Parameter: Default-Werte OK
 
 4. **Ausführen:**
    - "Run" klicken
+   - Beobachten Sie die API-Downloads im Log
+   - Cache wird in ~/.qgis3/hoehendaten_cache/ gespeichert
    - Warten bis "✅ Fertig!" erscheint
 
-5. **Report öffnen:**
+5. **Ergebnisse:**
+   - GeoPackage im aktuellen Verzeichnis: `WKA_{X}_{Y}.gpkg`
+   - HTML-Report: `WKA_{X}_{Y}.html`
+   - GeoPackage enthält DEM + alle Vektorlayer
+
+6. **Report öffnen:**
    - HTML-Datei im Browser öffnen
    - "📄 Als PDF exportieren" Button testen (oben rechts)
 
@@ -210,6 +230,6 @@ processing.algorithmHelp("script:windturbineearthworkv3")
 
 ---
 
-**Version:** 5.5 (Polygon-based Sampling + Professional Report)  
-**Autor:** Windkraft-Standortplanung  
-**Datum:** Oktober 2025
+**Version:** 6.0 (Hoehendaten.de API Integration & GeoPackage Output)
+**Autor:** Windkraft-Standortplanung
+**Datum:** November 2025

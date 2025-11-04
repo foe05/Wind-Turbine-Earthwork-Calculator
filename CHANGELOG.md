@@ -7,6 +7,72 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ---
 
+## [6.0.0] - 2025-11-04
+
+### 🚀 Hauptrelease - Hoehendaten.de API Integration & GeoPackage Output
+
+#### Hinzugefügt
+- **Hoehendaten.de API Integration** 🌐
+  - Automatischer DEM-Download von hoehendaten.de API
+  - Deutschland-weite Abdeckung mit 1m Auflösung
+  - Multi-Tile-Support mit automatischem Mosaicking
+  - `fetch_dem_tile_from_api()`: Holt einzelne 1×1km Kacheln
+  - `create_dem_mosaic_from_tiles()`: Erstellt nahtloses Mosaik aus mehreren Tiles
+  - `calculate_tiles_for_radius_points()`: Per-Site Radius-Berechnung (250m um jeden Standort)
+  - Boolean Parameter `USE_HOEHENDATEN_API` zum Umschalten
+  - Fallback auf manuelles DEM bei Offline/API-Fehler
+
+- **Intelligentes DEM-Caching-System** 💾
+  - Persistenter Cache in `~/.qgis3/hoehendaten_cache/tiles/`
+  - LRU (Least Recently Used) Eviction-Strategie
+  - `load_cache_metadata()`: Lädt Cache-Index mit Zugriffszähler und Zeitstempel
+  - `save_cache_metadata()`: Speichert Cache-Index persistent
+  - `cleanup_cache_lru()`: Entfernt am wenigsten genutzte Tiles bei Überschreitung
+  - Max. 100 Tiles (~500MB) automatische Limits
+  - Boolean Parameter `FORCE_DEM_REFRESH` für manuellen Cache-Refresh
+  - Wiederverwendung zwischen QGIS-Sessions
+
+- **GeoPackage All-in-One Output** 📦
+  - Ein einziges .gpkg für alle Outputs (Raster + Vektoren)
+  - `generate_geopackage_path()`: Erstellt Dateinamen aus südwestlichstem Punkt
+  - `save_raster_to_geopackage()`: Speichert DEM-Raster mit gdal:translate
+  - `save_vector_to_geopackage()`: Fügt Vektorlayer hinzu
+  - Automatischer Dateiname: `WKA_{Rechtswert}_{Hochwert}.gpkg`
+  - HTML-Report mit gleichem Basisdateinamen daneben
+  - Speicherung im aktuellen Arbeitsverzeichnis
+  - Enthält: DEM-Raster, Plattformen, Fundamente, Volumen-Daten, Profillinien
+
+- **Umfassender Crash-Schutz** 🛡️
+  - Multi-layered Validierung bei API-Antworten
+  - Base64-Dekodierungs-Fehlerbehandlung
+  - GeoTIFF-Validierung vor GDAL-Operationen
+  - Try-Catch für alle Raster-Layer-Erstellungen
+  - Detailliertes Logging mit ✓/✗/⚠ Indikatoren
+
+#### Geändert
+- Dateiname: `prototype.py` → `WindTurbine_Earthwork_Calculator.py`
+- Version: 5.5 → **6.0**
+- Parameter `INPUT_DEM` jetzt optional (wenn API aktiviert)
+- Output-Parameter entfernt (automatische Generierung)
+- Alle temporären Outputs werden in finale GeoPackage kopiert
+- DEM-Mosaik wird als Layer in GeoPackage integriert
+
+#### Behoben
+- **API-Request-Format**: Korrigierte Header (`Accept-Encoding: gzip`) und Request-Body (`data=json.dumps()` statt `json=`)
+- **QGIS-Crash-Prevention**: Umfangreiche Validierung verhindert Abstürze durch ungültige Raster-Daten
+- **Cache-Konsistenz**: Metadata wird atomar geschrieben, Locking verhindert Race-Conditions
+
+#### Dependencies
+- **NEU**: `requests` library (für API-Kommunikation)
+- Bestehende Dependencies: `numpy`, `qgis.core`, `PyQt5`
+
+#### Rückwärtskompatibilität
+- ✅ Manueller DEM-Upload weiterhin unterstützt (API optional)
+- ✅ Alle v5.5 Features (Polygon-basiert, Geländeschnitte) funktionieren unverändert
+- ✅ Bestehende Parameter-Kombinationen kompatibel
+
+---
+
 ## [5.5.0] - 2025-10-04
 
 ### 🚀 Hauptrelease - Polygon-basierte Berechnungen & Professional Reports

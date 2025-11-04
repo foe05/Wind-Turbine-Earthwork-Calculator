@@ -1,13 +1,14 @@
 # 🚀 SCHRITT-FÜR-SCHRITT ANLEITUNG
-## Wind Turbine Earthwork Calculator - Prototyp Installation
+## Wind Turbine Earthwork Calculator v6.0 - Installation
 
 ---
 
 ## ✅ VORAUSSETZUNGEN
 
 Was Sie brauchen:
-- ✓ QGIS installiert (Version 3.x)
-- ✓ Internet-Verbindung
+- ✓ QGIS installiert (Version 3.0 oder höher)
+- ✓ Internet-Verbindung (für API-Nutzung)
+- ✓ Python `requests` Bibliothek (Installation siehe unten)
 - ✓ Etwa 30 Minuten Zeit
 
 ---
@@ -67,35 +68,53 @@ Ich erstelle Ihnen gleich ein Python-Skript, das Test-DEM-Daten für Sie generie
 
 ---
 
-## 💾 SCHRITT 3: SCRIPT SPEICHERN
+## 📦 SCHRITT 3: PYTHON-PAKET INSTALLIEREN (NEU v6.0)
 
-**3.1** Den Python-Code kopieren:
-- Öffnen Sie das Artifact "Wind Turbine Earthwork Calculator - QGIS Processing Script" (oben)
-- Markieren Sie den **gesamten Code** (Strg+A)
-- Kopieren Sie ihn (Strg+C)
+**3.1** QGIS öffnen
 
-**3.2** Code in Datei speichern:
-1. Öffnen Sie einen Texteditor (Notepad, Notepad++, oder ähnlich)
-2. Fügen Sie den Code ein (Strg+V)
-3. Speichern unter:
-   - Speicherort: `C:\GIS_Daten\Windkraft\Scripts\`
-   - Dateiname: `wind_earthwork_calculator.py`
-   - **WICHTIG:** Dateityp: "Alle Dateien (*.*)" auswählen
-   - **NICHT** als .txt speichern!
+**3.2** Python Console öffnen:
+- Menü: `Plugins` → `Python-Konsole`
+- Oder Tastenkombination: `Strg+Alt+P`
 
-**3.3** Überprüfung:
-- Die Datei muss heißen: `wind_earthwork_calculator.py`
-- Dateigröße sollte ca. 20-25 KB sein
+**3.3** Requests-Bibliothek installieren:
+```python
+import subprocess
+import sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+```
+
+**3.4** Warten bis Installation abgeschlossen
+- Sie sollten sehen: "Successfully installed requests-..."
+- Falls Fehler: QGIS als Administrator starten und erneut versuchen
 
 ---
 
-## 🔧 SCHRITT 4: TEST-DEM ERSTELLEN (OPTIONAL, ABER EMPFOHLEN)
+## 💾 SCHRITT 4: SCRIPT SPEICHERN
 
-Wenn Sie noch keine echten DEM-Daten haben, erstellen wir jetzt welche:
+**4.1** Den Python-Code kopieren:
+- Laden Sie `WindTurbine_Earthwork_Calculator.py` herunter
+- Oder kopieren Sie das Script aus dem Repository
 
-**4.1** QGIS öffnen
+**4.2** Code in QGIS Scripts-Ordner speichern:
+   - **Linux/Mac**: `~/.local/share/QGIS/QGIS3/profiles/default/processing/scripts/`
+   - **Windows**: `%APPDATA%\QGIS\QGIS3\profiles\default\processing\scripts\`
 
-**4.2** Python Console öffnen:
+**4.3** Überprüfung:
+- Die Datei muss heißen: `WindTurbine_Earthwork_Calculator.py`
+- Dateigröße sollte ca. 150-200 KB sein
+
+---
+
+## 🔧 SCHRITT 5: TEST-DEM ERSTELLEN (OPTIONAL - v6.0 kann API nutzen!)
+
+**NEU in v6.0**: Sie können das DEM auch automatisch von hoehendaten.de beziehen!
+Dieser Schritt ist optional, wenn Sie die API-Integration nutzen möchten.
+
+Wenn Sie lieber mit lokalen Test-Daten arbeiten:
+
+**5.1** QGIS öffnen (falls noch nicht offen)
+
+**5.2** Python Console nutzen (bereits offen von Schritt 3):
 - Menü: `Plugins` → `Python-Konsole`
 - Oder Tastenkombination: `Strg+Alt+P`
 
