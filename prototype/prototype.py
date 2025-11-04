@@ -317,21 +317,60 @@ def create_dem_mosaic_from_tiles(tiles_data, feedback=None):
         # 1. Base64-Daten in temporäre GeoTIFF-Dateien schreiben
         for i, tile in enumerate(tiles_data):
             if not tile or 'data' not in tile:
+                if feedback:
+                    feedback.pushWarning(f'  ⚠ Kachel {i+1}: Keine Daten verfügbar')
                 continue
 
-            # Base64 dekodieren
-            geotiff_data = base64.b64decode(tile['data'])
+            try:
+                # Base64 dekodieren mit Validierung
+                if not tile['data']:
+                    if feedback:
+                        feedback.pushWarning(f'  ⚠ Kachel {i+1}: Leerer Data-String')
+                    continue
 
-            # Temporäre Datei erstellen
-            temp_file = tempfile.NamedTemporaryFile(
-                delete=False, suffix=f'_tile_{i}.tif', prefix='dem_'
-            )
-            temp_file.write(geotiff_data)
-            temp_file.close()
-            temp_files.append(temp_file.name)
+                if feedback:
+                    feedback.pushInfo(f'  → Kachel {i+1}/{len(tiles_data)}: Dekodiere Base64 ({len(tile["data"])} Zeichen)...')
 
-            if feedback:
-                feedback.pushInfo(f'  ✓ Kachel {i+1}/{len(tiles_data)} dekodiert: {temp_file.name}')
+                geotiff_data = base64.b64decode(tile['data'])
+
+                if not geotiff_data or len(geotiff_data) < 100:
+                    if feedback:
+                        feedback.reportError(f'  ✗ Kachel {i+1}: Dekodierte Daten zu klein ({len(geotiff_data)} Bytes)')
+                    continue
+
+                # Temporäre Datei erstellen
+                temp_file = tempfile.NamedTemporaryFile(
+                    delete=False, suffix=f'_tile_{i}.tif', prefix='dem_'
+                )
+                temp_file.write(geotiff_data)
+                temp_file.close()
+
+                # Validiere GeoTIFF-Datei BEVOR sie zur Liste hinzugefügt wird
+                test_layer = QgsRasterLayer(temp_file.name, 'test')
+                if not test_layer.isValid():
+                    if feedback:
+                        feedback.reportError(f'  ✗ Kachel {i+1}: Ungültiges GeoTIFF - {temp_file.name}')
+                    try:
+                        os.unlink(temp_file.name)
+                    except:
+                        pass
+                    continue
+
+                temp_files.append(temp_file.name)
+
+                if feedback:
+                    feedback.pushInfo(f'  ✓ Kachel {i+1}/{len(tiles_data)}: Gültig - {len(geotiff_data)} Bytes → {temp_file.name}')
+
+            except base64.binascii.Error as e:
+                if feedback:
+                    feedback.reportError(f'  ✗ Kachel {i+1}: Base64-Dekodierungsfehler - {str(e)}')
+                continue
+            except Exception as e:
+                if feedback:
+                    feedback.reportError(f'  ✗ Kachel {i+1}: Fehler beim Verarbeiten - {str(e)}')
+                    import traceback
+                    feedback.reportError(traceback.format_exc())
+                continue
 
         if not temp_files:
             if feedback:
@@ -351,29 +390,70 @@ def create_dem_mosaic_from_tiles(tiles_data, feedback=None):
         output_mosaic.close()
 
         if feedback:
-            feedback.pushInfo(f'  → Erstelle Mosaik: {output_mosaic.name}')
+            feedback.pushInfo(f'  → Erstelle Mosaik aus {len(temp_files)} Kachel(n): {output_mosaic.name}')
 
-        # QGIS Processing gdal:merge verwenden
-        import processing
-        params = {
-            'INPUT': temp_files,
-            'PCT': False,
-            'SEPARATE': False,
-            'DATA_TYPE': 5,  # Float32
-            'OUTPUT': output_mosaic.name
-        }
+        try:
+            # QGIS Processing gdal:merge verwenden
+            import processing
+            params = {
+                'INPUT': temp_files,
+                'PCT': False,
+                'SEPARATE': False,
+                'DATA_TYPE': 5,  # Float32
+                'OUTPUT': output_mosaic.name
+            }
 
-        result = processing.run('gdal:merge', params, feedback=feedback)
+            if feedback:
+                feedback.pushInfo('  → Starte GDAL Merge...')
 
-        # Temporäre Einzel-Kacheln löschen
+            result = processing.run('gdal:merge', params, feedback=feedback)
+
+            if feedback:
+                feedback.pushInfo(f'  → GDAL Merge abgeschlossen')
+
+            # Validiere Mosaik-Datei
+            if not os.path.exists(output_mosaic.name):
+                raise Exception(f'Mosaik-Datei wurde nicht erstellt: {output_mosaic.name}')
+
+            mosaic_size = os.path.getsize(output_mosaic.name)
+            if mosaic_size < 100:
+                raise Exception(f'Mosaik-Datei zu klein: {mosaic_size} Bytes')
+
+            # Test ob Mosaik gültig ist
+            test_mosaic = QgsRasterLayer(output_mosaic.name, 'test_mosaic')
+            if not test_mosaic.isValid():
+                raise Exception('Mosaik-Raster-Layer ist ungültig')
+
+            if feedback:
+                feedback.pushInfo(f'  ✓ Mosaik erfolgreich erstellt und validiert ({mosaic_size} Bytes)')
+
+        except Exception as e:
+            if feedback:
+                feedback.reportError(f'  ✗ GDAL Merge fehlgeschlagen: {str(e)}')
+                import traceback
+                feedback.reportError(traceback.format_exc())
+
+            # Cleanup bei Fehler
+            try:
+                os.unlink(output_mosaic.name)
+            except:
+                pass
+
+            # Temporäre Einzel-Kacheln löschen
+            for temp_file in temp_files:
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+
+            return None
+
+        # Temporäre Einzel-Kacheln löschen (bei Erfolg)
         for temp_file in temp_files:
             try:
                 os.unlink(temp_file)
             except:
                 pass
-
-        if feedback:
-            feedback.pushInfo('  ✓ Mosaik erfolgreich erstellt')
 
         return output_mosaic.name
 
@@ -446,28 +526,91 @@ def get_dem_from_hoehendaten_api(features, crs, feedback=None):
             feedback.pushInfo(f'\n📊 Datenquelle: {attribution}')
 
     # 3. Mosaik erstellen
-    mosaic_path = create_dem_mosaic_from_tiles(tiles_data, feedback)
+    try:
+        mosaic_path = create_dem_mosaic_from_tiles(tiles_data, feedback)
 
-    if not mosaic_path:
+        if not mosaic_path:
+            if feedback:
+                feedback.reportError('Mosaik-Erstellung fehlgeschlagen')
+            return None
+
         if feedback:
-            feedback.reportError('Mosaik-Erstellung fehlgeschlagen')
-        return None
+            feedback.pushInfo(f'\n→ Lade DEM-Raster-Layer von: {mosaic_path}')
 
-    # 4. Als QgsRasterLayer laden
-    dem_layer = QgsRasterLayer(mosaic_path, 'DEM (hoehendaten.de)')
+        # 4. Als QgsRasterLayer laden - KRITISCHER SCHRITT!
+        # Dieser Schritt kann QGIS crashen wenn die Datei ungültig ist
+        if not os.path.exists(mosaic_path):
+            if feedback:
+                feedback.reportError(f'✗ Mosaik-Datei existiert nicht: {mosaic_path}')
+            return None
 
-    if not dem_layer.isValid():
+        file_size = os.path.getsize(mosaic_path)
         if feedback:
-            feedback.reportError('DEM-Layer konnte nicht geladen werden')
+            feedback.pushInfo(f'  Dateigröße: {file_size} Bytes')
+
+        if file_size < 100:
+            if feedback:
+                feedback.reportError(f'✗ Mosaik-Datei zu klein: {file_size} Bytes')
+            return None
+
+        # Versuche Layer zu erstellen mit umfassender Fehlerbehandlung
+        try:
+            dem_layer = QgsRasterLayer(mosaic_path, 'DEM (hoehendaten.de)')
+        except Exception as e:
+            if feedback:
+                feedback.reportError(f'✗ Exception beim Erstellen des QgsRasterLayer: {str(e)}')
+                import traceback
+                feedback.reportError(traceback.format_exc())
+            return None
+
+        if not dem_layer:
+            if feedback:
+                feedback.reportError('✗ QgsRasterLayer ist None')
+            return None
+
+        if not dem_layer.isValid():
+            if feedback:
+                feedback.reportError('✗ DEM-Layer ist ungültig')
+                feedback.reportError(f'  Layer-Error: {dem_layer.error().summary()}')
+            return None
+
+        # Zusätzliche Validierungen
+        try:
+            extent = dem_layer.extent()
+            if extent.isEmpty():
+                if feedback:
+                    feedback.reportError('✗ DEM-Layer hat leere Ausdehnung')
+                return None
+
+            crs = dem_layer.crs()
+            if not crs.isValid():
+                if feedback:
+                    feedback.reportError('✗ DEM-Layer hat ungültiges CRS')
+                return None
+
+            if feedback:
+                feedback.pushInfo(f'\n✓ DEM erfolgreich geladen und validiert')
+                feedback.pushInfo(f'  Ausdehnung: {extent.toString()}')
+                feedback.pushInfo(f'  CRS: {crs.authid()}')
+                feedback.pushInfo(f'  Breite: {dem_layer.width()} Pixel')
+                feedback.pushInfo(f'  Höhe: {dem_layer.height()} Pixel')
+                feedback.pushInfo('='*70 + '\n')
+
+        except Exception as e:
+            if feedback:
+                feedback.reportError(f'✗ Fehler beim Validieren des DEM-Layers: {str(e)}')
+                import traceback
+                feedback.reportError(traceback.format_exc())
+            return None
+
+        return dem_layer
+
+    except Exception as e:
+        if feedback:
+            feedback.reportError(f'✗ Kritischer Fehler beim Laden des DEM: {str(e)}')
+            import traceback
+            feedback.reportError(traceback.format_exc())
         return None
-
-    if feedback:
-        feedback.pushInfo(f'\n✓ DEM erfolgreich geladen')
-        feedback.pushInfo(f'  Ausdehnung: {dem_layer.extent().toString()}')
-        feedback.pushInfo(f'  CRS: {dem_layer.crs().authid()}')
-        feedback.pushInfo('='*70 + '\n')
-
-    return dem_layer
 
 
 class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
