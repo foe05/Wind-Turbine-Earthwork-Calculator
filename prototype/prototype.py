@@ -175,6 +175,52 @@ def generate_geopackage_path(features, feedback=None):
     return gpkg_path
 
 
+def save_raster_to_geopackage(raster_layer, gpkg_path, layer_name='dem_mosaic', feedback=None):
+    """
+    Speichert ein Raster-Layer in ein GeoPackage.
+
+    Args:
+        raster_layer: QgsRasterLayer
+        gpkg_path: Pfad zum GeoPackage
+        layer_name: Name des Layers im GeoPackage
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        True bei Erfolg, False bei Fehler
+    """
+    if feedback:
+        feedback.pushInfo(f'\n💾 Speichere DEM in GeoPackage: {layer_name}')
+
+    try:
+        # Verwende gdal:translate zum Speichern ins GeoPackage
+        import processing
+
+        params = {
+            'INPUT': raster_layer,
+            'TARGET_CRS': None,  # Behalte Original-CRS
+            'NODATA': None,
+            'COPY_SUBDATASETS': False,
+            'OPTIONS': '',
+            'EXTRA': '',
+            'DATA_TYPE': 0,  # Use input layer data type
+            'OUTPUT': f'GPKG:{gpkg_path}:{layer_name}'
+        }
+
+        result = processing.run('gdal:translate', params, feedback=feedback)
+
+        if feedback:
+            feedback.pushInfo(f'   ✓ DEM gespeichert als Layer "{layer_name}"')
+
+        return True
+
+    except Exception as e:
+        if feedback:
+            feedback.reportError(f'   ✗ Fehler beim Speichern des DEM: {str(e)}')
+            import traceback
+            feedback.reportError(traceback.format_exc())
+        return False
+
+
 # =============================================================================
 # DEM Cache System mit LRU-Strategie
 # =============================================================================
@@ -1459,7 +1505,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         if use_polygons:
             feature_source = polygons_source
             input_mode = 'Polygon-Modus'
-            
+
             # CRS-Validierung für Polygone
             poly_crs = polygons_source.sourceCrs()
             if poly_crs.isGeographic():
@@ -1467,7 +1513,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                     f'Polygone müssen in projiziertem CRS sein (z.B. UTM)!\n'
                     f'Aktuelles CRS: {poly_crs.authid()} ({poly_crs.description()})\n'
                     f'Bitte reprojizieren Sie die Polygone vor der Verwendung.')
-            
+
             # CRS-Match mit DEM prüfen
             dem_crs = dem_layer.crs()
             if poly_crs.authid() != dem_crs.authid():
@@ -1481,28 +1527,44 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                 raise QgsProcessingException('Keine WKA-Standorte gefunden!')
             feature_source = points_source
             input_mode = 'Punkt-Modus'
-        
+
+        # =====================================================================
+        # GeoPackage-Pfad generieren (basierend auf südwestlichstem Punkt)
+        # =====================================================================
+        features_for_gpkg = list(feature_source.getFeatures())
+        gpkg_path = generate_geopackage_path(features_for_gpkg, feedback)
+
+        # HTML-Report-Pfad: Neben GeoPackage
+        html_path = gpkg_path.replace('.gpkg', '.html')
+        feedback.pushInfo(f'📄 HTML-Report: {html_path}')
+
         feedback.pushInfo(f'\nKonfiguration:')
         feedback.pushInfo(f'  Modus: {input_mode}')
         feedback.pushInfo(f'  Plattform: {platform_length}m x {platform_width}m (Standard)')
         feedback.pushInfo(f'  Fundament: Ø{foundation_diameter}m, {foundation_depth}m tief')
         feedback.pushInfo(f'  Wiederverwendung: {"Ja" if material_reuse else "Nein"}')
         feedback.pushInfo(f'  Standorte: {feature_source.featureCount()}')
-        
+
         fields = self._create_output_fields()
+
+        # =====================================================================
+        # Outputs in GeoPackage statt temporär
+        # =====================================================================
         (sink, dest_id) = self.parameterAsSink(
             parameters, self.OUTPUT_POINTS, context,
-            fields, QgsWkbTypes.Point, points_source.sourceCrs())
-        
+            fields, QgsWkbTypes.Point, points_source.sourceCrs(),
+            QgsProcessing.TEMPORARY_OUTPUT)
+
         # Standflächen-Polygone (optional)
         platform_fields = self._create_platform_fields()
         platform_sink = None
         platform_dest_id = None
-        
+
         if self.OUTPUT_PLATFORMS in parameters and parameters[self.OUTPUT_PLATFORMS] is not None:
             (platform_sink, platform_dest_id) = self.parameterAsSink(
                 parameters, self.OUTPUT_PLATFORMS, context,
-                platform_fields, QgsWkbTypes.Polygon, feature_source.sourceCrs())
+                platform_fields, QgsWkbTypes.Polygon, feature_source.sourceCrs(),
+                QgsProcessing.TEMPORARY_OUTPUT)
         
         total = feature_source.featureCount()
         results = []
@@ -1619,8 +1681,8 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                 feedback.reportError(f'Fehler: {str(e)}')
                 continue
         
-        # Report-Datei früh initialisieren (wird später für Profilordner benötigt)
-        report_file = self.parameterAsFileOutput(parameters, self.OUTPUT_REPORT, context)
+        # Report-Datei: Verwende html_path (neben GeoPackage)
+        report_file = html_path
         
         # === PROFILSCHNITTE ERSTELLEN ===
         generate_profiles = self.parameterAsBool(parameters, self.GENERATE_PROFILES, context)
@@ -1648,7 +1710,8 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                 if self.OUTPUT_PROFILES in parameters and parameters[self.OUTPUT_PROFILES] is not None:
                     (profile_sink, profile_dest_id) = self.parameterAsSink(
                         parameters, self.OUTPUT_PROFILES, context,
-                        profile_fields, QgsWkbTypes.LineString, feature_source.sourceCrs())
+                        profile_fields, QgsWkbTypes.LineString, feature_source.sourceCrs(),
+                        QgsProcessing.TEMPORARY_OUTPUT)
                 
                 # Für jeden Standort Profile generieren
                 feature_source2 = self.parameterAsSource(parameters, self.INPUT_POINTS if not use_polygons else self.INPUT_POLYGONS, context)
@@ -1725,20 +1788,96 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             slope_angle, slope_width, swell_factor, compaction_factor
         )
         feedback.pushInfo('✅ HTML-Report erstellt!')
-        
-        feedback.pushInfo(f'\n✅ Fertig! Report: {report_file}')
-        
+
+        # =====================================================================
+        # ALLE OUTPUTS INS GEOPACKAGE KOPIEREN
+        # =====================================================================
+        feedback.pushInfo(f'\n📦 Kopiere alle Outputs ins GeoPackage...')
+
+        # 1. DEM ins GeoPackage speichern
+        if dem_layer and dem_layer.isValid():
+            save_raster_to_geopackage(dem_layer, gpkg_path, 'dem_mosaic', feedback)
+
+        # 2. Vector-Layer ins GeoPackage kopieren
+        from qgis.core import QgsVectorLayer, QgsVectorFileWriter
+
+        # Volumen-Daten (Points)
+        try:
+            temp_layer = QgsVectorLayer(dest_id, 'temp_points', 'ogr')
+            if temp_layer.isValid():
+                options = QgsVectorFileWriter.SaveVectorOptions()
+                options.driverName = 'GPKG'
+                options.layerName = 'volumen_daten'
+                options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+
+                error = QgsVectorFileWriter.writeAsVectorFormatV2(
+                    temp_layer, gpkg_path, QgsProject.instance().transformContext(), options
+                )
+
+                if error[0] == QgsVectorFileWriter.NoError:
+                    feedback.pushInfo(f'   ✓ Volumen-Daten gespeichert')
+                else:
+                    feedback.pushWarning(f'   ⚠️ Volumen-Daten: {error[1]}')
+        except Exception as e:
+            feedback.reportError(f'   ✗ Fehler bei Volumen-Daten: {str(e)}')
+
+        # Standflächen (Polygone)
+        if platform_dest_id is not None:
+            try:
+                temp_layer = QgsVectorLayer(platform_dest_id, 'temp_platforms', 'ogr')
+                if temp_layer.isValid():
+                    options = QgsVectorFileWriter.SaveVectorOptions()
+                    options.driverName = 'GPKG'
+                    options.layerName = 'standflaechen'
+                    options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+
+                    error = QgsVectorFileWriter.writeAsVectorFormatV2(
+                        temp_layer, gpkg_path, QgsProject.instance().transformContext(), options
+                    )
+
+                    if error[0] == QgsVectorFileWriter.NoError:
+                        feedback.pushInfo(f'   ✓ Standflächen gespeichert')
+                    else:
+                        feedback.pushWarning(f'   ⚠️ Standflächen: {error[1]}')
+            except Exception as e:
+                feedback.reportError(f'   ✗ Fehler bei Standflächen: {str(e)}')
+
+        # Schnittlinien (LineStrings)
+        if profile_dest_id is not None:
+            try:
+                temp_layer = QgsVectorLayer(profile_dest_id, 'temp_profiles', 'ogr')
+                if temp_layer.isValid():
+                    options = QgsVectorFileWriter.SaveVectorOptions()
+                    options.driverName = 'GPKG'
+                    options.layerName = 'schnittlinien'
+                    options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+
+                    error = QgsVectorFileWriter.writeAsVectorFormatV2(
+                        temp_layer, gpkg_path, QgsProject.instance().transformContext(), options
+                    )
+
+                    if error[0] == QgsVectorFileWriter.NoError:
+                        feedback.pushInfo(f'   ✓ Schnittlinien gespeichert')
+                    else:
+                        feedback.pushWarning(f'   ⚠️ Schnittlinien: {error[1]}')
+            except Exception as e:
+                feedback.reportError(f'   ✗ Fehler bei Schnittlinien: {str(e)}')
+
+        feedback.pushInfo(f'\n✅ Fertig!')
+        feedback.pushInfo(f'   📦 GeoPackage: {gpkg_path}')
+        feedback.pushInfo(f'   📄 HTML-Report: {report_file}')
+
         result_dict = {
-            self.OUTPUT_POINTS: dest_id,
+            self.OUTPUT_POINTS: gpkg_path,  # Gebe GeoPackage-Pfad zurück
             self.OUTPUT_REPORT: report_file
         }
-        
+
         if platform_dest_id is not None:
-            result_dict[self.OUTPUT_PLATFORMS] = platform_dest_id
-        
+            result_dict[self.OUTPUT_PLATFORMS] = gpkg_path
+
         if profile_dest_id is not None:
-            result_dict[self.OUTPUT_PROFILES] = profile_dest_id
-        
+            result_dict[self.OUTPUT_PROFILES] = gpkg_path
+
         return result_dict
     
     def _calculate_complete_earthwork(self, dem_layer, point, length, width,
