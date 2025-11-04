@@ -128,7 +128,7 @@ def fetch_dem_tile_from_api(easting, northing, zone=32, feedback=None):
     tile_easting = int(easting / 1000) * 1000 + 500
     tile_northing = int(northing / 1000) * 1000 + 500
 
-    # Request-Payload - Koordinaten als Floats senden
+    # Request-Payload - Koordinaten als Floats senden (wie im curl-Beispiel)
     payload = {
         "Type": "RawTIFRequest",
         "ID": f"qgis_{zone}_{tile_easting}_{tile_northing}",
@@ -139,10 +139,11 @@ def fetch_dem_tile_from_api(easting, northing, zone=32, feedback=None):
         }
     }
 
-    # Headers explizit setzen
+    # Headers wie im offiziellen curl-Beispiel
     headers = {
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip'
     }
 
     if feedback:
@@ -150,7 +151,13 @@ def fetch_dem_tile_from_api(easting, northing, zone=32, feedback=None):
         feedback.pushInfo(f'     Payload: {json.dumps(payload)}')
 
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        # Daten als JSON-String senden (wie curl --data)
+        response = requests.post(
+            url,
+            data=json.dumps(payload),
+            headers=headers,
+            timeout=30
+        )
 
         # Debug: Response-Details ausgeben
         if feedback and response.status_code != 200:
