@@ -13,6 +13,14 @@
 numpy>=1.20.0          # Array-Operationen für DEM-Verarbeitung
                        # In QGIS: meist vorinstalliert
 
+# ===== API Dependencies (NEU v6.0) =====
+# Benötigt für hoehendaten.de API Integration
+
+requests>=2.28.0       # HTTP-Client für API-Kommunikation
+                       # MUSS in QGIS installiert werden:
+                       # import subprocess, sys
+                       # subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+
 # ===== QGIS & PyQt (NUR für Standalone-Testing) =====
 # Diese werden NUR benötigt, wenn du das Script außerhalb
 # von QGIS testen möchtest (sehr selten)

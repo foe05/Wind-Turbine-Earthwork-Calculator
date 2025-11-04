@@ -1,6 +1,6 @@
 # 🌬️ Wind Turbine Earthwork Calculator
 
-**Version 5.5** | QGIS Processing Tool für präzise Erdarbeitsberechnungen bei Windkraftanlagen-Standorten
+**Version 6.0** | QGIS Processing Tool für präzise Erdarbeitsberechnungen bei Windkraftanlagen-Standorten
 
 [![QGIS](https://img.shields.io/badge/QGIS-3.0+-green.svg)](https://qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.7+-blue.svg)](https://python.org)
@@ -20,10 +20,41 @@ Der **Wind Turbine Earthwork Calculator** ist ein leistungsstarkes QGIS-Processi
 - 🗺️ **Standflächen-Polygon-Export**
 - 🔄 **Beliebige Polygon-Formen** (v5.5)
 - 📈 **Geländeschnitt-Modul** (v5.0)
+- 🌐 **Hoehendaten.de API Integration** (v6.0)
+- 💾 **Intelligentes DEM-Caching** (v6.0)
+- 📦 **GeoPackage All-in-One Output** (v6.0)
 
 ---
 
-## ✨ Features v5.5
+## ✨ Features v6.0
+
+### 🆕 NEU: Hoehendaten.de API Integration & GeoPackage Output
+
+- **Automatischer DEM-Download**:
+  - Integration mit hoehendaten.de API für deutschlandweite Höhendaten
+  - 1m Auflösung für präzise Berechnungen
+  - Kein manuelles DEM-Upload nötig
+  - Automatische Multi-Tile-Mosaicking
+  - Fallback auf manuellen Upload bei Offline/Ausland
+
+- **Intelligentes Caching-System**:
+  - Persistent zwischen QGIS-Sessions (~/.qgis3/hoehendaten_cache/)
+  - LRU (Least Recently Used) Strategie
+  - Per-Site Radius-Berechnung (250m um jeden Standort)
+  - Max. 100 Tiles (~500MB) automatische Limits
+  - Cache-Metadata mit Zugriffszähler und Zeitstempel
+  - Manueller Force-Refresh für Aktualisierungen
+
+- **GeoPackage All-in-One Output**:
+  - Ein einziges .gpkg für alle Outputs
+  - DEM-Raster als Layer integriert
+  - Alle Vektorlayer (Plattformen, Fundamente, Volumen, Profile)
+  - HTML-Report mit gleichem Dateinamen daneben
+  - Automatischer Dateiname: WKA_{Rechtswert}_{Hochwert}.gpkg
+  - Basierend auf südwestlichstem Punkt des Projekts
+  - Speicherung im aktuellen Arbeitsverzeichnis
+
+### Features v5.5
 
 ### 🆕 NEU: Polygon-basierte Berechnungen
 
@@ -140,26 +171,36 @@ Der **Wind Turbine Earthwork Calculator** ist ein leistungsstarkes QGIS-Processi
 
 - **QGIS**: 3.0 oder höher
 - **Python**: 3.7+ (in QGIS integriert)
-- **Python-Pakete**: `numpy` (normalerweise mit QGIS vorinstalliert)
+- **Python-Pakete**:
+  - `numpy` (normalerweise mit QGIS vorinstalliert)
+  - `requests` (für hoehendaten.de API, siehe Installation)
 
 ### Installation des Tools
 
 #### Option 1: Über QGIS Processing Toolbox (empfohlen)
 
-1. **Script-Datei kopieren**:
+1. **Python-Paket installieren** (für API-Integration):
    ```bash
-   # Linux/Mac
-   cp prototype/prototype.py ~/.local/share/QGIS/QGIS3/profiles/default/processing/scripts/
-   
-   # Windows
-   copy prototype\prototype.py %APPDATA%\QGIS\QGIS3\profiles\default\processing\scripts\
+   # In QGIS Python-Konsole (Plugins → Python-Konsole)
+   import subprocess
+   import sys
+   subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
    ```
 
-2. **QGIS neu starten** oder Processing Toolbox aktualisieren:
+2. **Script-Datei kopieren**:
+   ```bash
+   # Linux/Mac
+   cp prototype/WindTurbine_Earthwork_Calculator.py ~/.local/share/QGIS/QGIS3/profiles/default/processing/scripts/
+
+   # Windows
+   copy prototype\WindTurbine_Earthwork_Calculator.py %APPDATA%\QGIS\QGIS3\profiles\default\processing\scripts\
+   ```
+
+3. **QGIS neu starten** oder Processing Toolbox aktualisieren:
    - Processing → Toolbox → Scripts → Reload Scripts
 
-3. **Tool finden**:
-   - Processing Toolbox → Scripts → Windkraft → Wind Turbine Earthwork Calculator v3.0
+4. **Tool finden**:
+   - Processing Toolbox → Scripts → Windkraft → Wind Turbine Earthwork Calculator v6.0
 
 #### Option 2: Direkt aus Python-Konsole
 
@@ -167,7 +208,7 @@ Der **Wind Turbine Earthwork Calculator** ist ein leistungsstarkes QGIS-Processi
 # In QGIS Python-Konsole
 import sys
 sys.path.append('/path/to/Wind-Turbine-Earthwork-Calculator/prototype')
-from prototype import WindTurbineEarthworkCalculatorV3
+from WindTurbine_Earthwork_Calculator import WindTurbineEarthworkCalculatorV3
 
 # Algorithmus registrieren
 from qgis.core import QgsApplication
@@ -191,7 +232,9 @@ QgsApplication.processingRegistry().addProvider(WindTurbineEarthworkCalculatorV3
 ### Schritt 1: Input-Daten vorbereiten
 
 **Benötigt**:
-- **DEM (Raster)**: Digitales Geländemodell im beliebigen Format (GeoTIFF, etc.)
+- **DEM (Raster)** - OPTIONAL seit v6.0:
+  - **NEU**: Automatischer Download via hoehendaten.de API (Deutschland, 1m Auflösung)
+  - **Klassisch**: Manuelles DEM (GeoTIFF, etc.) hochladen
   - Empfohlene Auflösung: 1-10m
   - Koordinatensystem: **Projektiert (z.B. UTM)** ⚠️ WICHTIG!
 
@@ -199,7 +242,7 @@ QgsApplication.processingRegistry().addProvider(WindTurbineEarthworkCalculatorV3
   - **Punkt-Layer** (Shapefile, GeoPackage, etc.) ODER
   - **Polygon-Layer** (angepasste Standflächen aus vorherigem Lauf)
   - Mindestens 1 Feature
-  - Gleiches oder kompatibles CRS wie DEM
+  - Für API-Modus: UTM32N (EPSG:25832) empfohlen
   - **Polygone müssen projiziert sein!**
 
 ### Schritt 2: Tool ausführen
@@ -209,6 +252,11 @@ QgsApplication.processingRegistry().addProvider(WindTurbineEarthworkCalculatorV3
 2. **Tool suchen**: "Wind Turbine" eingeben
 
 3. **Parameter einstellen**:
+
+   **DEM-Quelle** (v6.0 🆕):
+   - 🌐 DEM von hoehendaten.de API beziehen: ✓ (Deutschland, 1m Auflösung)
+   - 🔄 DEM-Cache aktualisieren: ☐ (nur bei Force-Refresh nötig)
+   - Eingabe-DEM: (optional, nur wenn API deaktiviert)
 
    **Geometrie**:
    - Plattformlänge: z.B. 45m
@@ -232,10 +280,10 @@ QgsApplication.processingRegistry().addProvider(WindTurbineEarthworkCalculatorV3
    - Schotter: 25 €/m³
    - Verdichtung: 5 €/m³
 
-   **Outputs**:
-   - ✓ Volumendaten: `ausgabe/volumendaten.gpkg`
-   - ✓ Standflächen: `ausgabe/standflaechen.gpkg` (optional)
-   - ✓ HTML-Report: `ausgabe/report.html`
+   **Outputs** (v6.0 🆕 - Automatisch generiert):
+   - 📦 GeoPackage: `WKA_{Rechtswert}_{Hochwert}.gpkg` (automatisch)
+   - 📄 HTML-Report: `WKA_{Rechtswert}_{Hochwert}.html` (automatisch)
+   - Speicherort: Aktuelles Arbeitsverzeichnis
 
 4. **Run** klicken
 
@@ -426,11 +474,15 @@ Siehe detaillierte Anleitung: [WORKFLOW_STANDFLAECHEN.md](prototype/WORKFLOW_STA
 ```
 Wind-Turbine-Earthwork-Calculator/
 ├── prototype/
-│   └── prototype.py              # Haupt-Processing-Script
-│   └── WORKFLOW_STANDFLAECHEN.md # Workflow-Dokumentation
-├── AGENTS.md                     # Entwickler-Informationen
-├── README.md                     # Diese Datei
-└── LICENSE                       # MIT-Lizenz
+│   └── WindTurbine_Earthwork_Calculator.py  # Haupt-Processing-Script (v6.0)
+│   └── WORKFLOW_STANDFLAECHEN.md            # Workflow-Dokumentation
+│   └── installationsanleitung.md            # Installationsanleitung
+│   └── INSTALLATION_QGIS.md                 # QGIS-spezifische Installation
+├── AGENTS.md                                # Entwickler-Informationen
+├── CHANGELOG.md                             # Versions-Historie
+├── README.md                                # Diese Datei
+├── requirements.txt                         # Python-Dependencies
+└── LICENSE                                  # MIT-Lizenz
 ```
 
 ### Beitragen

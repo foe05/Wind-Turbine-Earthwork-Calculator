@@ -1,8 +1,17 @@
 """
-Wind Turbine Earthwork Calculator - Version 5.5
+Wind Turbine Earthwork Calculator - Version 6.0
 ================================================
 
-NEUE FEATURES v5.5 (Polygon Refactoring):
+NEUE FEATURES v6.0 (hoehendaten.de API Integration & GeoPackage Output):
+- 🌐 Automatischer DEM-Download von hoehendaten.de API
+- 💾 DEM-Cache mit LRU-Strategie (persistent, max 100 Kacheln ~500MB)
+- 📍 Standort-basierte Kachel-Berechnung (250m Radius pro Standort)
+- 🔄 Manuelle Cache-Aktualisierung (Force-Refresh Parameter)
+- 📦 Ein GeoPackage für alle Outputs (DEM + Vektoren)
+- 🗂️ Automatischer Dateiname aus südwestlichstem Punkt
+- 📄 HTML-Report neben GeoPackage
+
+FEATURES v5.5 (Polygon Refactoring):
 - Beliebige Polygon-Formen für Kranstellflächen (L, Trapez, Kreis, Freiform)
 - Polygon-basierte Fundamente (Oktagon, Quadrat, etc.) als Alternative zu Kreis
 - Exakte Volumen-Berechnung entlang Polygon-Kontur (kein Bounding-Box-Fehler)
@@ -33,8 +42,8 @@ FEATURES v3.0:
 - Standflächen-Polygon-Export
 
 AUTOR: Windkraft-Standortplanung
-VERSION: 5.5 (Polygon-based Sampling)
-DATUM: Oktober 2025
+VERSION: 5.6 (hoehendaten.de API Integration)
+DATUM: November 2025
 """
 
 from qgis.PyQt.QtCore import QCoreApplication
@@ -65,9 +74,19 @@ import processing
 import math
 import numpy as np
 import os
+import json
+import base64
+import tempfile
 
 # HTML Report Generator (v5.5) - Inline für QGIS Processing
 from datetime import datetime
+
+# Optional: requests für API-Aufrufe
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
 
 try:
     import matplotlib
@@ -79,10 +98,1005 @@ except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
 
+# =============================================================================
+# GeoPackage Output Helper
+# =============================================================================
+
+def get_southwest_point_from_features(features):
+    """
+    Findet den südwestlichsten Punkt aus allen Features.
+
+    Args:
+        features: Liste von QgsFeature
+
+    Returns:
+        Tuple (min_x, min_y) oder None
+    """
+    min_x = float('inf')
+    min_y = float('inf')
+
+    for feature in features:
+        geom = feature.geometry()
+        if geom.isEmpty():
+            continue
+
+        # Für Punkt: direkt verwenden
+        if geom.type() == 0:  # Point
+            point = geom.asPoint()
+            min_x = min(min_x, point.x())
+            min_y = min(min_y, point.y())
+        else:  # Polygon: Alle Vertices prüfen
+            vertices = geom.asMultiPolygon() if geom.isMultipart() else [geom.asPolygon()]
+            for polygon in vertices:
+                for ring in polygon:
+                    for point in ring:
+                        min_x = min(min_x, point.x())
+                        min_y = min(min_y, point.y())
+
+    if min_x == float('inf') or min_y == float('inf'):
+        return None
+
+    return (min_x, min_y)
+
+
+def generate_geopackage_path(features, feedback=None):
+    """
+    Generiert GeoPackage-Pfad basierend auf südwestlichstem Punkt.
+
+    Format: WKA_{easting}_{northing}.gpkg im aktuellen Arbeitsverzeichnis
+
+    Args:
+        features: Liste von QgsFeature
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        String mit vollständigem Pfad zum GeoPackage
+    """
+    import os
+
+    sw_point = get_southwest_point_from_features(features)
+
+    if sw_point is None:
+        # Fallback: Zeitstempel
+        import time
+        timestamp = int(time.time())
+        filename = f'WKA_{timestamp}.gpkg'
+    else:
+        easting = int(sw_point[0])
+        northing = int(sw_point[1])
+        filename = f'WKA_{easting}_{northing}.gpkg'
+
+    # Aktuelles Arbeitsverzeichnis
+    cwd = os.getcwd()
+    gpkg_path = os.path.join(cwd, filename)
+
+    if feedback:
+        feedback.pushInfo(f'\n📦 GeoPackage: {gpkg_path}')
+
+    return gpkg_path
+
+
+def save_raster_to_geopackage(raster_layer, gpkg_path, layer_name='dem_mosaic', feedback=None):
+    """
+    Speichert ein Raster-Layer in ein GeoPackage.
+
+    Args:
+        raster_layer: QgsRasterLayer
+        gpkg_path: Pfad zum GeoPackage
+        layer_name: Name des Layers im GeoPackage
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        True bei Erfolg, False bei Fehler
+    """
+    if feedback:
+        feedback.pushInfo(f'\n💾 Speichere DEM in GeoPackage: {layer_name}')
+
+    try:
+        # Verwende gdal:translate zum Speichern ins GeoPackage
+        import processing
+
+        params = {
+            'INPUT': raster_layer,
+            'TARGET_CRS': None,  # Behalte Original-CRS
+            'NODATA': None,
+            'COPY_SUBDATASETS': False,
+            'OPTIONS': '',
+            'EXTRA': '',
+            'DATA_TYPE': 0,  # Use input layer data type
+            'OUTPUT': f'GPKG:{gpkg_path}:{layer_name}'
+        }
+
+        result = processing.run('gdal:translate', params, feedback=feedback)
+
+        if feedback:
+            feedback.pushInfo(f'   ✓ DEM gespeichert als Layer "{layer_name}"')
+
+        return True
+
+    except Exception as e:
+        if feedback:
+            feedback.reportError(f'   ✗ Fehler beim Speichern des DEM: {str(e)}')
+            import traceback
+            feedback.reportError(traceback.format_exc())
+        return False
+
+
+# =============================================================================
+# DEM Cache System mit LRU-Strategie
+# =============================================================================
+
+def get_cache_directory():
+    """Gibt den Cache-Ordner zurück und erstellt ihn falls nötig."""
+    import pathlib
+    from qgis.core import QgsApplication
+
+    # Cache in QGIS User-Verzeichnis
+    cache_base = pathlib.Path(QgsApplication.qgisSettingsDirPath())
+    cache_dir = cache_base / 'hoehendaten_cache' / 'tiles'
+
+    # Erstelle Verzeichnisse falls nicht vorhanden
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    return cache_dir
+
+
+def get_cache_metadata_path():
+    """Gibt Pfad zur LRU-Metadaten-Datei zurück."""
+    cache_dir = get_cache_directory().parent
+    return cache_dir / 'metadata.json'
+
+
+def load_cache_metadata():
+    """Lädt LRU-Metadaten aus JSON."""
+    metadata_path = get_cache_metadata_path()
+
+    if not metadata_path.exists():
+        return {
+            'tiles': {},
+            'config': {
+                'max_tiles': 100,
+                'max_size_mb': 500
+            }
+        }
+
+    try:
+        with open(metadata_path, 'r') as f:
+            return json.load(f)
+    except:
+        return {'tiles': {}, 'config': {'max_tiles': 100, 'max_size_mb': 500}}
+
+
+def save_cache_metadata(metadata):
+    """Speichert LRU-Metadaten in JSON."""
+    metadata_path = get_cache_metadata_path()
+
+    try:
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+    except Exception as e:
+        pass  # Fehler beim Speichern ignorieren
+
+
+def get_cache_tile_path(zone, easting, northing):
+    """Generiert Dateipfad für gecachte Kachel."""
+    cache_dir = get_cache_directory()
+    filename = f'{int(zone)}_{int(easting)}_{int(northing)}.tif'
+    return cache_dir / filename
+
+
+def update_cache_access(tile_id, metadata):
+    """Aktualisiert LRU-Metadaten bei Zugriff."""
+    import time
+
+    if tile_id not in metadata['tiles']:
+        metadata['tiles'][tile_id] = {
+            'last_used': time.time(),
+            'access_count': 1,
+            'size_bytes': 0
+        }
+    else:
+        metadata['tiles'][tile_id]['last_used'] = time.time()
+        metadata['tiles'][tile_id]['access_count'] += 1
+
+
+def cleanup_cache_lru(feedback=None):
+    """
+    Entfernt älteste/am wenigsten genutzte Kacheln wenn Limit überschritten.
+    LRU-Strategie: Sortiere nach (access_count, last_used)
+    """
+    metadata = load_cache_metadata()
+    tiles_info = metadata['tiles']
+    config = metadata['config']
+
+    max_tiles = config.get('max_tiles', 100)
+
+    # Wenn unter Limit: nichts tun
+    if len(tiles_info) <= max_tiles:
+        return
+
+    if feedback:
+        feedback.pushInfo(f'\n🗑️ Cache-Cleanup: {len(tiles_info)} Kacheln, Limit: {max_tiles}')
+
+    # Sortiere nach LRU: niedrigster access_count, dann älteste last_used
+    sorted_tiles = sorted(
+        tiles_info.items(),
+        key=lambda x: (x[1]['access_count'], x[1]['last_used'])
+    )
+
+    # Lösche überschüssige Kacheln
+    to_delete = len(sorted_tiles) - max_tiles
+
+    for tile_id, tile_info in sorted_tiles[:to_delete]:
+        # Extrahiere zone, easting, northing aus tile_id
+        parts = tile_id.split('_')
+        if len(parts) == 3:
+            zone, easting, northing = parts
+            tile_path = get_cache_tile_path(zone, easting, northing)
+
+            try:
+                if tile_path.exists():
+                    tile_path.unlink()
+                    if feedback:
+                        feedback.pushInfo(f'  ✗ Gelöscht: {tile_id} (Zugriffe: {tile_info["access_count"]})')
+            except:
+                pass
+
+            # Entferne aus Metadaten
+            del tiles_info[tile_id]
+
+    # Speichere aktualisierte Metadaten
+    save_cache_metadata(metadata)
+
+    if feedback:
+        feedback.pushInfo(f'  ✓ Cache bereinigt: {to_delete} Kacheln entfernt, {len(tiles_info)} verbleiben')
+
+
+def get_tile_from_cache(zone, easting, northing, feedback=None):
+    """
+    Holt Kachel aus Cache falls vorhanden.
+
+    Returns:
+        Pfad zur gecachten .tif-Datei oder None
+    """
+    tile_path = get_cache_tile_path(zone, easting, northing)
+    tile_id = f'{int(zone)}_{int(easting)}_{int(northing)}'
+
+    if not tile_path.exists():
+        return None
+
+    # Validiere dass Datei lesbar ist
+    try:
+        if tile_path.stat().st_size < 100:
+            return None
+    except:
+        return None
+
+    # Update LRU-Metadaten
+    metadata = load_cache_metadata()
+    update_cache_access(tile_id, metadata)
+    save_cache_metadata(metadata)
+
+    if feedback:
+        access_count = metadata['tiles'][tile_id]['access_count']
+        feedback.pushInfo(f'  💾 Cache-Hit: {tile_id} (Zugriff #{access_count})')
+
+    return tile_path
+
+
+def save_tile_to_cache(zone, easting, northing, geotiff_data, feedback=None):
+    """Speichert GeoTIFF-Kachel im Cache."""
+    import shutil
+
+    tile_path = get_cache_tile_path(zone, easting, northing)
+    tile_id = f'{int(zone)}_{int(easting)}_{int(northing)}'
+
+    try:
+        # Schreibe Datei
+        with open(tile_path, 'wb') as f:
+            f.write(geotiff_data)
+
+        # Update Metadaten
+        metadata = load_cache_metadata()
+        update_cache_access(tile_id, metadata)
+        metadata['tiles'][tile_id]['size_bytes'] = len(geotiff_data)
+        save_cache_metadata(metadata)
+
+        # Cleanup falls nötig
+        cleanup_cache_lru(feedback)
+
+        if feedback:
+            feedback.pushInfo(f'  💾 Cache gespeichert: {tile_id} ({len(geotiff_data)} Bytes)')
+
+        return True
+    except Exception as e:
+        if feedback:
+            feedback.pushWarning(f'  ⚠️ Cache-Speichern fehlgeschlagen: {str(e)}')
+        return False
+
+
+# =============================================================================
+# hoehendaten.de API Integration
+# =============================================================================
+
+def fetch_dem_tile_from_api(easting, northing, zone=32, feedback=None):
+    """
+    Holt eine einzelne 1x1km DEM-Kachel von der hoehendaten.de API.
+
+    Args:
+        easting: UTM Easting-Koordinate (Zentrum der Kachel)
+        northing: UTM Northing-Koordinate (Zentrum der Kachel)
+        zone: UTM Zone (Standard: 32 für Deutschland)
+        feedback: QgsProcessingFeedback für Logging
+
+    Returns:
+        dict mit 'data' (Base64-String), 'attribution', 'easting', 'northing'
+        oder None bei Fehler
+    """
+    if not REQUESTS_AVAILABLE:
+        if feedback:
+            feedback.reportError('requests-Bibliothek nicht verfügbar! '
+                               'Installation: pip install requests')
+        return None
+
+    # API-Endpoint
+    url = "https://api.hoehendaten.de:14444/v1/rawtif"
+
+    # Kachel auf 1km-Raster ausrichten (untere linke Ecke)
+    tile_easting = int(easting / 1000) * 1000 + 500
+    tile_northing = int(northing / 1000) * 1000 + 500
+
+    # Request-Payload - Koordinaten als Floats senden (wie im curl-Beispiel)
+    payload = {
+        "Type": "RawTIFRequest",
+        "ID": f"qgis_{zone}_{tile_easting}_{tile_northing}",
+        "Attributes": {
+            "Zone": int(zone),
+            "Easting": float(tile_easting),
+            "Northing": float(tile_northing)
+        }
+    }
+
+    # Headers wie im offiziellen curl-Beispiel
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip'
+    }
+
+    if feedback:
+        feedback.pushInfo(f'  → API-Anfrage: Zone {zone}, E={tile_easting}, N={tile_northing}')
+        feedback.pushInfo(f'     Payload: {json.dumps(payload)}')
+
+    try:
+        # Daten als JSON-String senden (wie curl --data)
+        response = requests.post(
+            url,
+            data=json.dumps(payload),
+            headers=headers,
+            timeout=30
+        )
+
+        # Debug: Response-Details ausgeben
+        if feedback and response.status_code != 200:
+            feedback.pushInfo(f'     Status: {response.status_code}')
+            feedback.pushInfo(f'     Response: {response.text[:500]}')
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Validierung der Response
+        if 'Attributes' not in data or 'RawTIFs' not in data['Attributes']:
+            if feedback:
+                feedback.reportError(f'Ungültige API-Response: {data}')
+            return None
+
+        raw_tifs = data['Attributes']['RawTIFs']
+        if not raw_tifs or len(raw_tifs) == 0:
+            if feedback:
+                feedback.reportError('Keine DEM-Daten verfügbar für diese Koordinaten')
+            return None
+
+        # Erste Kachel verwenden
+        tile_data = raw_tifs[0]
+
+        result = {
+            'data': tile_data.get('Data'),
+            'attribution': data['Attributes'].get('Attribution', 'hoehendaten.de'),
+            'easting': tile_easting,
+            'northing': tile_northing,
+            'zone': zone
+        }
+
+        if feedback:
+            feedback.pushInfo(f'    ✓ Kachel erfolgreich geladen (Attribution: {result["attribution"]})')
+
+        return result
+
+    except requests.exceptions.HTTPError as e:
+        if feedback:
+            feedback.reportError(f'API-HTTP-Fehler: {str(e)}')
+            if hasattr(e.response, 'text'):
+                feedback.reportError(f'Response-Body: {e.response.text[:500]}')
+        return None
+    except requests.exceptions.RequestException as e:
+        if feedback:
+            feedback.reportError(f'API-Request-Fehler: {str(e)}')
+        return None
+    except Exception as e:
+        if feedback:
+            feedback.reportError(f'Fehler beim Verarbeiten der API-Response: {str(e)}')
+            import traceback
+            feedback.reportError(traceback.format_exc())
+        return None
+
+
+def calculate_tiles_for_radius_points(features, crs, radius_m=250, feedback=None):
+    """
+    Berechnet Kacheln basierend auf Radius um JEDEN einzelnen Standort.
+
+    WICHTIG: Nicht Bounding Box um alle, sondern Radius um jeden einzelnen!
+
+    Args:
+        features: Liste von QgsFeature (WKA-Standorte)
+        crs: QgsCoordinateReferenceSystem der Features
+        radius_m: Radius um jeden Standort (Standard: 250m = 200m + 50m Puffer)
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        Liste von (zone, easting, northing) Tupeln für benötigte Kacheln
+    """
+    # UTM Zone aus CRS extrahieren
+    crs_authid = crs.authid()
+    if 'EPSG:' in crs_authid:
+        epsg_code = int(crs_authid.split(':')[1])
+        # UTM Zone aus EPSG Code ableiten (z.B. 32632 -> Zone 32)
+        if 32601 <= epsg_code <= 32660:  # UTM Nord
+            zone = epsg_code - 32600
+        elif 32701 <= epsg_code <= 32760:  # UTM Süd
+            zone = epsg_code - 32700
+        else:
+            zone = 32  # Default für Deutschland
+    else:
+        zone = 32
+
+    if feedback:
+        feedback.pushInfo(f'\n📍 Berechne DEM-Kacheln (Radius {radius_m}m um jeden Standort)...')
+        feedback.pushInfo(f'   UTM Zone: {zone}, Standorte: {len(features)}')
+
+    tile_size = 1000  # 1km Kacheln
+    tiles = set()
+
+    # Für JEDEN Standort einzeln
+    for i, feature in enumerate(features):
+        geom = feature.geometry()
+        if geom.isEmpty():
+            continue
+
+        # Zentrum des Features (Punkt oder Polygon)
+        if geom.type() == 0:  # Point
+            center = geom.asPoint()
+            center_x = center.x()
+            center_y = center.y()
+        else:  # Polygon
+            centroid = geom.centroid().asPoint()
+            center_x = centroid.x()
+            center_y = centroid.y()
+
+        # Bounding Box mit Radius um diesen Standort
+        min_x = center_x - radius_m
+        max_x = center_x + radius_m
+        min_y = center_y - radius_m
+        max_y = center_y + radius_m
+
+        # Kacheln für diesen Standort
+        tile_x_start = int(min_x / tile_size) * tile_size
+        tile_x_end = int(max_x / tile_size) * tile_size
+        tile_y_start = int(min_y / tile_size) * tile_size
+        tile_y_end = int(max_y / tile_size) * tile_size
+
+        standort_tiles = []
+        for x in range(tile_x_start, tile_x_end + tile_size, tile_size):
+            for y in range(tile_y_start, tile_y_end + tile_size, tile_size):
+                # Kachel-Zentrum
+                center_tile_x = x + tile_size / 2
+                center_tile_y = y + tile_size / 2
+                tile_tuple = (zone, center_tile_x, center_tile_y)
+                tiles.add(tile_tuple)
+                standort_tiles.append(tile_tuple)
+
+        if feedback:
+            feedback.pushInfo(f'   Standort {i+1}: {len(standort_tiles)} Kachel(n) @ ({center_x:.0f}, {center_y:.0f})')
+
+    if feedback:
+        feedback.pushInfo(f'   ✓ Gesamt: {len(tiles)} eindeutige Kachel(n) benötigt')
+
+    return list(tiles)
+
+
+def create_dem_mosaic_from_tile_paths(tile_paths, feedback=None):
+    """
+    Erstellt ein DEM-Mosaik aus GeoTIFF-Dateipfaden.
+
+    Args:
+        tile_paths: Liste von Pfaden zu .tif-Dateien
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        Pfad zur temporären Mosaik-Datei oder None bei Fehler
+    """
+    if not tile_paths:
+        return None
+
+    if feedback:
+        feedback.pushInfo(f'\n🔨 Erstelle Mosaik aus {len(tile_paths)} Kachel(n)...')
+
+    # Falls nur eine Kachel: Direkt verwenden
+    if len(tile_paths) == 1:
+        if feedback:
+            feedback.pushInfo('  → Einzelne Kachel, kein Mosaik nötig')
+        return tile_paths[0]
+
+    # Mehrere Kacheln: Mosaik erstellen mit gdal_merge
+    output_mosaic = tempfile.NamedTemporaryFile(
+        delete=False, suffix='_mosaic.tif', prefix='dem_'
+    )
+    output_mosaic.close()
+
+    if feedback:
+        feedback.pushInfo(f'  → Erstelle Mosaik: {output_mosaic.name}')
+
+    try:
+        # QGIS Processing gdal:merge verwenden
+        import processing
+        params = {
+            'INPUT': tile_paths,
+            'PCT': False,
+            'SEPARATE': False,
+            'DATA_TYPE': 5,  # Float32
+            'OUTPUT': output_mosaic.name
+        }
+
+        if feedback:
+            feedback.pushInfo('  → Starte GDAL Merge...')
+
+        result = processing.run('gdal:merge', params, feedback=feedback)
+
+        if feedback:
+            feedback.pushInfo(f'  → GDAL Merge abgeschlossen')
+
+        # Validiere Mosaik-Datei
+        if not os.path.exists(output_mosaic.name):
+            raise Exception(f'Mosaik-Datei wurde nicht erstellt: {output_mosaic.name}')
+
+        mosaic_size = os.path.getsize(output_mosaic.name)
+        if mosaic_size < 100:
+            raise Exception(f'Mosaik-Datei zu klein: {mosaic_size} Bytes')
+
+        # Test ob Mosaik gültig ist
+        test_mosaic = QgsRasterLayer(output_mosaic.name, 'test_mosaic')
+        if not test_mosaic.isValid():
+            raise Exception('Mosaik-Raster-Layer ist ungültig')
+
+        if feedback:
+            feedback.pushInfo(f'  ✓ Mosaik erfolgreich erstellt und validiert ({mosaic_size} Bytes)')
+
+        return output_mosaic.name
+
+    except Exception as e:
+        if feedback:
+            feedback.reportError(f'  ✗ GDAL Merge fehlgeschlagen: {str(e)}')
+            import traceback
+            feedback.reportError(traceback.format_exc())
+
+        # Cleanup bei Fehler
+        try:
+            os.unlink(output_mosaic.name)
+        except:
+            pass
+
+        return None
+
+
+def create_dem_mosaic_from_tiles(tiles_data, feedback=None):
+    """
+    Erstellt ein DEM-Mosaik aus mehreren Kacheln.
+
+    Args:
+        tiles_data: Liste von Dictionaries mit Kachel-Daten
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        Pfad zur temporären Mosaik-Datei oder None bei Fehler
+    """
+    if not tiles_data:
+        return None
+
+    if feedback:
+        feedback.pushInfo(f'\nErstelle DEM-Mosaik aus {len(tiles_data)} Kachel(n)...')
+
+    # Temporäre Dateien für einzelne Kacheln
+    temp_files = []
+
+    try:
+        # 1. Base64-Daten in temporäre GeoTIFF-Dateien schreiben
+        for i, tile in enumerate(tiles_data):
+            if not tile or 'data' not in tile:
+                if feedback:
+                    feedback.pushWarning(f'  ⚠ Kachel {i+1}: Keine Daten verfügbar')
+                continue
+
+            try:
+                # Base64 dekodieren mit Validierung
+                if not tile['data']:
+                    if feedback:
+                        feedback.pushWarning(f'  ⚠ Kachel {i+1}: Leerer Data-String')
+                    continue
+
+                if feedback:
+                    feedback.pushInfo(f'  → Kachel {i+1}/{len(tiles_data)}: Dekodiere Base64 ({len(tile["data"])} Zeichen)...')
+
+                geotiff_data = base64.b64decode(tile['data'])
+
+                if not geotiff_data or len(geotiff_data) < 100:
+                    if feedback:
+                        feedback.reportError(f'  ✗ Kachel {i+1}: Dekodierte Daten zu klein ({len(geotiff_data)} Bytes)')
+                    continue
+
+                # Temporäre Datei erstellen
+                temp_file = tempfile.NamedTemporaryFile(
+                    delete=False, suffix=f'_tile_{i}.tif', prefix='dem_'
+                )
+                temp_file.write(geotiff_data)
+                temp_file.close()
+
+                # Validiere GeoTIFF-Datei BEVOR sie zur Liste hinzugefügt wird
+                test_layer = QgsRasterLayer(temp_file.name, 'test')
+                if not test_layer.isValid():
+                    if feedback:
+                        feedback.reportError(f'  ✗ Kachel {i+1}: Ungültiges GeoTIFF - {temp_file.name}')
+                    try:
+                        os.unlink(temp_file.name)
+                    except:
+                        pass
+                    continue
+
+                temp_files.append(temp_file.name)
+
+                if feedback:
+                    feedback.pushInfo(f'  ✓ Kachel {i+1}/{len(tiles_data)}: Gültig - {len(geotiff_data)} Bytes → {temp_file.name}')
+
+            except base64.binascii.Error as e:
+                if feedback:
+                    feedback.reportError(f'  ✗ Kachel {i+1}: Base64-Dekodierungsfehler - {str(e)}')
+                continue
+            except Exception as e:
+                if feedback:
+                    feedback.reportError(f'  ✗ Kachel {i+1}: Fehler beim Verarbeiten - {str(e)}')
+                    import traceback
+                    feedback.reportError(traceback.format_exc())
+                continue
+
+        if not temp_files:
+            if feedback:
+                feedback.reportError('Keine gültigen Kacheln zum Verarbeiten')
+            return None
+
+        # 2. Falls nur eine Kachel: Direkt verwenden
+        if len(temp_files) == 1:
+            if feedback:
+                feedback.pushInfo('  → Einzelne Kachel, kein Mosaik nötig')
+            return temp_files[0]
+
+        # 3. Mehrere Kacheln: Mosaik erstellen mit gdal_merge
+        output_mosaic = tempfile.NamedTemporaryFile(
+            delete=False, suffix='_mosaic.tif', prefix='dem_'
+        )
+        output_mosaic.close()
+
+        if feedback:
+            feedback.pushInfo(f'  → Erstelle Mosaik aus {len(temp_files)} Kachel(n): {output_mosaic.name}')
+
+        try:
+            # QGIS Processing gdal:merge verwenden
+            import processing
+            params = {
+                'INPUT': temp_files,
+                'PCT': False,
+                'SEPARATE': False,
+                'DATA_TYPE': 5,  # Float32
+                'OUTPUT': output_mosaic.name
+            }
+
+            if feedback:
+                feedback.pushInfo('  → Starte GDAL Merge...')
+
+            result = processing.run('gdal:merge', params, feedback=feedback)
+
+            if feedback:
+                feedback.pushInfo(f'  → GDAL Merge abgeschlossen')
+
+            # Validiere Mosaik-Datei
+            if not os.path.exists(output_mosaic.name):
+                raise Exception(f'Mosaik-Datei wurde nicht erstellt: {output_mosaic.name}')
+
+            mosaic_size = os.path.getsize(output_mosaic.name)
+            if mosaic_size < 100:
+                raise Exception(f'Mosaik-Datei zu klein: {mosaic_size} Bytes')
+
+            # Test ob Mosaik gültig ist
+            test_mosaic = QgsRasterLayer(output_mosaic.name, 'test_mosaic')
+            if not test_mosaic.isValid():
+                raise Exception('Mosaik-Raster-Layer ist ungültig')
+
+            if feedback:
+                feedback.pushInfo(f'  ✓ Mosaik erfolgreich erstellt und validiert ({mosaic_size} Bytes)')
+
+        except Exception as e:
+            if feedback:
+                feedback.reportError(f'  ✗ GDAL Merge fehlgeschlagen: {str(e)}')
+                import traceback
+                feedback.reportError(traceback.format_exc())
+
+            # Cleanup bei Fehler
+            try:
+                os.unlink(output_mosaic.name)
+            except:
+                pass
+
+            # Temporäre Einzel-Kacheln löschen
+            for temp_file in temp_files:
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+
+            return None
+
+        # Temporäre Einzel-Kacheln löschen (bei Erfolg)
+        for temp_file in temp_files:
+            try:
+                os.unlink(temp_file)
+            except:
+                pass
+
+        return output_mosaic.name
+
+    except Exception as e:
+        if feedback:
+            feedback.reportError(f'Fehler beim Erstellen des Mosaiks: {str(e)}')
+
+        # Cleanup
+        for temp_file in temp_files:
+            try:
+                os.unlink(temp_file)
+            except:
+                pass
+
+        return None
+
+
+def fetch_or_get_cached_tile(zone, easting, northing, force_refresh=False, feedback=None):
+    """
+    Holt Kachel aus Cache oder von API.
+
+    Args:
+        zone: UTM Zone
+        easting: Easting-Koordinate
+        northing: Northing-Koordinate
+        force_refresh: Wenn True, Cache ignorieren und neu laden
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        Pfad zur .tif-Datei oder None
+    """
+    tile_id = f'{int(zone)}_{int(easting)}_{int(northing)}'
+
+    # Cache-Lookup (außer bei force_refresh)
+    if not force_refresh:
+        cached_path = get_tile_from_cache(zone, easting, northing, feedback)
+        if cached_path:
+            return str(cached_path)
+
+    # Nicht im Cache oder force_refresh: Von API laden
+    if feedback:
+        if force_refresh:
+            feedback.pushInfo(f'  🔄 Force-Refresh: {tile_id}')
+        else:
+            feedback.pushInfo(f'  ⬇️ Lade von API: {tile_id}')
+
+    tile_data = fetch_dem_tile_from_api(easting, northing, zone, feedback)
+
+    if not tile_data or 'data' not in tile_data:
+        return None
+
+    # Dekodiere Base64
+    try:
+        geotiff_data = base64.b64decode(tile_data['data'])
+
+        if len(geotiff_data) < 100:
+            if feedback:
+                feedback.reportError(f'  ✗ {tile_id}: GeoTIFF zu klein')
+            return None
+
+        # Speichere im Cache
+        save_tile_to_cache(zone, easting, northing, geotiff_data, feedback)
+
+        # Gib Cache-Pfad zurück
+        return str(get_cache_tile_path(zone, easting, northing))
+
+    except Exception as e:
+        if feedback:
+            feedback.reportError(f'  ✗ {tile_id}: Fehler beim Verarbeiten - {str(e)}')
+        return None
+
+
+def get_dem_from_hoehendaten_api(features, crs, force_refresh=False, feedback=None):
+    """
+    Hauptfunktion: Holt DEM von hoehendaten.de API basierend auf Features.
+    Nutzt Cache und standort-basierten Radius (250m um jeden Standort).
+
+    Args:
+        features: Liste von QgsFeature (WKA-Standorte)
+        crs: QgsCoordinateReferenceSystem
+        force_refresh: Wenn True, Cache ignorieren
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        QgsRasterLayer oder None bei Fehler
+    """
+    if not REQUESTS_AVAILABLE:
+        if feedback:
+            feedback.reportError('❌ requests-Bibliothek nicht verfügbar!')
+        return None
+
+    if feedback:
+        feedback.pushInfo('\n' + '='*70)
+        feedback.pushInfo('DEM-Download von hoehendaten.de API (mit Cache)')
+        feedback.pushInfo('='*70)
+        if force_refresh:
+            feedback.pushInfo('🔄 Cache-Refresh aktiviert - lade alle Kacheln neu')
+
+    # 1. Benötigte Kacheln berechnen (standort-basiert!)
+    tiles_needed = calculate_tiles_for_radius_points(features, crs, radius_m=250, feedback=feedback)
+
+    if not tiles_needed:
+        if feedback:
+            feedback.reportError('Keine Kacheln zu laden')
+        return None
+
+    # 2. Kacheln von Cache oder API laden
+    if feedback:
+        feedback.pushInfo(f'\n📦 Lade {len(tiles_needed)} Kachel(n)...')
+
+    tile_paths = []
+    cache_hits = 0
+    api_downloads = 0
+
+    for zone, easting, northing in tiles_needed:
+        # Prüfe zuerst ob im Cache (ohne force_refresh)
+        if not force_refresh:
+            cached = get_tile_from_cache(zone, easting, northing, feedback)
+            if cached:
+                tile_paths.append(str(cached))
+                cache_hits += 1
+                continue
+
+        # Nicht im Cache oder force_refresh
+        tile_path = fetch_or_get_cached_tile(zone, easting, northing, force_refresh, feedback)
+        if tile_path:
+            tile_paths.append(tile_path)
+            api_downloads += 1
+
+    if feedback:
+        feedback.pushInfo(f'\n📊 Cache-Statistik:')
+        feedback.pushInfo(f'   💾 Cache-Hits: {cache_hits}/{len(tiles_needed)}')
+        feedback.pushInfo(f'   ⬇️ API-Downloads: {api_downloads}/{len(tiles_needed)}')
+        feedback.pushInfo(f'   ✓ Erfolgreich geladen: {len(tile_paths)}/{len(tiles_needed)}')
+
+    if not tile_paths:
+        if feedback:
+            feedback.reportError('Keine Kacheln erfolgreich geladen')
+        return None
+
+    # 3. Mosaik erstellen aus Dateipfaden
+    try:
+        if feedback:
+            feedback.pushInfo(f'\n🔨 Erstelle Mosaik aus {len(tile_paths)} Kachel(n)...')
+
+        mosaic_path = create_dem_mosaic_from_tile_paths(tile_paths, feedback)
+
+        if not mosaic_path:
+            if feedback:
+                feedback.reportError('Mosaik-Erstellung fehlgeschlagen')
+            return None
+
+        if feedback:
+            feedback.pushInfo(f'\n→ Lade DEM-Raster-Layer von: {mosaic_path}')
+
+        # 4. Als QgsRasterLayer laden - KRITISCHER SCHRITT!
+        # Dieser Schritt kann QGIS crashen wenn die Datei ungültig ist
+        if not os.path.exists(mosaic_path):
+            if feedback:
+                feedback.reportError(f'✗ Mosaik-Datei existiert nicht: {mosaic_path}')
+            return None
+
+        file_size = os.path.getsize(mosaic_path)
+        if feedback:
+            feedback.pushInfo(f'  Dateigröße: {file_size} Bytes')
+
+        if file_size < 100:
+            if feedback:
+                feedback.reportError(f'✗ Mosaik-Datei zu klein: {file_size} Bytes')
+            return None
+
+        # Versuche Layer zu erstellen mit umfassender Fehlerbehandlung
+        try:
+            dem_layer = QgsRasterLayer(mosaic_path, 'DEM (hoehendaten.de)')
+        except Exception as e:
+            if feedback:
+                feedback.reportError(f'✗ Exception beim Erstellen des QgsRasterLayer: {str(e)}')
+                import traceback
+                feedback.reportError(traceback.format_exc())
+            return None
+
+        if not dem_layer:
+            if feedback:
+                feedback.reportError('✗ QgsRasterLayer ist None')
+            return None
+
+        if not dem_layer.isValid():
+            if feedback:
+                feedback.reportError('✗ DEM-Layer ist ungültig')
+                feedback.reportError(f'  Layer-Error: {dem_layer.error().summary()}')
+            return None
+
+        # Zusätzliche Validierungen
+        try:
+            extent = dem_layer.extent()
+            if extent.isEmpty():
+                if feedback:
+                    feedback.reportError('✗ DEM-Layer hat leere Ausdehnung')
+                return None
+
+            crs = dem_layer.crs()
+            if not crs.isValid():
+                if feedback:
+                    feedback.reportError('✗ DEM-Layer hat ungültiges CRS')
+                return None
+
+            if feedback:
+                feedback.pushInfo(f'\n✓ DEM erfolgreich geladen und validiert')
+                feedback.pushInfo(f'  Ausdehnung: {extent.toString()}')
+                feedback.pushInfo(f'  CRS: {crs.authid()}')
+                feedback.pushInfo(f'  Breite: {dem_layer.width()} Pixel')
+                feedback.pushInfo(f'  Höhe: {dem_layer.height()} Pixel')
+                feedback.pushInfo('='*70 + '\n')
+
+        except Exception as e:
+            if feedback:
+                feedback.reportError(f'✗ Fehler beim Validieren des DEM-Layers: {str(e)}')
+                import traceback
+                feedback.reportError(traceback.format_exc())
+            return None
+
+        return dem_layer
+
+    except Exception as e:
+        if feedback:
+            feedback.reportError(f'✗ Kritischer Fehler beim Laden des DEM: {str(e)}')
+            import traceback
+            feedback.reportError(traceback.format_exc())
+        return None
+
+
 class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
     """Berechnet Cut/Fill-Volumen für WKA inkl. Fundament und Kranstellfläche"""
     
     INPUT_DEM = 'INPUT_DEM'
+    USE_HOEHENDATEN_API = 'USE_HOEHENDATEN_API'
+    FORCE_DEM_REFRESH = 'FORCE_DEM_REFRESH'
     INPUT_POINTS = 'INPUT_POINTS'
     INPUT_POLYGONS = 'INPUT_POLYGONS'
     PLATFORM_LENGTH = 'PLATFORM_LENGTH'
@@ -127,7 +1141,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         return 'windturbineearthworkv3'
     
     def displayName(self):
-        return self.tr('Wind Turbine Earthwork Calculator v5.5')
+        return self.tr('Wind Turbine Earthwork Calculator v5.6')
     
     def group(self):
         return self.tr('Windkraft')
@@ -137,8 +1151,16 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
     
     def shortHelpString(self):
         return self.tr("""
-        <b>Windkraftanlagen Erdarbeitsrechner v5.5</b>
-        
+        <b>Windkraftanlagen Erdarbeitsrechner v5.6</b>
+
+        <p><b>🌐 NEU: hoehendaten.de API Integration</b></p>
+        <ul>
+            <li><b>Automatischer DEM-Download</b>: DEM-Daten automatisch von hoehendaten.de beziehen</li>
+            <li><b>Kein manueller Upload nötig</b>: Einfach WKA-Standorte angeben und API aktivieren</li>
+            <li><b>Deutschland-weite Abdeckung</b>: 1m-Auflösung aus Landesvermessung</li>
+            <li><b>Multi-Kachel-Support</b>: Automatisches Mosaik bei mehreren benötigten Kacheln</li>
+        </ul>
+
         <p><b>🆕 NEU in Version 5.5:</b></p>
         <ul>
             <li><b>Beliebige Polygon-Formen</b>: L, Trapez, Kreis, Freiform für Kranstellflächen</li>
@@ -179,18 +1201,38 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         
         <p><i>💡 Tipps:</i></p>
         <ul>
+            <li><b>API-Modus</b>: Aktivieren Sie "DEM von API beziehen" für automatischen DEM-Download (benötigt UTM-Koordinaten)</li>
             <li>Aktivieren Sie "Standflächen (Polygone)" Output in Schritt 1!</li>
             <li>Auto-Rotation findet beste Ausrichtung (testet 0°-360° in konfigurierbaren Schritten)</li>
             <li>Im Polygon-Modus wird Rotation automatisch aus Geometrie extrahiert</li>
+        </ul>
+
+        <p><i>⚠️ Hinweise zur API:</i></p>
+        <ul>
+            <li>Benötigt Internetverbindung und requests-Bibliothek (pip install requests)</li>
+            <li>WKA-Standorte müssen in UTM-Koordinaten vorliegen (z.B. EPSG:32632)</li>
+            <li>Funktioniert nur für Koordinaten in Deutschland</li>
+            <li>Datenquelle: hoehendaten.de (Attribution wird im Log angezeigt)</li>
         </ul>
         """)
     
     def initAlgorithm(self, config=None):
         """Definition aller Parameter"""
-        
+
         self.addParameter(QgsProcessingParameterRasterLayer(
-            self.INPUT_DEM, self.tr('Digitales Geländemodell (DEM)')))
-        
+            self.INPUT_DEM, self.tr('Digitales Geländemodell (DEM)'),
+            optional=True))
+
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.USE_HOEHENDATEN_API,
+            self.tr('🌐 DEM von hoehendaten.de API beziehen'),
+            defaultValue=False))
+
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.FORCE_DEM_REFRESH,
+            self.tr('🔄 DEM-Cache aktualisieren (neu laden)'),
+            defaultValue=False))
+
         self.addParameter(QgsProcessingParameterFeatureSource(
             self.INPUT_POINTS, self.tr('WKA-Standorte (Punkte)'),
             [QgsProcessing.TypeVectorPoint]))
@@ -356,15 +1398,64 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         """Hauptverarbeitung"""
         
         feedback.pushInfo('=' * 70)
-        feedback.pushInfo('Wind Turbine Earthwork Calculator v5.5')
+        feedback.pushInfo('Wind Turbine Earthwork Calculator v5.6')
         feedback.pushInfo('=' * 70)
-        
-        dem_layer = self.parameterAsRasterLayer(parameters, self.INPUT_DEM, context)
+
+        # Parameter auslesen
+        use_hoehendaten_api = self.parameterAsBool(parameters, self.USE_HOEHENDATEN_API, context)
+        force_dem_refresh = self.parameterAsBool(parameters, self.FORCE_DEM_REFRESH, context)
         points_source = self.parameterAsSource(parameters, self.INPUT_POINTS, context)
         polygons_source = self.parameterAsSource(parameters, self.INPUT_POLYGONS, context)
-        
+
         # Modus bestimmen: Polygone überschreiben Punkte
         use_polygons = (polygons_source is not None and polygons_source.featureCount() > 0)
+
+        # DEM-Quelle bestimmen
+        if use_hoehendaten_api:
+            feedback.pushInfo('\n🌐 DEM-Modus: hoehendaten.de API (mit Cache)')
+            if force_dem_refresh:
+                feedback.pushInfo('   🔄 Cache-Refresh aktiviert')
+
+            # Features für API sammeln
+            if use_polygons:
+                feature_source_for_api = polygons_source
+                source_crs = polygons_source.sourceCrs()
+            else:
+                feature_source_for_api = points_source
+                source_crs = points_source.sourceCrs()
+
+            # CRS-Validierung vor API-Aufruf
+            if source_crs.isGeographic():
+                raise QgsProcessingException(
+                    f'WKA-Standorte müssen in projiziertem CRS sein (z.B. UTM)!\n'
+                    f'Aktuelles CRS: {source_crs.authid()} ({source_crs.description()})\n'
+                    f'API benötigt UTM-Koordinaten.')
+
+            # Features sammeln
+            features_list = list(feature_source_for_api.getFeatures())
+
+            if not features_list:
+                raise QgsProcessingException('Keine WKA-Standorte gefunden für API-Aufruf!')
+
+            # DEM von API holen (mit Cache und optional force_refresh)
+            dem_layer = get_dem_from_hoehendaten_api(features_list, source_crs, force_dem_refresh, feedback)
+
+            if dem_layer is None:
+                raise QgsProcessingException(
+                    'DEM konnte nicht von API geladen werden!\n'
+                    'Mögliche Ursachen:\n'
+                    '- Keine Internetverbindung\n'
+                    '- Koordinaten außerhalb von Deutschland\n'
+                    '- requests-Bibliothek nicht installiert\n'
+                    'Tipp: Deaktivieren Sie "DEM von API beziehen" und laden Sie ein DEM manuell.')
+        else:
+            feedback.pushInfo('\n📁 DEM-Modus: Manueller Upload')
+            dem_layer = self.parameterAsRasterLayer(parameters, self.INPUT_DEM, context)
+
+            if dem_layer is None:
+                raise QgsProcessingException(
+                    'DEM konnte nicht geladen werden!\n'
+                    'Bitte laden Sie ein DEM oder aktivieren Sie "DEM von API beziehen".')
         
         platform_length = self.parameterAsDouble(parameters, self.PLATFORM_LENGTH, context)
         platform_width = self.parameterAsDouble(parameters, self.PLATFORM_WIDTH, context)
@@ -401,10 +1492,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             compaction_factor = 0.95
         
         foundation_type_names = ['Flachgründung', 'Tiefgründung', 'Pfahlgründung']
-        
-        if dem_layer is None:
-            raise QgsProcessingException('DEM konnte nicht geladen werden!')
-        
+
         # DEM CRS-Validierung (CRITICAL für korrekte Berechnungen)
         dem_crs = dem_layer.crs()
         if dem_crs.isGeographic():
@@ -418,7 +1506,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         if use_polygons:
             feature_source = polygons_source
             input_mode = 'Polygon-Modus'
-            
+
             # CRS-Validierung für Polygone
             poly_crs = polygons_source.sourceCrs()
             if poly_crs.isGeographic():
@@ -426,7 +1514,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                     f'Polygone müssen in projiziertem CRS sein (z.B. UTM)!\n'
                     f'Aktuelles CRS: {poly_crs.authid()} ({poly_crs.description()})\n'
                     f'Bitte reprojizieren Sie die Polygone vor der Verwendung.')
-            
+
             # CRS-Match mit DEM prüfen
             dem_crs = dem_layer.crs()
             if poly_crs.authid() != dem_crs.authid():
@@ -440,28 +1528,44 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                 raise QgsProcessingException('Keine WKA-Standorte gefunden!')
             feature_source = points_source
             input_mode = 'Punkt-Modus'
-        
+
+        # =====================================================================
+        # GeoPackage-Pfad generieren (basierend auf südwestlichstem Punkt)
+        # =====================================================================
+        features_for_gpkg = list(feature_source.getFeatures())
+        gpkg_path = generate_geopackage_path(features_for_gpkg, feedback)
+
+        # HTML-Report-Pfad: Neben GeoPackage
+        html_path = gpkg_path.replace('.gpkg', '.html')
+        feedback.pushInfo(f'📄 HTML-Report: {html_path}')
+
         feedback.pushInfo(f'\nKonfiguration:')
         feedback.pushInfo(f'  Modus: {input_mode}')
         feedback.pushInfo(f'  Plattform: {platform_length}m x {platform_width}m (Standard)')
         feedback.pushInfo(f'  Fundament: Ø{foundation_diameter}m, {foundation_depth}m tief')
         feedback.pushInfo(f'  Wiederverwendung: {"Ja" if material_reuse else "Nein"}')
         feedback.pushInfo(f'  Standorte: {feature_source.featureCount()}')
-        
+
         fields = self._create_output_fields()
+
+        # =====================================================================
+        # Outputs in GeoPackage statt temporär
+        # =====================================================================
         (sink, dest_id) = self.parameterAsSink(
             parameters, self.OUTPUT_POINTS, context,
-            fields, QgsWkbTypes.Point, points_source.sourceCrs())
-        
+            fields, QgsWkbTypes.Point, points_source.sourceCrs(),
+            QgsProcessing.TEMPORARY_OUTPUT)
+
         # Standflächen-Polygone (optional)
         platform_fields = self._create_platform_fields()
         platform_sink = None
         platform_dest_id = None
-        
+
         if self.OUTPUT_PLATFORMS in parameters and parameters[self.OUTPUT_PLATFORMS] is not None:
             (platform_sink, platform_dest_id) = self.parameterAsSink(
                 parameters, self.OUTPUT_PLATFORMS, context,
-                platform_fields, QgsWkbTypes.Polygon, feature_source.sourceCrs())
+                platform_fields, QgsWkbTypes.Polygon, feature_source.sourceCrs(),
+                QgsProcessing.TEMPORARY_OUTPUT)
         
         total = feature_source.featureCount()
         results = []
@@ -578,8 +1682,8 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                 feedback.reportError(f'Fehler: {str(e)}')
                 continue
         
-        # Report-Datei früh initialisieren (wird später für Profilordner benötigt)
-        report_file = self.parameterAsFileOutput(parameters, self.OUTPUT_REPORT, context)
+        # Report-Datei: Verwende html_path (neben GeoPackage)
+        report_file = html_path
         
         # === PROFILSCHNITTE ERSTELLEN ===
         generate_profiles = self.parameterAsBool(parameters, self.GENERATE_PROFILES, context)
@@ -607,7 +1711,8 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                 if self.OUTPUT_PROFILES in parameters and parameters[self.OUTPUT_PROFILES] is not None:
                     (profile_sink, profile_dest_id) = self.parameterAsSink(
                         parameters, self.OUTPUT_PROFILES, context,
-                        profile_fields, QgsWkbTypes.LineString, feature_source.sourceCrs())
+                        profile_fields, QgsWkbTypes.LineString, feature_source.sourceCrs(),
+                        QgsProcessing.TEMPORARY_OUTPUT)
                 
                 # Für jeden Standort Profile generieren
                 feature_source2 = self.parameterAsSource(parameters, self.INPUT_POINTS if not use_polygons else self.INPUT_POLYGONS, context)
@@ -684,20 +1789,96 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             slope_angle, slope_width, swell_factor, compaction_factor
         )
         feedback.pushInfo('✅ HTML-Report erstellt!')
-        
-        feedback.pushInfo(f'\n✅ Fertig! Report: {report_file}')
-        
+
+        # =====================================================================
+        # ALLE OUTPUTS INS GEOPACKAGE KOPIEREN
+        # =====================================================================
+        feedback.pushInfo(f'\n📦 Kopiere alle Outputs ins GeoPackage...')
+
+        # 1. DEM ins GeoPackage speichern
+        if dem_layer and dem_layer.isValid():
+            save_raster_to_geopackage(dem_layer, gpkg_path, 'dem_mosaic', feedback)
+
+        # 2. Vector-Layer ins GeoPackage kopieren
+        from qgis.core import QgsVectorLayer, QgsVectorFileWriter
+
+        # Volumen-Daten (Points)
+        try:
+            temp_layer = QgsVectorLayer(dest_id, 'temp_points', 'ogr')
+            if temp_layer.isValid():
+                options = QgsVectorFileWriter.SaveVectorOptions()
+                options.driverName = 'GPKG'
+                options.layerName = 'volumen_daten'
+                options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+
+                error = QgsVectorFileWriter.writeAsVectorFormatV2(
+                    temp_layer, gpkg_path, QgsProject.instance().transformContext(), options
+                )
+
+                if error[0] == QgsVectorFileWriter.NoError:
+                    feedback.pushInfo(f'   ✓ Volumen-Daten gespeichert')
+                else:
+                    feedback.pushWarning(f'   ⚠️ Volumen-Daten: {error[1]}')
+        except Exception as e:
+            feedback.reportError(f'   ✗ Fehler bei Volumen-Daten: {str(e)}')
+
+        # Standflächen (Polygone)
+        if platform_dest_id is not None:
+            try:
+                temp_layer = QgsVectorLayer(platform_dest_id, 'temp_platforms', 'ogr')
+                if temp_layer.isValid():
+                    options = QgsVectorFileWriter.SaveVectorOptions()
+                    options.driverName = 'GPKG'
+                    options.layerName = 'standflaechen'
+                    options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+
+                    error = QgsVectorFileWriter.writeAsVectorFormatV2(
+                        temp_layer, gpkg_path, QgsProject.instance().transformContext(), options
+                    )
+
+                    if error[0] == QgsVectorFileWriter.NoError:
+                        feedback.pushInfo(f'   ✓ Standflächen gespeichert')
+                    else:
+                        feedback.pushWarning(f'   ⚠️ Standflächen: {error[1]}')
+            except Exception as e:
+                feedback.reportError(f'   ✗ Fehler bei Standflächen: {str(e)}')
+
+        # Schnittlinien (LineStrings)
+        if profile_dest_id is not None:
+            try:
+                temp_layer = QgsVectorLayer(profile_dest_id, 'temp_profiles', 'ogr')
+                if temp_layer.isValid():
+                    options = QgsVectorFileWriter.SaveVectorOptions()
+                    options.driverName = 'GPKG'
+                    options.layerName = 'schnittlinien'
+                    options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+
+                    error = QgsVectorFileWriter.writeAsVectorFormatV2(
+                        temp_layer, gpkg_path, QgsProject.instance().transformContext(), options
+                    )
+
+                    if error[0] == QgsVectorFileWriter.NoError:
+                        feedback.pushInfo(f'   ✓ Schnittlinien gespeichert')
+                    else:
+                        feedback.pushWarning(f'   ⚠️ Schnittlinien: {error[1]}')
+            except Exception as e:
+                feedback.reportError(f'   ✗ Fehler bei Schnittlinien: {str(e)}')
+
+        feedback.pushInfo(f'\n✅ Fertig!')
+        feedback.pushInfo(f'   📦 GeoPackage: {gpkg_path}')
+        feedback.pushInfo(f'   📄 HTML-Report: {report_file}')
+
         result_dict = {
-            self.OUTPUT_POINTS: dest_id,
+            self.OUTPUT_POINTS: gpkg_path,  # Gebe GeoPackage-Pfad zurück
             self.OUTPUT_REPORT: report_file
         }
-        
+
         if platform_dest_id is not None:
-            result_dict[self.OUTPUT_PLATFORMS] = platform_dest_id
-        
+            result_dict[self.OUTPUT_PLATFORMS] = gpkg_path
+
         if profile_dest_id is not None:
-            result_dict[self.OUTPUT_PROFILES] = profile_dest_id
-        
+            result_dict[self.OUTPUT_PROFILES] = gpkg_path
+
         return result_dict
     
     def _calculate_complete_earthwork(self, dem_layer, point, length, width,
