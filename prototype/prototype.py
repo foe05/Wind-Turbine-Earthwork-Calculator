@@ -98,6 +98,84 @@ except ImportError:
 
 
 # =============================================================================
+# GeoPackage Output Helper
+# =============================================================================
+
+def get_southwest_point_from_features(features):
+    """
+    Findet den südwestlichsten Punkt aus allen Features.
+
+    Args:
+        features: Liste von QgsFeature
+
+    Returns:
+        Tuple (min_x, min_y) oder None
+    """
+    min_x = float('inf')
+    min_y = float('inf')
+
+    for feature in features:
+        geom = feature.geometry()
+        if geom.isEmpty():
+            continue
+
+        # Für Punkt: direkt verwenden
+        if geom.type() == 0:  # Point
+            point = geom.asPoint()
+            min_x = min(min_x, point.x())
+            min_y = min(min_y, point.y())
+        else:  # Polygon: Alle Vertices prüfen
+            vertices = geom.asMultiPolygon() if geom.isMultipart() else [geom.asPolygon()]
+            for polygon in vertices:
+                for ring in polygon:
+                    for point in ring:
+                        min_x = min(min_x, point.x())
+                        min_y = min(min_y, point.y())
+
+    if min_x == float('inf') or min_y == float('inf'):
+        return None
+
+    return (min_x, min_y)
+
+
+def generate_geopackage_path(features, feedback=None):
+    """
+    Generiert GeoPackage-Pfad basierend auf südwestlichstem Punkt.
+
+    Format: WKA_{easting}_{northing}.gpkg im aktuellen Arbeitsverzeichnis
+
+    Args:
+        features: Liste von QgsFeature
+        feedback: QgsProcessingFeedback
+
+    Returns:
+        String mit vollständigem Pfad zum GeoPackage
+    """
+    import os
+
+    sw_point = get_southwest_point_from_features(features)
+
+    if sw_point is None:
+        # Fallback: Zeitstempel
+        import time
+        timestamp = int(time.time())
+        filename = f'WKA_{timestamp}.gpkg'
+    else:
+        easting = int(sw_point[0])
+        northing = int(sw_point[1])
+        filename = f'WKA_{easting}_{northing}.gpkg'
+
+    # Aktuelles Arbeitsverzeichnis
+    cwd = os.getcwd()
+    gpkg_path = os.path.join(cwd, filename)
+
+    if feedback:
+        feedback.pushInfo(f'\n📦 GeoPackage: {gpkg_path}')
+
+    return gpkg_path
+
+
+# =============================================================================
 # DEM Cache System mit LRU-Strategie
 # =============================================================================
 
