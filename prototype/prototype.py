@@ -128,22 +128,35 @@ def fetch_dem_tile_from_api(easting, northing, zone=32, feedback=None):
     tile_easting = int(easting / 1000) * 1000 + 500
     tile_northing = int(northing / 1000) * 1000 + 500
 
-    # Request-Payload
+    # Request-Payload - Koordinaten als Floats senden
     payload = {
         "Type": "RawTIFRequest",
         "ID": f"qgis_{zone}_{tile_easting}_{tile_northing}",
         "Attributes": {
-            "Zone": zone,
-            "Easting": tile_easting,
-            "Northing": tile_northing
+            "Zone": int(zone),
+            "Easting": float(tile_easting),
+            "Northing": float(tile_northing)
         }
+    }
+
+    # Headers explizit setzen
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
     }
 
     if feedback:
         feedback.pushInfo(f'  → API-Anfrage: Zone {zone}, E={tile_easting}, N={tile_northing}')
+        feedback.pushInfo(f'     Payload: {json.dumps(payload)}')
 
     try:
-        response = requests.post(url, json=payload, timeout=30)
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+
+        # Debug: Response-Details ausgeben
+        if feedback and response.status_code != 200:
+            feedback.pushInfo(f'     Status: {response.status_code}')
+            feedback.pushInfo(f'     Response: {response.text[:500]}')
+
         response.raise_for_status()
 
         data = response.json()
@@ -176,13 +189,21 @@ def fetch_dem_tile_from_api(easting, northing, zone=32, feedback=None):
 
         return result
 
+    except requests.exceptions.HTTPError as e:
+        if feedback:
+            feedback.reportError(f'API-HTTP-Fehler: {str(e)}')
+            if hasattr(e.response, 'text'):
+                feedback.reportError(f'Response-Body: {e.response.text[:500]}')
+        return None
     except requests.exceptions.RequestException as e:
         if feedback:
-            feedback.reportError(f'API-Fehler: {str(e)}')
+            feedback.reportError(f'API-Request-Fehler: {str(e)}')
         return None
     except Exception as e:
         if feedback:
             feedback.reportError(f'Fehler beim Verarbeiten der API-Response: {str(e)}')
+            import traceback
+            feedback.reportError(traceback.format_exc())
         return None
 
 
