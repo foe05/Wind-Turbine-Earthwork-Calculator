@@ -64,18 +64,10 @@ SMTP_FROM_EMAIL=deine-email@gmail.com
 
 ```bash
 # Im webapp/ Verzeichnis
-
-# Optional: BuildKit aktivieren (empfohlen, schneller & effizienter)
-export DOCKER_BUILDKIT=1
-export COMPOSE_DOCKER_CLI_BUILD=1
-
-# ODER: BuildKit global aktivieren
-echo '{"features": {"buildkit": true}}' | sudo tee /etc/docker/daemon.json
-sudo systemctl restart docker
-
-# Services starten
 docker-compose up -d
 ```
+
+> **Hinweis zur BuildKit Warnung**: Die Warnung "The legacy builder is deprecated" kannst du ignorieren. Der alte Builder funktioniert einwandfrei. BuildKit ist optional und bringt für unsere Zwecke keinen Vorteil.
 
 Das baut und startet automatisch:
 - ✅ PostgreSQL + PostGIS (Port 5432)
