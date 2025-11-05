@@ -148,6 +148,82 @@ class APIClient {
     return response.data;
   }
 
+  // Phase 2: Road Calculation methods
+  async calculateRoad(data: {
+    dem_id: string;
+    centerline: number[][];
+    road_width: number;
+    design_grade: number;
+    cut_slope?: number;
+    fill_slope?: number;
+    profile_type?: string;
+    station_interval?: number;
+    start_elevation?: number;
+    include_ditches?: boolean;
+    ditch_width?: number;
+    ditch_depth?: number;
+  }) {
+    const response = await this.client.post('/road/calculate', data);
+    return response.data;
+  }
+
+  async getRoadProfileTypes() {
+    const response = await this.client.get('/road/profile-types');
+    return response.data;
+  }
+
+  // Phase 2: Solar Park Calculation methods
+  async calculateSolar(data: {
+    dem_id: string;
+    boundary: number[][];
+    panel_length: number;
+    panel_width: number;
+    row_spacing: number;
+    panel_tilt: number;
+    foundation_type: string;
+    grading_strategy: string;
+    orientation?: number;
+    access_road_width?: number;
+    access_road_length?: number;
+  }) {
+    const response = await this.client.post('/solar/calculate', data);
+    return response.data;
+  }
+
+  async getSolarFoundationTypes() {
+    const response = await this.client.get('/solar/foundation-types');
+    return response.data;
+  }
+
+  async getSolarGradingStrategies() {
+    const response = await this.client.get('/solar/grading-strategies');
+    return response.data;
+  }
+
+  // Phase 2: Terrain Analysis methods
+  async analyzeTerrain(data: {
+    dem_id: string;
+    polygon: number[][];
+    analysis_type: string;
+    resolution?: number;
+    target_elevation?: number;
+    optimization_method?: string;
+    contour_interval?: number;
+  }) {
+    const response = await this.client.post('/terrain/analyze', data);
+    return response.data;
+  }
+
+  async getTerrainAnalysisTypes() {
+    const response = await this.client.get('/terrain/analysis-types');
+    return response.data;
+  }
+
+  async getTerrainOptimizationMethods() {
+    const response = await this.client.get('/terrain/optimization-methods');
+    return response.data;
+  }
+
   // Cost Service methods
   async calculateCosts(request: CostCalculationRequest): Promise<CostCalculationResponse> {
     const response = await this.client.post('/costs/calculate', request);
