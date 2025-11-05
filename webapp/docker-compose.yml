@@ -123,9 +123,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      dem_service:
+        condition: service_started
     volumes:
       - ./services/calculation_service:/app
-      - ../../shared:/shared  # Zugriff auf shared module
+      - ../shared:/shared  # Zugriff auf shared module
     command: uvicorn app.main:app --host 0.0.0.0 --port 8003 --reload
 
   # Cost Service (Port 8004)

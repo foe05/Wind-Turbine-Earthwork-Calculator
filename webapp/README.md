@@ -81,39 +81,54 @@ request = {
 
 ---
 
-### 3. Calculation Service (Port 8003) ⚠️ TODO
-**Status:** Noch zu implementieren
-**Abhängigkeiten:** `shared/core/*`
+### 3. Calculation Service (Port 8003) ✅ IMPLEMENTIERT
+**Status:** Komplett
+**Abhängigkeiten:** `shared/core/*`, DEM Service
 
-**Geplante Module:**
+**Module:**
 ```
 app/modules/
-├── foundation.py      # Fundament-Berechnungen
-├── platform.py        # Kranflächen Cut/Fill
-├── optimization.py    # Plattformhöhe-Optimierung
-├── profiles.py        # Schnittlinien-Generierung
+├── optimization.py    # 3 Optimierungsmethoden (mean, min_cut, balanced)
+├── platform.py        # Kranflächen Cut/Fill (polygon & rectangle)
+└── profiles.py        # Schnittlinien (TODO)
+
+app/core/
+└── dem_sampling.py    # DEM-Sampling mit rasterio
+
+Erweitert:
 ├── road.py           # Straßenbau-Modul (TODO)
 └── solar.py          # Solar-Park-Modul (TODO)
 ```
 
-**Endpoints (geplant):**
-- `POST /calc/foundation` - Fundament-Volumen
-- `POST /calc/platform` - Kranflächen Cut/Fill
-- `POST /calc/profiles` - Schnittlinien
-- `POST /calc/road` - Straßenbau
-- `POST /calc/solar` - Solar-Park
+**Endpoints:**
+- `POST /calc/foundation/circular` - Kreisförmiges Fundament ✅
+- `POST /calc/foundation/polygon` - Polygon-Fundament ✅
+- `POST /calc/platform/rectangle` - Rechteckige Plattform ✅
+- `POST /calc/platform/polygon` - Polygon-Plattform ✅
+- `POST /calc/wka/site` - Komplette WKA-Berechnung ✅
 
-**Refactoring-Hinweise:**
-```python
-# ALT (QGIS):
-from qgis.core import QgsRasterLayer
-layer = QgsRasterLayer(dem_path)
-value = layer.dataProvider().sample(QgsPointXY(x, y), 1)[0]
+**Features:**
+- ✅ DEM-Sampling mit rasterio (statt QGIS)
+- ✅ 3 Optimierungsmethoden für Plattformhöhe
+- ✅ Material-Balance-Integration
+- ✅ Automatischer DEM-Download vom DEM Service
 
-# NEU (rasterio):
-import rasterio
-with rasterio.open(dem_path) as src:
-    value = list(src.sample([(x, y)]))[0]
+**Beispiel:**
+```bash
+# Komplette WKA-Berechnung
+curl -X POST http://localhost:8003/calc/wka/site \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dem_id": "uuid-from-dem-service",
+    "center_x": 497500,
+    "center_y": 5670500,
+    "foundation_diameter": 22.0,
+    "foundation_depth": 4.0,
+    "platform_length": 45.0,
+    "platform_width": 40.0,
+    "optimization_method": "balanced",
+    "material_reuse": true
+  }'
 ```
 
 ---
@@ -252,12 +267,18 @@ uvicorn app.main:app --reload --port 8002
 docker-compose up --build
 ```
 
+6. **Integration testen:**
+```bash
+./test-integration.sh
+```
+
 ### Zugriff
 
-- **API Gateway:** http://localhost:8000/docs
+- **API Gateway:** http://localhost:8000/docs (TODO)
 - **Auth Service:** http://localhost:8001/docs
 - **DEM Service:** http://localhost:8002/docs
-- **Frontend:** http://localhost:3000
+- **Calculation Service:** http://localhost:8003/docs
+- **Frontend:** http://localhost:3000 (TODO)
 
 ---
 
@@ -323,10 +344,12 @@ railway up
 ### Phase 1: Core-Services vervollständigen
 1. ✅ Auth Service - **FERTIG**
 2. ✅ DEM Service - **FERTIG**
-3. ⚠️ Calculation Service - **TODO**
-   - Foundation-Modul implementieren (nutze `shared/core/foundation.py`)
-   - Platform Cut/Fill-Modul
-   - Optimization-Modul
+3. ✅ Calculation Service - **FERTIG**
+   - ✅ Foundation-Modul (circular & polygon)
+   - ✅ Platform Cut/Fill-Modul (rectangle & polygon mit Rotation)
+   - ✅ Optimization-Modul (3 Methoden)
+   - ✅ DEM-Sampling mit rasterio
+   - ✅ Integration mit DEM Service
 4. ⚠️ Cost Service - **TODO**
    - API-Endpoints (nutze `shared/core/costs.py` und `material_balance.py`)
 5. ⚠️ Report Service - **TODO**
