@@ -44,6 +44,8 @@ services:
     environment:
       DATABASE_URL: postgresql://admin:secret@postgres:5432/geo_engineering
       REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-secret-key-change-in-production
+      JWT_ALGORITHM: HS256
       AUTH_SERVICE_URL: http://auth_service:8001
       DEM_SERVICE_URL: http://dem_service:8002
       CALCULATION_SERVICE_URL: http://calculation_service:8003
