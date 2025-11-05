@@ -1,5 +1,7 @@
 # Geo-Engineering Platform
 
+**Status**: Production Ready (Phase 1-3 Complete)
+
 Microservices-based web application for Wind Turbine (WKA) Earthwork Calculations. This platform complements the existing QGIS Plugin and provides a modern web-based interface for calculating earthwork volumes, costs, and generating reports.
 
 ## 🎯 Overview
@@ -8,15 +10,16 @@ The platform consists of 6 microservices orchestrated with Docker Compose:
 
 1. **Auth Service** (Port 8001) - Magic Link authentication ✅
 2. **DEM Service** (Port 8002) - Digital Elevation Model data management ✅
-3. **Calculation Service** (Port 8003) - Earthwork calculations ✅
+3. **Calculation Service** (Port 8003) - Multi-use-case earthwork calculations ✅
 4. **Cost Service** (Port 8004) - Cost analysis ✅
 5. **Report Service** (Port 8005) - HTML/PDF report generation ✅
-6. **API Gateway** (Port 8000) - Central routing and authentication ✅
+6. **API Gateway** (Port 8000) - Central routing, authentication, projects, batch upload, export ✅
 
 Plus:
-- **Frontend** (Port 3000) - React + Leaflet web interface ✅
+- **Frontend** (Port 3000) - React + TypeScript web interface with lazy loading ✅
+- **Celery Workers** - Background job processing ✅
 - **PostgreSQL + PostGIS** - Spatial database
-- **Redis** - Caching layer
+- **Redis** - Caching layer & message broker
 
 ## 🏗️ Architecture
 
@@ -538,3 +541,55 @@ For issues, questions, or feature requests, please create an issue on GitHub.
 - **Leaflet** - Mapping library
 - **FastAPI** - Python web framework
 - **proj4** - Coordinate transformation library
+
+## ✨ Phase 3 Features (NEW)
+
+### Projects Dashboard
+- Full CRUD operations for projects
+- Filter by use case (WKA, Road, Solar, Terrain)
+- Job statistics per project
+- GeoPackage export functionality
+
+### Batch Upload
+- CSV and GeoJSON import (max 123 sites)
+- Automatic UTM zone detection
+- WGS84 to UTM coordinate conversion
+- Validation and bulk job creation
+
+### Jobs History
+- View all calculations with filtering
+- Real-time progress tracking via WebSocket
+- Error message display
+- Job deletion
+
+### GeoPackage Export
+- Professional GIS data export
+- Compatible with QGIS/ArcGIS
+- Includes all attributes and results
+- Automatic CRS handling
+
+### Error Handling
+- User-friendly 404 page
+- React Error Boundary for runtime errors
+- Graceful error recovery
+
+### Performance
+- Route-based lazy loading
+- Code splitting for optimal bundle size
+- Faster initial load time
+
+## 📚 Documentation
+
+- [Main README](../README.md) - Project overview
+- [Frontend README](frontend/README.md) - Frontend documentation
+- [Phase 3 Complete](../docs/PHASE3_COMPLETE.md) - Phase 3 features
+- [Project Structure](../PROJECT_STRUCTURE.md) - Full architecture
+
+## 🚀 API Documentation
+
+Visit `/docs` endpoint on any service for Swagger UI:
+- API Gateway: http://localhost:8000/docs
+- Auth Service: http://localhost:8001/docs
+- DEM Service: http://localhost:8002/docs
+- etc.
+
