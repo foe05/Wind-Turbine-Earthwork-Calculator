@@ -10,7 +10,7 @@ from slowapi.errors import RateLimitExceeded
 import logging
 
 from app.core.config import get_settings
-from app.api import proxy, websocket, jobs
+from app.api import proxy, websocket, jobs, projects, batch
 
 # Configure logging
 logging.basicConfig(
@@ -49,6 +49,8 @@ app.add_middleware(
 app.include_router(proxy.router)
 app.include_router(websocket.router)
 app.include_router(jobs.router)
+app.include_router(projects.router)
+app.include_router(batch.router)
 
 
 @app.get("/")
@@ -72,7 +74,9 @@ async def root():
             "Rate limiting",
             "CORS support",
             "Background job processing (Celery)",
-            "WebSocket real-time progress updates"
+            "WebSocket real-time progress updates",
+            "Project management (CRUD)",
+            "Batch upload (CSV/GeoJSON)"
         ]
     }
 

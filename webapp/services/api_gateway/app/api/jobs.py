@@ -2,9 +2,11 @@
 Background Jobs API
 Endpoints for submitting and managing background calculation jobs
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, Literal
+from typing import Optional, Dict, Any, Literal, List
+from datetime import datetime
+from uuid import UUID
 import uuid
 import logging
 
@@ -15,6 +17,8 @@ from app.tasks import (
     analyze_terrain,
     generate_report
 )
+from app.core.database import get_db_connection
+from app.core.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/jobs", tags=["Background Jobs"])
@@ -258,4 +262,208 @@ async def submit_report_job(request: ReportJobRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to submit job: {str(e)}"
+        )
+
+# =============================================================================
+# Jobs History API
+# =============================================================================
+
+class JobHistoryResponse(BaseModel):
+    """Job history response"""
+    id: UUID
+    project_id: UUID
+    project_name: Optional[str] = None
+    status: str
+    progress: int
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    site_count: Optional[int] = None
+    created_at: datetime
+
+
+@router.get("/history", response_model=List[JobHistoryResponse])
+async def get_jobs_history(
+    project_id: Optional[UUID] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get jobs history for current user
+
+    Returns paginated list of jobs with optional filtering by project and status.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Build query
+        where_clauses = ["p.user_id = %s"]
+        params = [current_user["id"]]
+
+        if project_id:
+            where_clauses.append("j.project_id = %s")
+            params.append(str(project_id))
+
+        if status:
+            where_clauses.append("j.status = %s")
+            params.append(status)
+
+        where_clause = " AND ".join(where_clauses)
+
+        query = f"""
+            SELECT
+                j.id, j.project_id, p.name as project_name,
+                j.status, j.progress,
+                j.started_at, j.completed_at, j.error_message,
+                j.site_count, j.created_at
+            FROM jobs j
+            JOIN projects p ON j.project_id = p.id
+            WHERE {where_clause}
+            ORDER BY j.created_at DESC
+            LIMIT %s OFFSET %s
+        """
+        params.extend([limit, offset])
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+
+        jobs = []
+        for row in rows:
+            jobs.append(JobHistoryResponse(
+                id=row[0],
+                project_id=row[1],
+                project_name=row[2],
+                status=row[3],
+                progress=row[4] or 0,
+                started_at=row[5],
+                completed_at=row[6],
+                error_message=row[7],
+                site_count=row[8],
+                created_at=row[9]
+            ))
+
+        cur.close()
+        conn.close()
+
+        logger.info(f"Retrieved {len(jobs)} jobs for user {current_user['id']}")
+        return jobs
+
+    except Exception as e:
+        logger.error(f"Error getting jobs history: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get jobs history: {str(e)}"
+        )
+
+
+@router.get("/{job_id}/details", response_model=dict)
+async def get_job_details(
+    job_id: UUID,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get detailed job information
+
+    Returns complete job details including input data and results.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT
+                j.id, j.project_id, p.name as project_name,
+                j.status, j.progress,
+                j.started_at, j.completed_at, j.error_message,
+                j.input_data, j.result_data, j.report_url,
+                j.site_count, j.created_at, j.updated_at
+            FROM jobs j
+            JOIN projects p ON j.project_id = p.id
+            WHERE j.id = %s AND p.user_id = %s
+        """, (str(job_id), current_user["id"]))
+
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job {job_id} not found"
+            )
+
+        return {
+            "id": str(row[0]),
+            "project_id": str(row[1]),
+            "project_name": row[2],
+            "status": row[3],
+            "progress": row[4] or 0,
+            "started_at": row[5].isoformat() if row[5] else None,
+            "completed_at": row[6].isoformat() if row[6] else None,
+            "error_message": row[7],
+            "input_data": row[8],
+            "result_data": row[9],
+            "report_url": row[10],
+            "site_count": row[11],
+            "created_at": row[12].isoformat() if row[12] else None,
+            "updated_at": row[13].isoformat() if row[13] else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting job details: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get job details: {str(e)}"
+        )
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_job(
+    job_id: UUID,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Delete job
+
+    Removes job record from database. Does not cancel running jobs.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Check ownership
+        cur.execute("""
+            SELECT j.id FROM jobs j
+            JOIN projects p ON j.project_id = p.id
+            WHERE j.id = %s AND p.user_id = %s
+        """, (str(job_id), current_user["id"]))
+
+        if not cur.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job {job_id} not found"
+            )
+
+        # Delete job
+        cur.execute("DELETE FROM jobs WHERE id = %s", (str(job_id),))
+        conn.commit()
+
+        cur.close()
+        conn.close()
+
+        logger.info(f"Deleted job {job_id}")
+        return None
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting job: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete job: {str(e)}"
         )
