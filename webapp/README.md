@@ -1,121 +1,397 @@
-# Geo-Engineering Platform - Web Application
+# Geo-Engineering Platform
 
-Microservices-basierte Web-Plattform für Geo-Engineering-Berechnungen.
+Microservices-based web application for Wind Turbine (WKA) Earthwork Calculations. This platform complements the existing QGIS Plugin and provides a modern web-based interface for calculating earthwork volumes, costs, and generating reports.
 
-## 🏗️ Architektur
+## 🎯 Overview
+
+The platform consists of 6 microservices orchestrated with Docker Compose:
+
+1. **Auth Service** (Port 8001) - Magic Link authentication ✅
+2. **DEM Service** (Port 8002) - Digital Elevation Model data management ✅
+3. **Calculation Service** (Port 8003) - Earthwork calculations ✅
+4. **Cost Service** (Port 8004) - Cost analysis ✅
+5. **Report Service** (Port 8005) - HTML/PDF report generation ✅
+6. **API Gateway** (Port 8000) - Central routing and authentication ✅
+
+Plus:
+- **Frontend** (Port 3000) - React + Leaflet web interface ✅
+- **PostgreSQL + PostGIS** - Spatial database
+- **Redis** - Caching layer
+
+## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│ FRONTEND (React + Leaflet)                  │
-│ Port: 3000                                  │
-└──────────────┬──────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────┐
-│ API GATEWAY (FastAPI)                       │
-│ Port: 8000                                  │
-│ - Routing, Auth Middleware, Job Queue      │
-└──┬───┬───┬───┬───┬──────────────────────────┘
-   │   │   │   │   │
-   ▼   ▼   ▼   ▼   ▼
-  Auth DEM Calc Cost Report
-  8001 8002 8003 8004 8005
+┌─────────────────────────────────────────────────────────────┐
+│                     Frontend (React)                        │
+│          Leaflet Maps + proj4 UTM Conversion                │
+│                      Port 3000                              │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    API Gateway (Port 8000)                  │
+│           Routing, Auth Middleware, Rate Limiting           │
+└───┬────────┬──────────┬──────────┬──────────┬──────────────┘
+    │        │          │          │          │
+    ▼        ▼          ▼          ▼          ▼
+┌──────┐ ┌──────┐ ┌─────────┐ ┌──────┐ ┌────────┐
+│ Auth │ │ DEM  │ │  Calc   │ │ Cost │ │ Report │
+│ 8001 │ │ 8002 │ │  8003   │ │ 8004 │ │  8005  │
+└──────┘ └──┬───┘ └─────────┘ └──────┘ └────────┘
+           │
+           ▼
+    ┌──────────────┐
+    │ hoehendaten  │
+    │     API      │
+    └──────────────┘
 ```
 
-## 📦 Services
+## ✨ Key Features
 
-### 1. Auth Service (Port 8001) ✅ IMPLEMENTIERT
-**Status:** Komplett
-**Features:**
-- Magic Link Authentifizierung (passwordless)
-- JWT Token Management
-- Email-Versand mit Templates
-- Session-Tracking
+### Phase 1 (✅ COMPLETED)
+- ✅ Magic Link authentication (passwordless)
+- ✅ Interactive Leaflet map with WKA site placement
+- ✅ Automatic Lat/Lng to UTM coordinate conversion (proj4)
+- ✅ DEM data fetching from hoehendaten.de API
+- ✅ Foundation calculations (circular, polygon)
+- ✅ Platform calculations with 3 optimization methods
+- ✅ Material balance with swell/compaction factors
+- ✅ Cost calculations with preset rate options
+- ✅ PDF report generation with Jinja2 templates
+- ✅ Redis caching (6-month TTL for DEM tiles)
+- ✅ Docker Compose orchestration
 
-**Endpoints:**
-- `POST /auth/request-login` - Magic Link anfordern
-- `GET /auth/verify/{token}` - Token verifizieren → JWT
-- `GET /auth/me` - Current user
-- `POST /auth/logout` - Logout
+### Phase 2 (🔜 Planned)
+- 🔜 Road earthwork calculations
+- 🔜 Solar park earthwork calculations
+- 🔜 General terrain modeling
+- 🔜 Multi-user project collaboration
+- 🔜 Real-time progress tracking (WebSocket)
+- 🔜 Historical project archives
 
-**Tech Stack:**
-- FastAPI, SQLAlchemy, PostgreSQL
-- python-jose (JWT)
-- itsdangerous (Magic Links)
-- aiosmtplib (Email)
+## ⚠️ Critical Requirements
+
+### Coordinate System
+**MANDATORY**: All calculations use **UTM coordinates (EPSG:25832-25836)** for Germany
+- Frontend automatically converts Lat/Lng to UTM using proj4
+- hoehendaten.de API requires UTM coordinates
+- Germany is primarily in UTM zones 32 and 33
+
+### DEM Buffer
+**MANDATORY**: **250m buffer** around WKA sites (NOT 100m)
+- Ensures sufficient terrain data for slope calculations
+- Buffer is applied in DEM fetch requests
+
+### hoehendaten.de API
+- German elevation data API
+- Returns Base64-encoded GeoTIFF tiles
+- 1km × 1km tile size
+- Cached in Redis for 6 months
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Docker and Docker Compose
+- Git
+- (Optional) Node.js 18+ for local frontend development
+- (Optional) Python 3.11+ for local service development
+
+### 1. Clone Repository
+```bash
+git clone https://github.com/foe05/Wind-Turbine-Earthwork-Calculator.git
+cd Wind-Turbine-Earthwork-Calculator/webapp
+```
+
+### 2. Configure Environment
+```bash
+# Copy example env files
+cp .env.example .env
+
+# Edit .env with your settings
+# IMPORTANT: Set SMTP credentials for Magic Link authentication
+nano .env
+```
+
+Required environment variables:
+```env
+# SMTP for Magic Link
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+SMTP_FROM_EMAIL=noreply@geo-engineering.example.com
+
+# JWT Secret
+JWT_SECRET=change-this-to-a-secure-random-string
+
+# Database
+POSTGRES_PASSWORD=change-this-in-production
+```
+
+### 3. Start All Services
+```bash
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Check service health
+docker-compose ps
+```
+
+### 4. Access Application
+- **Frontend**: http://localhost:3000
+- **API Gateway**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
+
+### 5. First Login
+1. Navigate to http://localhost:3000
+2. Enter your email address
+3. Check your email for the Magic Link
+4. Click the link to log in
+
+## 📦 Service Details
+
+### 1. Auth Service (Port 8001) ✅
+**Purpose**: User authentication with Magic Links (passwordless)
+
+**Key Endpoints**:
+- `POST /auth/request-login` - Request magic link
+- `GET /auth/verify/{token}` - Verify token and get JWT
+- `GET /auth/me` - Get current user info
+- `POST /auth/logout` - Invalidate session
+
+**Tech Stack**: FastAPI, PostgreSQL, SQLAlchemy, python-jose (JWT)
 
 ---
 
-### 2. DEM Service (Port 8002) ✅ IMPLEMENTIERT
-**Status:** Komplett mit hoehendaten.de API Integration
-**Features:**
-- **hoehendaten.de API Integration** (1:1 aus QGIS Plugin übernommen)
-- UTM-Koordinaten-Validierung (EPSG:25832-25836)
-- 250m Buffer um jeden WKA-Standort
-- 1km Kachel-Management
-- Redis-Cache (6 Monate TTL)
-- Automatisches Mosaik-Building
+### 2. DEM Service (Port 8002) ✅
+**Purpose**: Digital Elevation Model data management and caching
 
-**Endpoints:**
-- `POST /dem/fetch` - DEM von API holen
-- `GET /dem/{dem_id}` - GeoTIFF download
-- `GET /dem/{dem_id}/info` - Metadaten
-- `GET /dem/cache/stats` - Cache-Statistiken
+**Key Endpoints**:
+- `POST /dem/fetch` - Fetch DEM tiles for coordinates
+- `GET /dem/{dem_id}` - Get cached DEM data
+- `GET /dem/cache/stats` - Cache statistics
 
-**WICHTIG - UTM-Koordinaten:**
-```python
-# Koordinaten MÜSSEN in UTM sein!
-request = {
-    "coordinates": [
-        (497500, 5670500),  # UTM Easting, Northing
-        (498000, 5671000)
-    ],
-    "crs": "EPSG:25832",  # UTM Zone 32
-    "buffer_meters": 250.0  # Mind. 250m!
-}
-```
+**Tech Stack**: FastAPI, Redis, requests, rasterio
 
-**Implementation Details:**
-- `app/core/hoehendaten_api.py` - API-Integration (aus QGIS übernommen)
-- `app/core/cache.py` - Redis-Cache-Manager
-- `app/api/dem.py` - REST-Endpoints
+**Critical**:
+- Requires UTM coordinates (EPSG:25832-25836)
+- 250m buffer requirement
+- Caches tiles for 6 months in Redis
+- Integrates with hoehendaten.de API
+
+**Implementation Details**:
+- `app/core/hoehendaten_api.py` - API integration (copied 1:1 from QGIS Plugin)
+- `app/core/cache.py` - Redis cache manager
+- `app/api/dem.py` - REST endpoints
 
 ---
 
-### 3. Calculation Service (Port 8003) ✅ IMPLEMENTIERT
-**Status:** Komplett
-**Abhängigkeiten:** `shared/core/*`, DEM Service
+### 3. Calculation Service (Port 8003) ✅
+**Purpose**: Earthwork volume calculations
 
-**Module:**
+**Key Endpoints**:
+- `POST /calc/foundation/circular` - Circular foundation
+- `POST /calc/foundation/polygon` - Polygon foundation
+- `POST /calc/platform/rectangle` - Rectangular platform
+- `POST /calc/platform/polygon` - Polygon platform
+- `POST /calc/wka/site` - Complete WKA site calculation
+
+**Tech Stack**: FastAPI, NumPy, rasterio, shapely
+
+**Optimization Methods**:
+1. **mean**: Average elevation of sample points
+2. **min_cut**: 40th percentile (minimize cut)
+3. **balanced**: Binary search for cut/fill balance
+
+**Module Structure**:
 ```
 app/modules/
-├── optimization.py    # 3 Optimierungsmethoden (mean, min_cut, balanced)
-├── platform.py        # Kranflächen Cut/Fill (polygon & rectangle)
-└── profiles.py        # Schnittlinien (TODO)
+├── optimization.py    # 3 optimization methods
+├── platform.py        # Platform cut/fill (polygon & rectangle)
+└── profiles.py        # Cross-section profiles (TODO Phase 2)
 
 app/core/
-└── dem_sampling.py    # DEM-Sampling mit rasterio
+└── dem_sampling.py    # DEM sampling with rasterio
 
-Erweitert:
-├── road.py           # Straßenbau-Modul (TODO)
-└── solar.py          # Solar-Park-Modul (TODO)
+Future (Phase 2):
+├── road.py           # Road construction module
+└── solar.py          # Solar park module
 ```
 
-**Endpoints:**
-- `POST /calc/foundation/circular` - Kreisförmiges Fundament ✅
-- `POST /calc/foundation/polygon` - Polygon-Fundament ✅
-- `POST /calc/platform/rectangle` - Rechteckige Plattform ✅
-- `POST /calc/platform/polygon` - Polygon-Plattform ✅
-- `POST /calc/wka/site` - Komplette WKA-Berechnung ✅
+---
 
-**Features:**
-- ✅ DEM-Sampling mit rasterio (statt QGIS)
-- ✅ 3 Optimierungsmethoden für Plattformhöhe
-- ✅ Material-Balance-Integration
-- ✅ Automatischer DEM-Download vom DEM Service
+### 4. Cost Service (Port 8004) ✅
+**Purpose**: Cost calculations and material balance
 
-**Beispiel:**
+**Key Endpoints**:
+- `POST /costs/calculate` - Calculate project costs
+- `POST /costs/material-balance` - Material reuse calculation
+- `GET /costs/presets` - Get cost rate presets
+
+**Tech Stack**: FastAPI, shared/core modules
+
+**Cost Factors**:
+- Excavation cost (€/m³)
+- Transport cost (€/m³)
+- Disposal cost (€/m³)
+- Fill material cost (€/m³)
+- Platform preparation cost (€/m²)
+- Swell factor: 1.25
+- Compaction factor: 0.85
+
+**Presets**: standard, low, high, premium
+
+---
+
+### 5. Report Service (Port 8005) ✅
+**Purpose**: HTML and PDF report generation
+
+**Key Endpoints**:
+- `POST /report/generate` - Generate report (HTML/PDF)
+- `GET /report/download/{report_id}/{filename}` - Download report
+
+**Tech Stack**: FastAPI, Jinja2, WeasyPrint
+
+**Features**:
+- WKA site reports with material balance
+- Print-friendly CSS
+- Auto-cleanup after 30 days
+- Multiple template support (WKA ready, Road/Solar/Terrain planned)
+
+**Templates**:
+- `wka_report.html` - Modern responsive design based on QGIS Plugin template
+
+---
+
+### 6. API Gateway (Port 8000) ✅
+**Purpose**: Central routing, authentication, and rate limiting
+
+**Key Features**:
+- Service proxying to all microservices
+- JWT authentication middleware
+- Rate limiting with slowapi
+- CORS support
+- Service discovery endpoint
+
+**Tech Stack**: FastAPI, httpx (async client), slowapi
+
+**Proxy Routes**:
+- `/auth/*` → Auth Service (8001)
+- `/dem/*` → DEM Service (8002)
+- `/calc/*` → Calculation Service (8003)
+- `/costs/*` → Cost Service (8004)
+- `/report/*` → Report Service (8005)
+
+---
+
+### 7. Frontend (Port 3000) ✅
+**Purpose**: React-based web interface
+
+**Key Features**:
+- Interactive Leaflet map
+- Click-to-place WKA sites
+- Automatic coordinate conversion (proj4)
+- Real-time calculation parameters
+- Material balance visualization
+- PDF report download
+- Responsive design
+
+**Tech Stack**: React 18, TypeScript, Vite, Leaflet, proj4, axios
+
+**Components**:
+- `Map.tsx` - Leaflet map with marker management
+- `WKAForm.tsx` - Comprehensive calculation form
+- `Dashboard.tsx` - Main application interface
+- `Login.tsx` - Magic link authentication
+
+**Critical Feature**: Automatic Lat/Lng → UTM conversion using proj4
+```typescript
+// Germany UTM zones 32-36 (EPSG:25832-25836)
+const utmCoords = latLngToUTM({ lat: 51.5, lng: 10.5 });
+// Result: { easting: 597500, northing: 5705000, zone: 32, epsg: "EPSG:25832" }
+```
+
+## 📁 Project Structure
+
+```
+Wind-Turbine-Earthwork-Calculator/
+├── plugin/                     # Original QGIS Plugin (preserved)
+│   └── prototype/
+├── webapp/                     # NEW: Web Application
+│   ├── docker-compose.yml     # Orchestration
+│   ├── init-db/               # Database initialization
+│   ├── services/
+│   │   ├── auth_service/      # Port 8001
+│   │   ├── dem_service/       # Port 8002
+│   │   ├── calculation_service/ # Port 8003
+│   │   ├── cost_service/      # Port 8004
+│   │   ├── report_service/    # Port 8005
+│   │   └── api_gateway/       # Port 8000
+│   ├── frontend/              # React app (Port 3000)
+│   └── test-integration.sh    # Integration tests
+├── shared/                    # Shared calculation modules
+│   ├── core/
+│   │   ├── foundation.py      # Foundation calculations
+│   │   ├── platform.py        # Platform calculations
+│   │   ├── material_balance.py # Material reuse
+│   │   └── costs.py           # Cost calculations
+│   └── utils/
+│       └── geometry.py        # Geometry utilities
+├── tests/                     # Test suites
+└── docs/                      # Additional documentation
+```
+
+## 🗄️ Database Schema
+
+PostgreSQL with PostGIS extension:
+
+**Tables**:
+- `users` - User accounts
+- `magic_links` - Authentication tokens
+- `sessions` - Active sessions
+- `projects` - User projects
+- `jobs` - Background calculation jobs
+- `dem_cache` - Metadata for cached DEM tiles
+- `dem_tiles` - Individual DEM tile metadata
+- `calculation_results` - Calculation outputs
+- `reports` - Generated reports
+
+See `init-db/01-init.sql` for complete schema.
+
+## 🧪 Testing
+
+### Integration Tests
 ```bash
-# Komplette WKA-Berechnung
+cd webapp
+./test-integration.sh
+```
+
+Tests:
+1. Foundation calculation
+2. DEM fetch with UTM coordinates
+3. Platform calculation
+4. Complete WKA site calculation
+
+### Manual Testing
+```bash
+# Test Auth Service
+curl -X POST http://localhost:8001/auth/request-login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com"}'
+
+# Test DEM Service
+curl -X POST http://localhost:8002/dem/fetch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "crs": "EPSG:25832",
+    "center_x": 497500,
+    "center_y": 5670500,
+    "buffer_meters": 250
+  }'
+
+# Test Calculation Service
 curl -X POST http://localhost:8003/calc/wka/site \
   -H "Content-Type: application/json" \
   -d '{
@@ -126,287 +402,139 @@ curl -X POST http://localhost:8003/calc/wka/site \
     "foundation_depth": 4.0,
     "platform_length": 45.0,
     "platform_width": 40.0,
-    "optimization_method": "balanced",
-    "material_reuse": true
+    "optimization_method": "balanced"
   }'
 ```
 
----
+## 🔧 Development
 
-### 4. Cost Service (Port 8004) ⚠️ TODO
-**Status:** Noch zu implementieren
-**Abhängigkeiten:** `shared/core/costs.py`, `shared/core/material_balance.py`
+### Running Services Locally
 
-**Features:**
-- Material-Bilanz (Wiederverwendung)
-- Kostenberechnung mit Swell/Compaction
-- Einsparungs-Analyse
+Each service can be run independently:
 
-**Endpoints (geplant):**
-- `POST /costs/calculate` - Kosten berechnen
-
-**Implementation:**
-```python
-# Nutze shared modules
-from shared.core.material_balance import calculate_material_balance
-from shared.core.costs import calculate_costs
-
-material_balance = calculate_material_balance(
-    foundation_volume=1000,
-    crane_cut=500,
-    crane_fill=800,
-    swell_factor=1.25,
-    compaction_factor=0.85
-)
-
-costs = calculate_costs(
-    foundation_volume=1000,
-    crane_cut=500,
-    crane_fill=800,
-    platform_area=1800,
-    material_balance=material_balance,
-    material_reuse=True
-)
-```
-
----
-
-### 5. Report Service (Port 8005) ⚠️ TODO
-**Status:** Noch zu implementieren
-
-**Features:**
-- HTML Report-Generierung (Jinja2 Templates)
-- PDF Export (weasyprint)
-- GeoJSON/GeoPackage Export
-- Mehrere Templates: WKA, Road, Solar, Terrain
-
-**Endpoints (geplant):**
-- `POST /report/generate` - Report erstellen
-- `GET /report/download/{job_id}/{filename}` - Report download
-
-**Templates:**
-```
-templates/
-├── wka_report.html          # Aus QGIS Plugin übernehmen
-├── road_report.html
-├── solar_report.html
-└── terrain_report.html
-```
-
----
-
-### 6. API Gateway (Port 8000) ⚠️ TODO
-**Status:** Noch zu implementieren
-
-**Features:**
-- Service-Routing
-- Auth-Middleware (JWT validation)
-- Rate Limiting
-- WebSocket für Job-Progress
-- Celery Job Queue
-
-**Job-Flow:**
-```python
-1. User startet Berechnung
-   → Job in DB (status: "pending")
-
-2. Celery Worker:
-   → "fetching_dem" (20%)
-   → DEM Service Call
-
-   → "calculating" (40%)
-   → Calculation Service Calls
-
-   → "computing_costs" (70%)
-   → Cost Service Call
-
-   → "generating_report" (90%)
-   → Report Service Call
-
-   → "completed" (100%)
-```
-
----
-
-## 🔧 Setup & Deployment
-
-### Lokale Entwicklung
-
-1. **Environment-Variablen:**
 ```bash
-cp .env.example .env
-# Bearbeite .env mit deinen SMTP-Credentials
-```
-
-2. **Starte Services:**
-```bash
-cd webapp
-docker-compose up -d postgres redis
-```
-
-3. **Datenbank initialisieren:**
-```bash
-docker-compose exec postgres psql -U admin -d geo_engineering -f /docker-entrypoint-initdb.d/01-init.sql
-```
-
-4. **Service einzeln starten (Development):**
-```bash
-# Auth Service
-cd services/auth_service
+# Example: Run Calculation Service locally
+cd services/calculation_service
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8001
-
-# DEM Service
-cd services/dem_service
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8002
+uvicorn app.main:app --host 0.0.0.0 --port 8003 --reload
 ```
 
-5. **Alle Services starten:**
-```bash
-docker-compose up --build
-```
-
-6. **Integration testen:**
-```bash
-./test-integration.sh
-```
-
-### Zugriff
-
-- **API Gateway:** http://localhost:8000/docs (TODO)
-- **Auth Service:** http://localhost:8001/docs
-- **DEM Service:** http://localhost:8002/docs
-- **Calculation Service:** http://localhost:8003/docs
-- **Frontend:** http://localhost:3000 (TODO)
-
----
-
-## 📚 Shared Modules
-
-Die `shared/` Module enthalten die Berechnungslogik, die von mehreren Services genutzt wird:
-
-### `shared/core/foundation.py` ✅
-- `calculate_foundation_circular()` - Kreisförmiges Fundament
-- `calculate_foundation_polygon()` - Polygon-Fundament
-
-### `shared/core/material_balance.py` ✅
-- `calculate_material_balance()` - Material-Bilanz mit Swell/Compaction
-
-### `shared/core/costs.py` ✅
-- `calculate_costs()` - Detaillierte Kostenberechnung
-
-**Verwendung:**
-```python
-# In Calculation Service
-import sys
-sys.path.append('/shared')
-from shared.core.foundation import calculate_foundation_circular
-```
-
----
-
-## 🧪 Testing
+### Running Frontend Locally
 
 ```bash
-# Unit Tests
-pytest tests/
-
-# Einzelner Service
-pytest tests/webapp/test_auth_service.py
-
-# Integration Tests
-pytest tests/webapp/test_integration.py
+cd frontend
+npm install
+npm start
 ```
 
----
+### Adding New Services
 
-## 🚀 Production Deployment
+1. Create service directory in `services/`
+2. Follow the FastAPI service template
+3. Add to `docker-compose.yml`
+4. Add proxy route in API Gateway
+5. Update frontend API client if needed
 
-### Fly.io
+## 🚢 Deployment
+
+### Production Considerations
+
+1. **Security**:
+   - Change default passwords
+   - Use strong JWT secret
+   - Restrict CORS origins
+   - Use HTTPS (add nginx reverse proxy)
+   - Enable firewall rules
+
+2. **Performance**:
+   - Increase Redis memory limit
+   - Add more Celery workers (Phase 2)
+   - Use PostgreSQL connection pooling
+   - Enable HTTP/2
+
+3. **Monitoring**:
+   - Add logging aggregation
+   - Set up health check endpoints
+   - Monitor Redis cache hit rates
+   - Track DEM API response times
+
+4. **Backup**:
+   - Regular PostgreSQL backups
+   - Redis persistence configuration
+   - Report file backups
+
+## 🐛 Troubleshooting
+
+### Services won't start
 ```bash
-# Pro Service ein Deployment
-fly launch --name geo-auth-service --region fra
-fly launch --name geo-dem-service --region fra
-...
+# Check Docker logs
+docker-compose logs <service-name>
+
+# Restart specific service
+docker-compose restart <service-name>
+
+# Rebuild if code changed
+docker-compose up -d --build
 ```
 
-### Railway
-```bash
-railway init
-railway up
-```
+### Frontend can't connect to API
+- Check that API Gateway is running: `curl http://localhost:8000/health`
+- Verify CORS settings in API Gateway
+- Check browser console for CORS errors
 
----
+### DEM fetch fails
+- Verify UTM coordinates are being used (EPSG:25832-25836)
+- Check hoehendaten.de API availability
+- Verify Redis is running: `docker-compose logs redis`
 
-## 📋 Nächste Schritte
+### Magic Link not received
+- Check SMTP credentials in `.env`
+- Check email spam folder
+- Verify SMTP service is not blocking emails
+- Check Auth Service logs: `docker-compose logs auth_service`
 
-### Phase 1: Core-Services vervollständigen
-1. ✅ Auth Service - **FERTIG**
-2. ✅ DEM Service - **FERTIG**
-3. ✅ Calculation Service - **FERTIG**
-   - ✅ Foundation-Modul (circular & polygon)
-   - ✅ Platform Cut/Fill-Modul (rectangle & polygon mit Rotation)
-   - ✅ Optimization-Modul (3 Methoden)
-   - ✅ DEM-Sampling mit rasterio
-   - ✅ Integration mit DEM Service
-4. ⚠️ Cost Service - **TODO**
-   - API-Endpoints (nutze `shared/core/costs.py` und `material_balance.py`)
-5. ⚠️ Report Service - **TODO**
-   - HTML-Template aus QGIS Plugin übernehmen
-   - PDF-Export mit weasyprint
-6. ⚠️ API Gateway - **TODO**
-   - Service-Routing
-   - Celery Job Queue
-   - WebSocket für Progress
+## 📋 Next Steps
 
-### Phase 2: Frontend
-1. React-App mit Leaflet-Karte
-2. proj4js für UTM-Konvertierung (WICHTIG!)
-3. Use-Case-spezifische Formulare
-4. WebSocket-Integration für Live-Progress
+### Phase 2: Extended Use Cases
+1. Road construction earthwork module
+2. Solar park planning module
+3. General terrain analysis module
+4. WebSocket integration for real-time progress
+5. Multi-user collaboration features
 
-### Phase 3: Erweiterte Use-Cases
-1. Road-Modul (Straßenbau)
-2. Solar-Modul (Solar-Park-Planung)
-3. Terrain-Modul (Geländeanalyse)
+### Phase 3: Advanced Features
+1. 3D visualization of earthwork
+2. Drone survey integration
+3. Machine learning for cost estimation
+4. Mobile app (React Native)
 
----
+## 📖 Documentation
 
-## 🐛 Known Issues & Wichtige Hinweise
-
-### ⚠️ KRITISCH: UTM-Koordinaten
-- **hoehendaten.de API erwartet UTM-Koordinaten!**
-- Frontend MUSS Lat/Lng → UTM konvertieren (proj4js)
-- Mindestens 250m Buffer um WKA-Standorte
-- Validierung: Deutschland EPSG:25832-25836
-
-### ⚠️ QGIS Plugin vs Web-App
-- Plugin bleibt unter `plugin/prototype/` erhalten
-- Shared Module nutzen rasterio statt QGIS
-- Keine Abhängigkeit von QGIS in Web-Services
-
-### ⚠️ Cache-Management
-- Redis-Cache: 6 Monate TTL
-- File-Cache: `/app/cache` in DEM Service
-- Regelmäßig `POST /dem/cache/clear-expired` aufrufen
-
----
-
-## 📖 Dokumentation
-
-- **API-Referenz:** http://localhost:8000/docs (Swagger)
-- **QGIS Plugin:** `../plugin/prototype/WORKFLOW_STANDFLAECHEN.md`
-- **hoehendaten.de Docs:** https://hoehendaten.de/api-rawtifrequest.html
-
----
+- **API Reference**: http://localhost:8000/docs (Swagger)
+- **QGIS Plugin**: `../plugin/prototype/WORKFLOW_STANDFLAECHEN.md`
+- **hoehendaten.de API**: https://hoehendaten.de/api-rawtifrequest.html
 
 ## 🤝 Contributing
 
-Siehe `../CONTRIBUTING.md`
-
----
+1. Create feature branch: `git checkout -b feature/your-feature`
+2. Make changes
+3. Test locally with Docker Compose
+4. Run integration tests: `./test-integration.sh`
+5. Commit with descriptive message
+6. Push and create Pull Request
 
 ## 📄 License
 
-Siehe `../LICENSE`
+See LICENSE file for details.
+
+## 📞 Contact
+
+For issues, questions, or feature requests, please create an issue on GitHub.
+
+## 🙏 Acknowledgments
+
+- **hoehendaten.de** - German elevation data API
+- **OpenStreetMap** - Map tiles
+- **Leaflet** - Mapping library
+- **FastAPI** - Python web framework
+- **proj4** - Coordinate transformation library
