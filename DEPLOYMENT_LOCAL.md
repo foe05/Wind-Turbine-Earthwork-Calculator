@@ -64,6 +64,16 @@ SMTP_FROM_EMAIL=deine-email@gmail.com
 
 ```bash
 # Im webapp/ Verzeichnis
+
+# Optional: BuildKit aktivieren (empfohlen, schneller & effizienter)
+export DOCKER_BUILDKIT=1
+export COMPOSE_DOCKER_CLI_BUILD=1
+
+# ODER: BuildKit global aktivieren
+echo '{"features": {"buildkit": true}}' | sudo tee /etc/docker/daemon.json
+sudo systemctl restart docker
+
+# Services starten
 docker-compose up -d
 ```
 
