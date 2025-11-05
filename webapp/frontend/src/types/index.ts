@@ -156,10 +156,151 @@ export interface WKASite {
   cost?: CostCalculationResponse;
 }
 
+// Phase 2: Road Calculation types
+export interface RoadCalculationRequest {
+  dem_id: string;
+  centerline: number[][];
+  road_width: number;
+  design_grade: number;
+  cut_slope?: number;
+  fill_slope?: number;
+  profile_type?: string;
+  station_interval?: number;
+  start_elevation?: number;
+  include_ditches?: boolean;
+  ditch_width?: number;
+  ditch_depth?: number;
+}
+
+export interface RoadCalculationResponse {
+  road_length: number;
+  total_cut: number;
+  total_fill: number;
+  net_volume: number;
+  avg_cut_depth: number;
+  avg_fill_depth: number;
+  num_stations: number;
+  station_interval: number;
+  design_grade: number;
+  road_width: number;
+  profile_type: string;
+  start_elevation: number;
+  end_elevation: number;
+  ditch_cut?: number;
+  stations: StationData[];
+}
+
+export interface StationData {
+  station: number;
+  distance: number;
+  x: number;
+  y: number;
+  ground_elevation: number;
+  design_elevation: number;
+  cut_depth: number;
+  fill_depth: number;
+  cut_area: number;
+  fill_area: number;
+}
+
+// Phase 2: Solar Park types
+export interface SolarCalculationRequest {
+  dem_id: string;
+  boundary: number[][];
+  panel_length: number;
+  panel_width: number;
+  row_spacing: number;
+  panel_tilt: number;
+  foundation_type: string;
+  grading_strategy: string;
+  orientation?: number;
+  access_road_width?: number;
+  access_road_length?: number;
+}
+
+export interface SolarCalculationResponse {
+  num_panels: number;
+  panel_area: number;
+  panel_density: number;
+  site_area: number;
+  foundation_volume: number;
+  foundation_type: string;
+  grading_cut: number;
+  grading_fill: number;
+  grading_strategy: string;
+  access_road_cut: number;
+  access_road_fill: number;
+  access_road_length: number;
+  total_cut: number;
+  total_fill: number;
+  net_volume: number;
+  panel_positions: number[][];
+}
+
+// Phase 2: Terrain Analysis types
+export interface TerrainAnalysisRequest {
+  dem_id: string;
+  polygon: number[][];
+  analysis_type: string;
+  resolution?: number;
+  target_elevation?: number;
+  optimization_method?: string;
+  contour_interval?: number;
+}
+
+export interface TerrainAnalysisResponse {
+  analysis_type: string;
+  polygon_area: number;
+  num_sample_points: number;
+  resolution: number;
+  optimal_elevation?: number;
+  cut_volume?: number;
+  fill_volume?: number;
+  net_volume?: number;
+  target_elevation?: number;
+  min_elevation?: number;
+  max_elevation?: number;
+  avg_elevation?: number;
+  statistics?: Record<string, any>;
+  slope_analysis?: Record<string, any>;
+  contour_data?: Record<string, any>;
+}
+
+// Phase 2: Extended Project types
+export interface RoadProject {
+  id: string;
+  name: string;
+  centerline: LatLng[];
+  utmCenterline: Array<[number, number]>;
+  calculation?: RoadCalculationResponse;
+  cost?: CostCalculationResponse;
+}
+
+export interface SolarProject {
+  id: string;
+  name: string;
+  boundary: LatLng[];
+  utmBoundary: Array<[number, number]>;
+  calculation?: SolarCalculationResponse;
+  cost?: CostCalculationResponse;
+}
+
+export interface TerrainProject {
+  id: string;
+  name: string;
+  polygon: LatLng[];
+  utmPolygon: Array<[number, number]>;
+  analysis?: TerrainAnalysisResponse;
+}
+
 // UI State types
 export interface AppState {
   currentProject: Project | null;
   selectedSite: WKASite | null;
   isCalculating: boolean;
   mapBounds: L.LatLngBounds | null;
+  activeTab: 'wka' | 'road' | 'solar' | 'terrain';
+  roadProjects: RoadProject[];
+  solarProjects: SolarProject[];
+  terrainProjects: TerrainProject[];
 }
