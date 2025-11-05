@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gelände-Analyse Bericht - {{ project_name }}</title>
+    <style>
+        :root {
+            --primary: #16A085;
+            --accent: #E67E22;
+            --success: #27AE60;
+            --warning: #F39C12;
+            --info: #3498DB;
+            --bg-light: #F8F9FA;
+            --border: #ECF0F1;
+            --text-dark: #2C3E50;
+            --text-medium: #7F8C8D;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--text-dark);
+            background: white;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        /* Header */
+        .report-header {
+            text-align: center;
+            margin-bottom: 60px;
+            padding-bottom: 30px;
+            border-bottom: 3px solid var(--primary);
+        }
+
+        .report-header h1 {
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+
+        .report-header .subtitle {
+            font-size: 18px;
+            color: var(--text-medium);
+        }
+
+        .report-header .date {
+            font-size: 14px;
+            color: var(--text-medium);
+            margin-top: 10px;
+        }
+
+        /* Analysis Type Badge */
+        .analysis-badge {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        /* Summary Cards */
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .summary-card {
+            background: var(--bg-light);
+            padding: 25px;
+            border-radius: 10px;
+            border-left: 4px solid;
+        }
+
+        .summary-card.area { border-color: var(--primary); }
+        .summary-card.cut { border-color: var(--accent); }
+        .summary-card.fill { border-color: var(--success); }
+        .summary-card.samples { border-color: var(--info); }
+
+        .summary-card h3 {
+            font-size: 14px;
+            color: var(--text-medium);
+            font-weight: 600;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .summary-card .value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .summary-card .unit {
+            font-size: 14px;
+            color: var(--text-medium);
+        }
+
+        /* Terrain Details */
+        .terrain-details {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 30px;
+            margin-bottom: 40px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .terrain-details h2 {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+
+        /* Parameters Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        table th {
+            background: var(--bg-light);
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--text-dark);
+            border-bottom: 2px solid var(--border);
+        }
+
+        table td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        table tr:last-child td {
+            border-bottom: none;
+        }
+
+        table .value {
+            font-weight: 600;
+        }
+
+        .cut-value { color: var(--accent); }
+        .fill-value { color: var(--success); }
+        .optimal-value { color: var(--primary); }
+
+        /* Statistics Section */
+        .statistics-section {
+            background: var(--bg-light);
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 30px;
+        }
+
+        .statistics-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .stats-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+        }
+
+        .stats-item .label {
+            font-size: 13px;
+            color: var(--text-medium);
+        }
+
+        .stats-item .value {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* Slope Analysis */
+        .slope-analysis {
+            margin-top: 40px;
+        }
+
+        .slope-analysis h2 {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+
+        .slope-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+        }
+
+        .slope-item {
+            text-align: center;
+            padding: 20px;
+            background: var(--bg-light);
+            border-radius: 8px;
+        }
+
+        .slope-item .label {
+            font-size: 12px;
+            color: var(--text-medium);
+            margin-bottom: 8px;
+        }
+
+        .slope-item .value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .slope-item .unit {
+            font-size: 12px;
+            color: var(--text-medium);
+            margin-top: 4px;
+        }
+
+        /* Contours Section */
+        .contours-section {
+            margin-top: 40px;
+        }
+
+        .contours-section h2 {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+
+        .contour-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .contour-item {
+            padding: 10px 15px;
+            background: var(--bg-light);
+            margin-bottom: 8px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .contour-item .elevation {
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .contour-item .points {
+            font-size: 13px;
+            color: var(--text-medium);
+        }
+
+        /* Footer */
+        .report-footer {
+            margin-top: 60px;
+            padding-top: 30px;
+            border-top: 2px solid var(--border);
+            text-align: center;
+            color: var(--text-medium);
+            font-size: 12px;
+        }
+
+        /* Print Styles */
+        @media print {
+            body {
+                font-size: 12px;
+            }
+
+            .container {
+                max-width: 100%;
+                padding: 20px;
+            }
+
+            .terrain-details, .slope-analysis, .contours-section {
+                page-break-inside: avoid;
+            }
+
+            .summary {
+                page-break-after: avoid;
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .summary {
+                grid-template-columns: 1fr;
+            }
+
+            .stats-grid, .slope-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="report-header">
+            <h1>🗺️ Gelände-Analyse Bericht</h1>
+            <div class="subtitle">{{ project_name }}</div>
+            <div class="analysis-badge">{{ analysis_type_label }}</div>
+            <div class="date">Erstellt am: {{ report_date }} um {{ report_time }}</div>
+        </div>
+
+        <!-- Summary -->
+        <div class="summary">
+            <div class="summary-card area">
+                <h3>Analysefläche</h3>
+                <div class="value">{{ "{:,.0f}".format(polygon_area) }}</div>
+                <div class="unit">m²</div>
+            </div>
+
+            <div class="summary-card samples">
+                <h3>Abtastpunkte</h3>
+                <div class="value">{{ "{:,.0f}".format(num_sample_points) }}</div>
+                <div class="unit">Punkte</div>
+            </div>
+
+            {% if cut_volume is defined %}
+            <div class="summary-card cut">
+                <h3>Aushub</h3>
+                <div class="value">{{ "{:,.0f}".format(cut_volume) }}</div>
+                <div class="unit">m³</div>
+            </div>
+            {% endif %}
+
+            {% if fill_volume is defined %}
+            <div class="summary-card fill">
+                <h3>Auftrag</h3>
+                <div class="value">{{ "{:,.0f}".format(fill_volume) }}</div>
+                <div class="unit">m³</div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Terrain Details -->
+        <div class="terrain-details">
+            <h2>Analyse-Parameter</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th style="text-align: right;">Wert</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Analysetyp</td>
+                        <td class="value" style="text-align: right;">{{ analysis_type_label }}</td>
+                    </tr>
+                    <tr>
+                        <td>Analysefläche</td>
+                        <td class="value" style="text-align: right;">{{ "{:,.2f}".format(polygon_area) }} m²</td>
+                    </tr>
+                    <tr>
+                        <td>Abtastauflösung</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(resolution) }} m</td>
+                    </tr>
+                    <tr>
+                        <td>Anzahl Abtastpunkte</td>
+                        <td class="value" style="text-align: right;">{{ "{:,.0f}".format(num_sample_points) }}</td>
+                    </tr>
+                    {% if min_elevation is defined %}
+                    <tr>
+                        <td>Minimale Höhe</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(min_elevation) }} m</td>
+                    </tr>
+                    {% endif %}
+                    {% if max_elevation is defined %}
+                    <tr>
+                        <td>Maximale Höhe</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(max_elevation) }} m</td>
+                    </tr>
+                    {% endif %}
+                    {% if avg_elevation is defined %}
+                    <tr>
+                        <td>Durchschnittshöhe</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(avg_elevation) }} m</td>
+                    </tr>
+                    {% endif %}
+                    {% if optimal_elevation is defined %}
+                    <tr style="background: var(--bg-light);">
+                        <td><strong>Optimale Höhe</strong></td>
+                        <td class="value optimal-value" style="text-align: right;"><strong>{{ "{:.2f}".format(optimal_elevation) }} m</strong></td>
+                    </tr>
+                    {% endif %}
+                    {% if target_elevation is defined %}
+                    <tr>
+                        <td>Zielhöhe</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(target_elevation) }} m</td>
+                    </tr>
+                    {% endif %}
+                    {% if cut_volume is defined %}
+                    <tr style="background: var(--bg-light);">
+                        <td><strong>Aushub</strong></td>
+                        <td class="value cut-value" style="text-align: right;"><strong>{{ "{:,.2f}".format(cut_volume) }} m³</strong></td>
+                    </tr>
+                    {% endif %}
+                    {% if fill_volume is defined %}
+                    <tr style="background: var(--bg-light);">
+                        <td><strong>Auftrag</strong></td>
+                        <td class="value fill-value" style="text-align: right;"><strong>{{ "{:,.2f}".format(fill_volume) }} m³</strong></td>
+                    </tr>
+                    {% endif %}
+                    {% if net_volume is defined %}
+                    <tr style="background: var(--bg-light);">
+                        <td><strong>Nettovolumen (Cut - Fill)</strong></td>
+                        <td class="value" style="text-align: right;"><strong>{{ "{:,.2f}".format(net_volume) }} m³</strong></td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+
+            <!-- Statistics (for cut_fill_balance) -->
+            {% if statistics is defined %}
+            <div class="statistics-section">
+                <h3>Detaillierte Statistik</h3>
+                <div class="stats-grid">
+                    {% if statistics.elevation_range is defined %}
+                    <div class="stats-item">
+                        <span class="label">Höhenunterschied:</span>
+                        <span class="value">{{ "{:.2f}".format(statistics.elevation_range) }} m</span>
+                    </div>
+                    {% endif %}
+                    {% if statistics.cut_points is defined %}
+                    <div class="stats-item">
+                        <span class="label">Aushub-Punkte:</span>
+                        <span class="value">{{ "{:,.0f}".format(statistics.cut_points) }}</span>
+                    </div>
+                    {% endif %}
+                    {% if statistics.fill_points is defined %}
+                    <div class="stats-item">
+                        <span class="label">Auftrags-Punkte:</span>
+                        <span class="value">{{ "{:,.0f}".format(statistics.fill_points) }}</span>
+                    </div>
+                    {% endif %}
+                    {% if statistics.avg_cut_depth is defined %}
+                    <div class="stats-item">
+                        <span class="label">Ø Aushubtiefe:</span>
+                        <span class="value cut-value">{{ "{:.2f}".format(statistics.avg_cut_depth) }} m</span>
+                    </div>
+                    {% endif %}
+                    {% if statistics.avg_fill_depth is defined %}
+                    <div class="stats-item">
+                        <span class="label">Ø Auftragshöhe:</span>
+                        <span class="value fill-value">{{ "{:.2f}".format(statistics.avg_fill_depth) }} m</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Slope Analysis -->
+        {% if slope_analysis is defined %}
+        <div class="slope-analysis">
+            <h2>Hangneigung-Analyse</h2>
+            <div class="slope-grid">
+                <div class="slope-item">
+                    <div class="label">Durchschnitt</div>
+                    <div class="value">{{ "{:.2f}".format(slope_analysis.avg_slope) }}</div>
+                    <div class="unit">%</div>
+                </div>
+                <div class="slope-item">
+                    <div class="label">Minimum</div>
+                    <div class="value">{{ "{:.2f}".format(slope_analysis.min_slope) }}</div>
+                    <div class="unit">%</div>
+                </div>
+                <div class="slope-item">
+                    <div class="label">Maximum</div>
+                    <div class="value">{{ "{:.2f}".format(slope_analysis.max_slope) }}</div>
+                    <div class="unit">%</div>
+                </div>
+                {% if slope_analysis.median_slope is defined %}
+                <div class="slope-item">
+                    <div class="label">Median</div>
+                    <div class="value">{{ "{:.2f}".format(slope_analysis.median_slope) }}</div>
+                    <div class="unit">%</div>
+                </div>
+                {% endif %}
+                {% if slope_analysis.slope_std is defined %}
+                <div class="slope-item">
+                    <div class="label">Standardabweichung</div>
+                    <div class="value">{{ "{:.2f}".format(slope_analysis.slope_std) }}</div>
+                    <div class="unit">%</div>
+                </div>
+                {% endif %}
+                {% if slope_analysis.slope_percentile_90 is defined %}
+                <div class="slope-item">
+                    <div class="label">90. Perzentil</div>
+                    <div class="value">{{ "{:.2f}".format(slope_analysis.slope_percentile_90) }}</div>
+                    <div class="unit">%</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Contours -->
+        {% if contour_data is defined and contour_data.contours|length > 0 %}
+        <div class="contours-section">
+            <h2>Höhenlinien</h2>
+            <div class="statistics-section" style="margin-bottom: 20px;">
+                <div class="stats-grid">
+                    <div class="stats-item">
+                        <span class="label">Höhenlinien-Intervall:</span>
+                        <span class="value">{{ "{:.2f}".format(contour_data.contour_interval) }} m</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="label">Anzahl Höhenlinien:</span>
+                        <span class="value">{{ contour_data.num_contours }}</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="label">Min. Höhe:</span>
+                        <span class="value">{{ "{:.2f}".format(contour_data.min_elevation) }} m</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="label">Max. Höhe:</span>
+                        <span class="value">{{ "{:.2f}".format(contour_data.max_elevation) }} m</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="contour-list">
+                {% for contour in contour_data.contours %}
+                <div class="contour-item">
+                    <span class="elevation">{{ "{:.1f}".format(contour.elevation) }} m</span>
+                    <span class="points">{{ contour.point_count }} Punkte</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Footer -->
+        <div class="report-footer">
+            <p><strong>Geo-Engineering Platform</strong> v1.0 | hoehendaten.de</p>
+            <p>Gelände-Analyse erstellt am {{ report_date }} um {{ report_time }}</p>
+        </div>
+    </div>
+</body>
+</html>

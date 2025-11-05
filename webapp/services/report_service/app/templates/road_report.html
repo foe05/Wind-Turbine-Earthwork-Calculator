@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Straßenbau Erdarbeits-Bericht - {{ project_name }}</title>
+    <style>
+        :root {
+            --primary: #34495E;
+            --accent: #E67E22;
+            --success: #27AE60;
+            --warning: #F39C12;
+            --info: #3498DB;
+            --bg-light: #F8F9FA;
+            --border: #ECF0F1;
+            --text-dark: #2C3E50;
+            --text-medium: #7F8C8D;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--text-dark);
+            background: white;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        /* Header */
+        .report-header {
+            text-align: center;
+            margin-bottom: 60px;
+            padding-bottom: 30px;
+            border-bottom: 3px solid var(--primary);
+        }
+
+        .report-header h1 {
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+
+        .report-header .subtitle {
+            font-size: 18px;
+            color: var(--text-medium);
+        }
+
+        .report-header .date {
+            font-size: 14px;
+            color: var(--text-medium);
+            margin-top: 10px;
+        }
+
+        /* Summary Cards */
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .summary-card {
+            background: var(--bg-light);
+            padding: 25px;
+            border-radius: 10px;
+            border-left: 4px solid;
+        }
+
+        .summary-card.length { border-color: var(--primary); }
+        .summary-card.cut { border-color: var(--accent); }
+        .summary-card.fill { border-color: var(--success); }
+        .summary-card.net { border-color: var(--info); }
+
+        .summary-card h3 {
+            font-size: 14px;
+            color: var(--text-medium);
+            font-weight: 600;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .summary-card .value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .summary-card .unit {
+            font-size: 14px;
+            color: var(--text-medium);
+        }
+
+        /* Road Details */
+        .road-details {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 30px;
+            margin-bottom: 40px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .road-details h2 {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+
+        /* Parameters Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        table th {
+            background: var(--bg-light);
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--text-dark);
+            border-bottom: 2px solid var(--border);
+        }
+
+        table td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        table tr:last-child td {
+            border-bottom: none;
+        }
+
+        table .value {
+            font-weight: 600;
+        }
+
+        .cut-value { color: var(--accent); }
+        .fill-value { color: var(--success); }
+
+        /* Stations Section */
+        .stations-section {
+            margin-top: 40px;
+        }
+
+        .stations-section h2 {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+
+        .station-table {
+            font-size: 12px;
+            overflow-x: auto;
+        }
+
+        .station-table table {
+            min-width: 800px;
+        }
+
+        .station-table th {
+            white-space: nowrap;
+        }
+
+        .station-table td {
+            text-align: right;
+        }
+
+        .station-table td:first-child {
+            text-align: left;
+            font-weight: 600;
+        }
+
+        /* Profile Info */
+        .profile-info {
+            background: var(--bg-light);
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 30px;
+        }
+
+        .profile-info h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .profile-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .profile-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+        }
+
+        .profile-item .label {
+            font-size: 13px;
+            color: var(--text-medium);
+        }
+
+        .profile-item .value {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* Footer */
+        .report-footer {
+            margin-top: 60px;
+            padding-top: 30px;
+            border-top: 2px solid var(--border);
+            text-align: center;
+            color: var(--text-medium);
+            font-size: 12px;
+        }
+
+        /* Print Styles */
+        @media print {
+            body {
+                font-size: 12px;
+            }
+
+            .container {
+                max-width: 100%;
+                padding: 20px;
+            }
+
+            .road-details {
+                page-break-inside: avoid;
+            }
+
+            .station-table {
+                page-break-inside: auto;
+            }
+
+            .summary {
+                page-break-after: avoid;
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .summary {
+                grid-template-columns: 1fr;
+            }
+
+            .profile-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .station-table {
+                overflow-x: scroll;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="report-header">
+            <h1>🛣️ Straßenbau Erdarbeits-Bericht</h1>
+            <div class="subtitle">{{ project_name }}</div>
+            <div class="date">Erstellt am: {{ report_date }} um {{ report_time }}</div>
+        </div>
+
+        <!-- Summary -->
+        <div class="summary">
+            <div class="summary-card length">
+                <h3>Streckenlänge</h3>
+                <div class="value">{{ "{:,.0f}".format(road_length) }}</div>
+                <div class="unit">m</div>
+            </div>
+
+            <div class="summary-card cut">
+                <h3>Aushub</h3>
+                <div class="value">{{ "{:,.0f}".format(total_cut) }}</div>
+                <div class="unit">m³</div>
+            </div>
+
+            <div class="summary-card fill">
+                <h3>Auftrag</h3>
+                <div class="value">{{ "{:,.0f}".format(total_fill) }}</div>
+                <div class="unit">m³</div>
+            </div>
+
+            <div class="summary-card net">
+                <h3>Nettovolumen</h3>
+                <div class="value">{{ "{:,.0f}".format(net_volume) }}</div>
+                <div class="unit">m³</div>
+            </div>
+        </div>
+
+        <!-- Road Details -->
+        <div class="road-details">
+            <h2>Straßenparameter</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th style="text-align: right;">Wert</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Streckenlänge</td>
+                        <td class="value" style="text-align: right;">{{ "{:,.2f}".format(road_length) }} m</td>
+                    </tr>
+                    <tr>
+                        <td>Straßenbreite</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(road_width) }} m</td>
+                    </tr>
+                    <tr>
+                        <td>Profil-Typ</td>
+                        <td class="value" style="text-align: right;">{{ profile_type }}</td>
+                    </tr>
+                    <tr>
+                        <td>Längsgefälle</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(design_grade) }} %</td>
+                    </tr>
+                    <tr>
+                        <td>Stationierungsintervall</td>
+                        <td class="value" style="text-align: right;">{{ "{:.1f}".format(station_interval) }} m</td>
+                    </tr>
+                    <tr>
+                        <td>Anzahl Stationen</td>
+                        <td class="value" style="text-align: right;">{{ num_stations }}</td>
+                    </tr>
+                    <tr>
+                        <td>Start-Höhe</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(start_elevation) }} m</td>
+                    </tr>
+                    <tr>
+                        <td>End-Höhe</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(end_elevation) }} m</td>
+                    </tr>
+                    <tr style="background: var(--bg-light);">
+                        <td><strong>Aushub</strong></td>
+                        <td class="value cut-value" style="text-align: right;"><strong>{{ "{:,.2f}".format(total_cut) }} m³</strong></td>
+                    </tr>
+                    <tr style="background: var(--bg-light);">
+                        <td><strong>Auftrag</strong></td>
+                        <td class="value fill-value" style="text-align: right;"><strong>{{ "{:,.2f}".format(total_fill) }} m³</strong></td>
+                    </tr>
+                    <tr style="background: var(--bg-light);">
+                        <td><strong>Nettovolumen (Cut - Fill)</strong></td>
+                        <td class="value" style="text-align: right;"><strong>{{ "{:,.2f}".format(net_volume) }} m³</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Durchschnittliche Aushubtiefe</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(avg_cut_depth) }} m</td>
+                    </tr>
+                    <tr>
+                        <td>Durchschnittliche Auftragshöhe</td>
+                        <td class="value" style="text-align: right;">{{ "{:.2f}".format(avg_fill_depth) }} m</td>
+                    </tr>
+                    {% if ditch_cut is defined and ditch_cut > 0 %}
+                    <tr>
+                        <td>Grabenaushub</td>
+                        <td class="value cut-value" style="text-align: right;">{{ "{:,.2f}".format(ditch_cut) }} m³</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+
+            <!-- Profile Info -->
+            <div class="profile-info">
+                <h3>Querprofil-Information</h3>
+                <div class="profile-grid">
+                    <div class="profile-item">
+                        <span class="label">Böschungsneigung Aushub:</span>
+                        <span class="value">{{ "{:.1f}".format(cut_slope) }}:1</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="label">Böschungsneigung Auftrag:</span>
+                        <span class="value">{{ "{:.1f}".format(fill_slope) }}:1</span>
+                    </div>
+                    {% if include_ditches %}
+                    <div class="profile-item">
+                        <span class="label">Grabentiefe:</span>
+                        <span class="value">{{ "{:.2f}".format(ditch_depth) }} m</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="label">Grabenbreite:</span>
+                        <span class="value">{{ "{:.2f}".format(ditch_width) }} m</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Stations Detail -->
+        {% if stations and stations|length > 0 %}
+        <div class="stations-section">
+            <h2>Stationierungen (Detailansicht)</h2>
+            <div class="station-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Station</th>
+                            <th>Distanz (m)</th>
+                            <th>X (m)</th>
+                            <th>Y (m)</th>
+                            <th>Gelände (m)</th>
+                            <th>Planung (m)</th>
+                            <th>Aushub (m)</th>
+                            <th>Auftrag (m)</th>
+                            <th>Aushub (m²)</th>
+                            <th>Auftrag (m²)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for station in stations %}
+                        <tr>
+                            <td>{{ station.station }}</td>
+                            <td>{{ "{:.2f}".format(station.distance) }}</td>
+                            <td>{{ "{:.2f}".format(station.x) }}</td>
+                            <td>{{ "{:.2f}".format(station.y) }}</td>
+                            <td>{{ "{:.2f}".format(station.ground_elevation) }}</td>
+                            <td>{{ "{:.2f}".format(station.design_elevation) }}</td>
+                            <td class="cut-value">{{ "{:.2f}".format(station.cut_depth) if station.cut_depth > 0 else "-" }}</td>
+                            <td class="fill-value">{{ "{:.2f}".format(station.fill_depth) if station.fill_depth > 0 else "-" }}</td>
+                            <td class="cut-value">{{ "{:.2f}".format(station.cut_area) if station.cut_area > 0 else "-" }}</td>
+                            <td class="fill-value">{{ "{:.2f}".format(station.fill_area) if station.fill_area > 0 else "-" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Footer -->
+        <div class="report-footer">
+            <p><strong>Geo-Engineering Platform</strong> v1.0 | hoehendaten.de</p>
+            <p>Straßenbau-Bericht erstellt am {{ report_date }} um {{ report_time }}</p>
+        </div>
+    </div>
+</body>
+</html>
