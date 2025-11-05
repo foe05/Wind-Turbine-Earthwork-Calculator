@@ -18,7 +18,7 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=True)
-    metadata = Column(JSONB, default={})
+    user_metadata = Column(JSONB, default={})
 
     # Relationships
     magic_links = relationship("MagicLink", back_populates="user", cascade="all, delete-orphan")
