@@ -2,7 +2,7 @@
 API Gateway - Main Application
 Central entry point for all microservices
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -56,7 +56,7 @@ app.include_router(exports.router)
 
 @app.get("/")
 @limiter.limit("60/minute")
-async def root():
+async def root(request: Request):
     """Health check and service info"""
     return {
         "service": settings.APP_NAME,
