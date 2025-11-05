@@ -1,0 +1,219 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: geo_postgres
+    environment:
+      POSTGRES_DB: geo_engineering
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d geo_engineering"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: geo_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Gateway (Port 8000)
+  api_gateway:
+    build:
+      context: ./services/api_gateway
+      dockerfile: Dockerfile
+    container_name: geo_api_gateway
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://admin:secret@postgres:5432/geo_engineering
+      REDIS_URL: redis://redis:6379
+      AUTH_SERVICE_URL: http://auth_service:8001
+      DEM_SERVICE_URL: http://dem_service:8002
+      CALCULATION_SERVICE_URL: http://calculation_service:8003
+      COST_SERVICE_URL: http://cost_service:8004
+      REPORT_SERVICE_URL: http://report_service:8005
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/api_gateway:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Auth Service (Port 8001)
+  auth_service:
+    build:
+      context: ./services/auth_service
+      dockerfile: Dockerfile
+    container_name: geo_auth
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql://admin:secret@postgres:5432/geo_engineering
+      JWT_SECRET: your-secret-key-change-in-production
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRATION_HOURS: 24
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-noreply@geo-engineering.example.com}
+      MAGIC_LINK_EXPIRATION_MINUTES: 15
+      FRONTEND_URL: http://localhost:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./services/auth_service:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+
+  # DEM Service (Port 8002)
+  dem_service:
+    build:
+      context: ./services/dem_service
+      dockerfile: Dockerfile
+    container_name: geo_dem
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql://admin:secret@postgres:5432/geo_engineering
+      REDIS_URL: redis://redis:6379
+      HOEHENDATEN_API_URL: https://api.hoehendaten.de:14444/v1/rawtif
+      DEM_CACHE_TTL_SECONDS: 15552000  # 6 Monate
+      DEM_BUFFER_METERS: 250
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/dem_service:/app
+      - dem_cache:/app/cache
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+
+  # Calculation Service (Port 8003)
+  calculation_service:
+    build:
+      context: ./services/calculation_service
+      dockerfile: Dockerfile
+    container_name: geo_calculation
+    ports:
+      - "8003:8003"
+    environment:
+      REDIS_URL: redis://redis:6379
+      DEM_SERVICE_URL: http://dem_service:8002
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/calculation_service:/app
+      - ../../shared:/shared  # Zugriff auf shared module
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8003 --reload
+
+  # Cost Service (Port 8004)
+  cost_service:
+    build:
+      context: ./services/cost_service
+      dockerfile: Dockerfile
+    container_name: geo_cost
+    ports:
+      - "8004:8004"
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/cost_service:/app
+      - ../../shared:/shared
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8004 --reload
+
+  # Report Service (Port 8005)
+  report_service:
+    build:
+      context: ./services/report_service
+      dockerfile: Dockerfile
+    container_name: geo_report
+    ports:
+      - "8005:8005"
+    environment:
+      REDIS_URL: redis://redis:6379
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      REPORT_EXPIRATION_DAYS: 30
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/report_service:/app
+      - ./services/report_service/templates:/app/templates
+      - reports_data:/app/reports
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8005 --reload
+
+  # Celery Worker für Background Jobs
+  celery_worker:
+    build:
+      context: ./services/api_gateway
+      dockerfile: Dockerfile
+    container_name: geo_celery_worker
+    environment:
+      DATABASE_URL: postgresql://admin:secret@postgres:5432/geo_engineering
+      REDIS_URL: redis://redis:6379
+      AUTH_SERVICE_URL: http://auth_service:8001
+      DEM_SERVICE_URL: http://dem_service:8002
+      CALCULATION_SERVICE_URL: http://calculation_service:8003
+      COST_SERVICE_URL: http://cost_service:8004
+      REPORT_SERVICE_URL: http://report_service:8005
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/api_gateway:/app
+    command: celery -A app.worker worker --loglevel=info --concurrency=4
+
+  # Frontend (React)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: geo_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:8000
+      REACT_APP_WS_URL: ws://localhost:8000/ws
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm start
+
+volumes:
+  postgres_data:
+  redis_data:
+  dem_cache:
+  reports_data:
+
+networks:
+  default:
+    name: geo_engineering_network
