@@ -7,6 +7,8 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import MultiTabDashboard from './pages/MultiTabDashboard';
+import ProjectsOverview from './pages/ProjectsOverview';
+import JobsHistory from './pages/JobsHistory';
 
 const App: React.FC = () => {
   return (
@@ -14,7 +16,9 @@ const App: React.FC = () => {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/dashboard" element={<ProtectedRoute><MultiTabDashboard /></ProtectedRoute>} />
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/projects" element={<ProtectedRoute><ProjectsOverview /></ProtectedRoute>} />
+        <Route path="/jobs" element={<ProtectedRoute><JobsHistory /></ProtectedRoute>} />
+        <Route path="/" element={<Navigate to="/projects" replace />} />
       </Routes>
     </BrowserRouter>
   );

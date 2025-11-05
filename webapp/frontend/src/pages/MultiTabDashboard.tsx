@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import MapWithDrawing from '../components/MapWithDrawing';
 import WKAForm from '../components/WKAForm';
 import RoadForm from '../components/RoadForm';
@@ -15,6 +16,7 @@ import apiClient from '../services/api';
 type TabType = 'wka' | 'road' | 'solar' | 'terrain';
 
 const MultiTabDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabType>('wka');
   const [projectName, setProjectName] = useState('Neues Projekt');
 
@@ -121,6 +123,17 @@ const MultiTabDashboard: React.FC = () => {
           />
         </div>
         <div style={styles.headerRight}>
+          <nav style={styles.headerNav}>
+            <button onClick={() => navigate('/projects')} style={styles.navButton}>
+              📂 Projekte
+            </button>
+            <button onClick={() => navigate('/jobs')} style={styles.navButton}>
+              📊 Jobs
+            </button>
+            <button onClick={() => navigate('/dashboard')} style={styles.navButton}>
+              🏗️ Rechner
+            </button>
+          </nav>
           <button onClick={handleLogout} style={styles.logoutButton}>
             Abmelden
           </button>
@@ -290,7 +303,23 @@ const styles: { [key: string]: React.CSSProperties } = {
   },
   headerRight: {
     display: 'flex',
+    alignItems: 'center',
     gap: '12px',
+  },
+  headerNav: {
+    display: 'flex',
+    gap: '8px',
+  },
+  navButton: {
+    padding: '8px 16px',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: 'white',
+    backgroundColor: '#374151',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    transition: 'background-color 0.2s',
   },
   logoutButton: {
     padding: '8px 16px',
