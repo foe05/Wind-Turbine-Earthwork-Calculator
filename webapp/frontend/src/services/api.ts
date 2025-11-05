@@ -373,6 +373,46 @@ class APIClient {
     });
     return response.data;
   }
+
+  // ========== Export Endpoints ==========
+
+  /**
+   * Export project as GeoPackage
+   */
+  async exportProjectGeoPackage(projectId: string): Promise<void> {
+    const response = await this.client.get(`/exports/projects/${projectId}/geopackage`, {
+      responseType: 'blob',
+    });
+
+    // Trigger download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `project_${projectId}.gpkg`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Export job result as GeoPackage
+   */
+  async exportJobGeoPackage(jobId: string): Promise<void> {
+    const response = await this.client.get(`/exports/jobs/${jobId}/geopackage`, {
+      responseType: 'blob',
+    });
+
+    // Trigger download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `job_${jobId}.gpkg`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  }
 }
 
 export const apiClient = new APIClient();

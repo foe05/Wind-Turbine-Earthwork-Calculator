@@ -10,7 +10,7 @@ from slowapi.errors import RateLimitExceeded
 import logging
 
 from app.core.config import get_settings
-from app.api import proxy, websocket, jobs, projects, batch
+from app.api import proxy, websocket, jobs, projects, batch, exports
 
 # Configure logging
 logging.basicConfig(
@@ -51,6 +51,7 @@ app.include_router(websocket.router)
 app.include_router(jobs.router)
 app.include_router(projects.router)
 app.include_router(batch.router)
+app.include_router(exports.router)
 
 
 @app.get("/")

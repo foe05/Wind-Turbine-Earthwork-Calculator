@@ -46,6 +46,15 @@ const ProjectsOverview: React.FC = () => {
     }
   };
 
+  const handleExportProject = async (projectId: string, projectName: string) => {
+    try {
+      await apiClient.exportProjectGeoPackage(projectId);
+    } catch (err: any) {
+      console.error('Error exporting project:', err);
+      alert(`Fehler beim Exportieren: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
   const getUseCaseLabel = (useCase: string) => {
     const labels: Record<string, string> = {
       wka: '🌬️ WKA',
@@ -217,6 +226,13 @@ const ProjectsOverview: React.FC = () => {
                   style={styles.jobsButton}
                 >
                   Jobs anzeigen
+                </button>
+                <button
+                  onClick={() => handleExportProject(project.id, project.name)}
+                  style={styles.exportButton}
+                  title="Als GeoPackage exportieren"
+                >
+                  📦 Export
                 </button>
               </div>
             </div>
@@ -499,6 +515,17 @@ const styles: { [key: string]: React.CSSProperties } = {
     color: '#3B82F6',
     backgroundColor: 'white',
     border: '1px solid #3B82F6',
+    borderRadius: '6px',
+    cursor: 'pointer',
+  },
+  exportButton: {
+    flex: 1,
+    padding: '10px',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#10B981',
+    backgroundColor: 'white',
+    border: '1px solid #10B981',
     borderRadius: '6px',
     cursor: 'pointer',
   },
