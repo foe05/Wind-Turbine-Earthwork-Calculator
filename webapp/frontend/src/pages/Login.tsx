@@ -73,6 +73,9 @@ const Login: React.FC = () => {
       <div style={styles.card}>
         <h1 style={styles.title}>Geo-Engineering Platform</h1>
         <p style={styles.subtitle}>Windkraftanlagen Erdarbeiten Berechnung</p>
+        <p style={styles.welcomeText}>
+          🌟 <strong>Neu hier?</strong> Geben Sie einfach Ihre E-Mail ein - Ihr Account wird automatisch erstellt!
+        </p>
 
         {message && (
           <div
@@ -109,11 +112,14 @@ const Login: React.FC = () => {
         <div style={styles.info}>
           <h3 style={styles.infoTitle}>Wie funktioniert es?</h3>
           <ol style={styles.infoList}>
-            <li>Geben Sie Ihre E-Mail-Adresse ein</li>
+            <li>Geben Sie Ihre E-Mail-Adresse ein (neu oder bestehend)</li>
             <li>Klicken Sie auf "Magic Link senden"</li>
             <li>Überprüfen Sie Ihr Postfach auf den Anmelde-Link</li>
             <li>Klicken Sie auf den Link, um sich anzumelden</li>
           </ol>
+          <p style={styles.infoNote}>
+            ℹ️ Bei neuen E-Mail-Adressen wird automatisch ein Account erstellt - kein separates Registrierungsformular notwendig!
+          </p>
         </div>
       </div>
     </div>
@@ -145,10 +151,21 @@ const styles: { [key: string]: React.CSSProperties } = {
     textAlign: 'center' as const,
   },
   subtitle: {
-    margin: '0 0 32px 0',
+    margin: '0 0 12px 0',
     fontSize: '14px',
     color: '#6B7280',
     textAlign: 'center' as const,
+  },
+  welcomeText: {
+    margin: '0 0 24px 0',
+    padding: '12px 16px',
+    fontSize: '14px',
+    color: '#1F2937',
+    textAlign: 'center' as const,
+    backgroundColor: '#EFF6FF',
+    border: '1px solid #BFDBFE',
+    borderRadius: '8px',
+    lineHeight: '1.5',
   },
   message: {
     padding: '12px',
@@ -210,11 +227,18 @@ const styles: { [key: string]: React.CSSProperties } = {
     color: '#374151',
   },
   infoList: {
-    margin: '0',
+    margin: '0 0 12px 0',
     paddingLeft: '20px',
     fontSize: '14px',
     color: '#6B7280',
     lineHeight: '1.6',
+  },
+  infoNote: {
+    margin: '0',
+    fontSize: '13px',
+    color: '#059669',
+    fontWeight: '500',
+    lineHeight: '1.5',
   },
 };
 

@@ -34,6 +34,7 @@ class MagicLink(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used = Column(Boolean, default=False)
     used_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     ip_address = Column(String(45))
     user_agent = Column(Text)
 

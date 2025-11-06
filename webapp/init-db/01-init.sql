@@ -29,12 +29,14 @@ CREATE TABLE magic_links (
     expires_at TIMESTAMP NOT NULL,
     used BOOLEAN DEFAULT FALSE,
     used_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW(),
     ip_address VARCHAR(45),
     user_agent TEXT
 );
 
 CREATE INDEX idx_magic_links_user_id ON magic_links(user_id);
 CREATE INDEX idx_magic_links_expires_at ON magic_links(expires_at);
+CREATE INDEX idx_magic_links_created_at ON magic_links(created_at);
 
 -- JWT Sessions
 CREATE TABLE sessions (

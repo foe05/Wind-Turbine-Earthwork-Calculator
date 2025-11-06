@@ -73,10 +73,11 @@ services:
       JWT_SECRET: your-secret-key-change-in-production
       JWT_ALGORITHM: HS256
       JWT_EXPIRATION_HOURS: 24
-      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      DEBUG: ${DEBUG:-true}  # Enable dev mode by default
+      SMTP_HOST: ${SMTP_HOST:-}  # Empty by default for dev mode
       SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER}
-      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-noreply@geo-engineering.example.com}
       MAGIC_LINK_EXPIRATION_MINUTES: 15
       FRONTEND_URL: http://localhost:3000
