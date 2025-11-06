@@ -70,7 +70,7 @@ async def proxy_request(
 @router.api_route("/auth/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_auth(path: str, request: Request):
     """Proxy to Auth Service"""
-    return await proxy_request(request, settings.AUTH_SERVICE_URL, f"/{path}")
+    return await proxy_request(request, settings.AUTH_SERVICE_URL, f"/auth/{path}")
 
 
 # DEM Service Routes
