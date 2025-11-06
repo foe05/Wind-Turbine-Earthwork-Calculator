@@ -7,7 +7,9 @@ import logging
 from pathlib import Path
 from typing import List
 import uuid
+import os
 from datetime import datetime, timedelta
+import rasterio
 
 from app.schemas.dem import (
     DEMFetchRequest, DEMFetchResponse,
@@ -167,7 +169,6 @@ async def fetch_dem(
 
     finally:
         # Clean up temporary files
-        import os
         for path in tile_paths:
             try:
                 os.unlink(path)
