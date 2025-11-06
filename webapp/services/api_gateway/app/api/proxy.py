@@ -77,25 +77,25 @@ async def proxy_auth(path: str, request: Request):
 @router.api_route("/dem/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_dem(path: str, request: Request):
     """Proxy to DEM Service"""
-    return await proxy_request(request, settings.DEM_SERVICE_URL, f"/{path}")
+    return await proxy_request(request, settings.DEM_SERVICE_URL, f"/dem/{path}")
 
 
 # Calculation Service Routes
 @router.api_route("/calc/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_calculation(path: str, request: Request):
     """Proxy to Calculation Service"""
-    return await proxy_request(request, settings.CALCULATION_SERVICE_URL, f"/{path}")
+    return await proxy_request(request, settings.CALCULATION_SERVICE_URL, f"/calc/{path}")
 
 
 # Cost Service Routes
 @router.api_route("/costs/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_cost(path: str, request: Request):
     """Proxy to Cost Service"""
-    return await proxy_request(request, settings.COST_SERVICE_URL, f"/{path}")
+    return await proxy_request(request, settings.COST_SERVICE_URL, f"/costs/{path}")
 
 
 # Report Service Routes
 @router.api_route("/report/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_report(path: str, request: Request):
     """Proxy to Report Service"""
-    return await proxy_request(request, settings.REPORT_SERVICE_URL, f"/{path}")
+    return await proxy_request(request, settings.REPORT_SERVICE_URL, f"/report/{path}")
