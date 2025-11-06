@@ -73,8 +73,9 @@ services:
       JWT_SECRET: your-secret-key-change-in-production
       JWT_ALGORITHM: HS256
       JWT_EXPIRATION_HOURS: 24
-      DEBUG: ${DEBUG:-true}  # Enable dev mode by default
-      SMTP_HOST: ${SMTP_HOST:-}  # Empty by default for dev mode
+      # Enable dev mode by default (empty SMTP = no emails)
+      DEBUG: ${DEBUG:-true}
+      SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}

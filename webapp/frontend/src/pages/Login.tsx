@@ -2,7 +2,7 @@
  * Login Page - Magic Link Authentication
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import apiClient from '../services/api';
 
@@ -14,10 +14,14 @@ const Login: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
+  // Prevent double verification (React 18 StrictMode calls useEffect twice)
+  const verificationAttempted = useRef(false);
+
   // Check for verification token in URL
   useEffect(() => {
     const token = searchParams.get('token');
-    if (token) {
+    if (token && !verificationAttempted.current) {
+      verificationAttempted.current = true;
       verifyToken(token);
     }
   }, [searchParams]);

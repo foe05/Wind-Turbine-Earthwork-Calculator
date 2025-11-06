@@ -65,12 +65,15 @@ async def request_magic_link(
     # Send email (skip if SMTP not configured for development)
     email_sent = False
 
+    # Check if SMTP is configured (non-empty and not a comment)
+    smtp_configured = settings.SMTP_HOST and not settings.SMTP_HOST.strip().startswith('#')
+
     try:
-        if settings.SMTP_HOST:
+        if smtp_configured:
             email_sent = await send_magic_link_email(request.email, token)
         else:
-            # Development mode: Skip email sending
-            email_sent = True  # Pretend it worked
+            # Development mode: Skip email sending (no error logged)
+            email_sent = True
     except Exception as e:
         # In development, don't fail if email can't be sent
         if settings.DEBUG:
@@ -81,7 +84,7 @@ async def request_magic_link(
                 detail=f"Failed to send email: {str(e)}"
             )
 
-    message = f"Magic link sent to {request.email}" if settings.SMTP_HOST else \
+    message = f"Magic link sent to {request.email}" if smtp_configured else \
               f"Magic link created for {request.email}. Use /auth/dev/magic-links/{request.email} to retrieve it."
 
     return MagicLinkResponse(
