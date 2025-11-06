@@ -16,7 +16,7 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT NOW(),
     last_login TIMESTAMP,
     is_active BOOLEAN DEFAULT TRUE,
-    metadata JSONB DEFAULT '{}'::jsonb
+    user_metadata JSONB DEFAULT '{}'::jsonb
 );
 
 CREATE INDEX idx_users_email ON users(email);

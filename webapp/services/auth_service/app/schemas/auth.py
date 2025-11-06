@@ -72,3 +72,7 @@ class LogoutRequest(BaseModel):
 class LogoutResponse(BaseModel):
     """Logout response"""
     message: str = "Successfully logged out"
+
+
+# Resolve forward references for Pydantic v2
+TokenVerifyResponse.model_rebuild()
