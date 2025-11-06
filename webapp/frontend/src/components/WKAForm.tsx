@@ -55,9 +55,8 @@ const WKAForm: React.FC<WKAFormProps> = ({ site, onCalculationComplete }) => {
     try {
       // Step 1: Fetch DEM data
       const demResponse = await apiClient.fetchDEM({
+        coordinates: [[site.utmPosition.easting, site.utmPosition.northing]],
         crs: site.utmPosition.epsg,
-        center_x: site.utmPosition.easting,
-        center_y: site.utmPosition.northing,
         buffer_meters: 250, // CRITICAL: 250m buffer requirement
       });
 

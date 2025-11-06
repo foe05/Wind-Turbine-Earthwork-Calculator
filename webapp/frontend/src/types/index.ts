@@ -17,25 +17,22 @@ export interface UTMCoordinate {
 
 // DEM types
 export interface DEMRequest {
-  crs: string;
-  center_x: number;
-  center_y: number;
+  coordinates: Array<[number, number]>; // List of [easting, northing] tuples in UTM
+  crs: string; // UTM CRS (e.g., 'EPSG:25832')
   buffer_meters: number;
+  force_refresh?: boolean;
 }
 
 export interface DEMResponse {
   dem_id: string;
-  crs: string;
-  center_x: number;
-  center_y: number;
-  bounds: {
-    minx: number;
-    miny: number;
-    maxx: number;
-    maxy: number;
-  };
   tiles_count: number;
-  cached: boolean;
+  utm_zone: number;
+  attribution: string;
+  cache_hits: number;
+  api_downloads: number;
+  file_path: string;
+  created_at: string;
+  expires_at: string;
 }
 
 // WKA Calculation types

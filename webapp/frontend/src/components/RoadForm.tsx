@@ -59,14 +59,14 @@ const RoadForm: React.FC<RoadFormProps> = ({ road, onCalculationComplete }) => {
         return [utm.easting, utm.northing];
       });
 
-      // Get first point for DEM center
+      // Convert all points to UTM coordinates for DEM fetch
+      const utmCoords = utmCenterline.map(coord => [coord[0], coord[1]] as [number, number]);
       const firstUTM = latLngToUTM(road.centerline[0]);
 
       // Step 1: Fetch DEM data
       const demResponse = await apiClient.fetchDEM({
+        coordinates: utmCoords,
         crs: firstUTM.epsg,
-        center_x: firstUTM.easting,
-        center_y: firstUTM.northing,
         buffer_meters: 250,
       });
 
