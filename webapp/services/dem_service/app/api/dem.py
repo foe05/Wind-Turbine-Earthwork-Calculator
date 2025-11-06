@@ -89,6 +89,7 @@ async def fetch_dem(
     cache_hits = 0
     api_downloads = 0
     attribution = "hoehendaten.de"
+    memfiles = []  # Keep memfiles alive to prevent data corruption
 
     for easting, northing in tiles_needed:
         # Check cache first (unless force_refresh)
@@ -97,14 +98,16 @@ async def fetch_dem(
 
             if cached_tile:
                 # Load from cache
-                dataset = decode_dem_tile(
+                result = decode_dem_tile(
                     cached_tile['data'],
                     easting,
                     northing,
                     utm_zone
                 )
 
-                if dataset:
+                if result:
+                    memfile, dataset = result
+                    memfiles.append(memfile)  # Keep memfile alive
                     tile_datasets.append(dataset)
                     cache_hits += 1
                     attribution = cached_tile.get('attribution', attribution)
@@ -118,14 +121,16 @@ async def fetch_dem(
             continue
 
         # Decode tile
-        dataset = decode_dem_tile(
+        result = decode_dem_tile(
             tile_data['data'],
             easting,
             northing,
             utm_zone
         )
 
-        if dataset:
+        if result:
+            memfile, dataset = result
+            memfiles.append(memfile)  # Keep memfile alive
             tile_datasets.append(dataset)
             api_downloads += 1
             attribution = tile_data.get('attribution', attribution)

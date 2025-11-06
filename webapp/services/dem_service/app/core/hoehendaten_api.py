@@ -256,7 +256,7 @@ def fetch_dem_tile_from_api(
         return None
 
 
-def decode_dem_tile(base64_data: str, easting: float, northing: float, zone: int) -> Optional[rasterio.DatasetReader]:
+def decode_dem_tile(base64_data: str, easting: float, northing: float, zone: int) -> Optional[tuple]:
     """
     Dekodiert Base64 GeoTIFF Daten zu rasterio Dataset
 
@@ -267,13 +267,15 @@ def decode_dem_tile(base64_data: str, easting: float, northing: float, zone: int
         zone: UTM Zone
 
     Returns:
-        rasterio MemoryFile DatasetReader oder None
+        Tuple of (MemoryFile, DatasetReader) or None
+        IMPORTANT: MemoryFile must be kept alive to prevent data corruption
     """
     try:
         # Base64 dekodieren
         tif_bytes = base64.b64decode(base64_data)
 
         # Als rasterio Dataset öffnen
+        # IMPORTANT: Return both memfile and dataset to keep memfile alive
         memfile = MemoryFile(tif_bytes)
         dataset = memfile.open()
 
@@ -282,7 +284,7 @@ def decode_dem_tile(base64_data: str, easting: float, northing: float, zone: int
             f"CRS: {dataset.crs}"
         )
 
-        return dataset
+        return (memfile, dataset)
 
     except Exception as e:
         logger.error(f"Fehler beim Dekodieren: {e}", exc_info=True)
