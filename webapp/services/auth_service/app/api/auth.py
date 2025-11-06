@@ -239,3 +239,69 @@ async def logout(
         db.commit()
 
     return LogoutResponse(message="Successfully logged out")
+
+
+@router.get("/dev/magic-links/{email}")
+async def get_magic_links_for_dev(
+    email: str,
+    db: Session = Depends(get_db)
+):
+    """
+    🔧 DEVELOPMENT ONLY: Get magic links for an email without sending email
+
+    This endpoint helps with local development when SMTP is not configured.
+    Only available when DEBUG=True or SMTP is not configured.
+
+    Usage:
+    1. Request login via POST /auth/request-login with your email
+    2. Call this endpoint: GET /auth/dev/magic-links/{email}
+    3. Copy the magic link URL and open it in your browser
+    """
+    # Only allow in development mode or when SMTP is not configured
+    if not settings.DEBUG and settings.SMTP_HOST:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is only available in development mode"
+        )
+
+    # Get user
+    user = db.query(User).filter(User.email == email).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No user found with email: {email}"
+        )
+
+    # Get all unused, non-expired magic links for this user
+    magic_links = db.query(MagicLink).filter(
+        MagicLink.user_id == user.id,
+        MagicLink.used == False,
+        MagicLink.expires_at > datetime.utcnow()
+    ).order_by(MagicLink.created_at.desc()).all()
+
+    if not magic_links:
+        return {
+            "email": email,
+            "message": "No active magic links found. Request a new login first.",
+            "links": []
+        }
+
+    # Build full URLs
+    links = []
+    for ml in magic_links:
+        magic_link_url = f"{settings.FRONTEND_URL}/login?token={ml.token}"
+        links.append({
+            "token": ml.token,
+            "url": magic_link_url,
+            "created_at": ml.created_at.isoformat(),
+            "expires_at": ml.expires_at.isoformat(),
+            "expires_in_minutes": int((ml.expires_at - datetime.utcnow()).total_seconds() / 60)
+        })
+
+    return {
+        "email": email,
+        "user_id": str(user.id),
+        "message": "🔧 Development mode: Copy the URL below and open in your browser",
+        "links": links
+    }
