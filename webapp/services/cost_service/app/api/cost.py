@@ -10,9 +10,7 @@ from app.schemas.cost import (
     CostRatesPreset
 )
 
-# Import shared modules
-import sys
-sys.path.append('/shared')
+# Import shared modules (PYTHONPATH is set in docker-compose.yml)
 from shared.core.material_balance import calculate_material_balance
 from shared.core.costs import calculate_costs
 

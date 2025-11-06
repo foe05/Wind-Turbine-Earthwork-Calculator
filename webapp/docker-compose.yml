@@ -130,6 +130,7 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       DEM_SERVICE_URL: http://dem_service:8002
+      PYTHONPATH: /shared
     depends_on:
       redis:
         condition: service_healthy
@@ -150,6 +151,7 @@ services:
       - "8004:8004"
     environment:
       REDIS_URL: redis://redis:6379
+      PYTHONPATH: /shared
     depends_on:
       redis:
         condition: service_healthy

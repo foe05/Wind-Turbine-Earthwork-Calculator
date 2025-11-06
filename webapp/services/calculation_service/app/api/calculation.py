@@ -13,9 +13,7 @@ from app.schemas.calculation import (
     WKASiteRequest, WKASiteResponse
 )
 
-# Import shared modules
-import sys
-sys.path.append('/shared')
+# Import shared modules (PYTHONPATH is set in docker-compose.yml)
 from shared.core.foundation import calculate_foundation_circular, calculate_foundation_polygon
 from shared.core.material_balance import calculate_material_balance
 
