@@ -15,6 +15,7 @@ import json
 import logging
 from typing import List, Tuple, Optional, Dict
 from pathlib import Path
+import tempfile
 import requests
 import rasterio
 from rasterio.merge import merge
@@ -256,9 +257,9 @@ def fetch_dem_tile_from_api(
         return None
 
 
-def decode_dem_tile(base64_data: str, easting: float, northing: float, zone: int) -> Optional[tuple]:
+def decode_dem_tile(base64_data: str, easting: float, northing: float, zone: int) -> Optional[str]:
     """
-    Dekodiert Base64 GeoTIFF Daten zu rasterio Dataset
+    Dekodiert Base64 GeoTIFF Daten und speichert in temporärer Datei
 
     Args:
         base64_data: Base64-kodierter GeoTIFF String
@@ -267,24 +268,26 @@ def decode_dem_tile(base64_data: str, easting: float, northing: float, zone: int
         zone: UTM Zone
 
     Returns:
-        Tuple of (MemoryFile, DatasetReader) or None
-        IMPORTANT: MemoryFile must be kept alive to prevent data corruption
+        Path to temporary file or None
+        NOTE: Caller is responsible for cleaning up temp files
     """
     try:
         # Base64 dekodieren
         tif_bytes = base64.b64decode(base64_data)
 
-        # Als rasterio Dataset öffnen
-        # IMPORTANT: Return both memfile and dataset to keep memfile alive
-        memfile = MemoryFile(tif_bytes)
-        dataset = memfile.open()
+        # In temporäre Datei schreiben (wird nicht automatisch gelöscht)
+        temp_file = tempfile.NamedTemporaryFile(suffix='.tif', delete=False)
+        temp_file.write(tif_bytes)
+        temp_file.close()
 
-        logger.debug(
-            f"  Tile dekodiert: {dataset.width}x{dataset.height} px, "
-            f"CRS: {dataset.crs}"
-        )
+        # Validieren dass die Datei lesbar ist
+        with rasterio.open(temp_file.name) as dataset:
+            logger.debug(
+                f"  Tile dekodiert: {dataset.width}x{dataset.height} px, "
+                f"CRS: {dataset.crs}"
+            )
 
-        return (memfile, dataset)
+        return temp_file.name
 
     except Exception as e:
         logger.error(f"Fehler beim Dekodieren: {e}", exc_info=True)

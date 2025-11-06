@@ -85,11 +85,10 @@ async def fetch_dem(
     logger.info(f"\n📦 Lade {len(tiles_needed)} Kachel(n)...")
 
     # 3. Fetch tiles (from cache or API)
-    tile_datasets = []
+    tile_paths = []  # Paths to temporary tile files
     cache_hits = 0
     api_downloads = 0
     attribution = "hoehendaten.de"
-    memfiles = []  # Keep memfiles alive to prevent data corruption
 
     for easting, northing in tiles_needed:
         # Check cache first (unless force_refresh)
@@ -98,17 +97,15 @@ async def fetch_dem(
 
             if cached_tile:
                 # Load from cache
-                result = decode_dem_tile(
+                tile_path = decode_dem_tile(
                     cached_tile['data'],
                     easting,
                     northing,
                     utm_zone
                 )
 
-                if result:
-                    memfile, dataset = result
-                    memfiles.append(memfile)  # Keep memfile alive
-                    tile_datasets.append(dataset)
+                if tile_path:
+                    tile_paths.append(tile_path)
                     cache_hits += 1
                     attribution = cached_tile.get('attribution', attribution)
                     continue
@@ -120,18 +117,16 @@ async def fetch_dem(
             logger.error(f"Fehler beim Laden: E={easting}, N={northing}")
             continue
 
-        # Decode tile
-        result = decode_dem_tile(
+        # Decode tile to temp file
+        tile_path = decode_dem_tile(
             tile_data['data'],
             easting,
             northing,
             utm_zone
         )
 
-        if result:
-            memfile, dataset = result
-            memfiles.append(memfile)  # Keep memfile alive
-            tile_datasets.append(dataset)
+        if tile_path:
+            tile_paths.append(tile_path)
             api_downloads += 1
             attribution = tile_data.get('attribution', attribution)
 
@@ -141,26 +136,43 @@ async def fetch_dem(
     logger.info(f"\n📊 Cache-Statistik:")
     logger.info(f"   💾 Cache-Hits: {cache_hits}/{len(tiles_needed)}")
     logger.info(f"   ⬇️ API-Downloads: {api_downloads}/{len(tiles_needed)}")
-    logger.info(f"   ✓ Erfolgreich geladen: {len(tile_datasets)}/{len(tiles_needed)}")
+    logger.info(f"   ✓ Erfolgreich geladen: {len(tile_paths)}/{len(tiles_needed)}")
 
-    if not tile_datasets:
+    if not tile_paths:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Keine Kacheln erfolgreich geladen"
         )
 
-    # 4. Create mosaic
-    logger.info(f"\n🔨 Erstelle Mosaik aus {len(tile_datasets)} Kachel(n)...")
+    # 4. Create mosaic from tile files
+    logger.info(f"\n🔨 Erstelle Mosaik aus {len(tile_paths)} Kachel(n)...")
 
-    mosaic_result = create_mosaic_from_tiles(tile_datasets)
+    try:
+        # Open all tile files
+        tile_datasets = [rasterio.open(path) for path in tile_paths]
 
-    if not mosaic_result:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Mosaik-Erstellung fehlgeschlagen"
-        )
+        mosaic_result = create_mosaic_from_tiles(tile_datasets)
 
-    mosaic, transform, crs = mosaic_result
+        if not mosaic_result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Mosaik-Erstellung fehlgeschlagen"
+            )
+
+        mosaic, transform, crs = mosaic_result
+
+        # Close datasets
+        for dataset in tile_datasets:
+            dataset.close()
+
+    finally:
+        # Clean up temporary files
+        import os
+        for path in tile_paths:
+            try:
+                os.unlink(path)
+            except Exception as e:
+                logger.warning(f"Could not delete temp file {path}: {e}")
 
     # 5. Save to file
     dem_id = uuid.uuid4()
