@@ -76,20 +76,27 @@ export interface CostCalculationRequest {
   platform_area: number;
   cost_excavation: number;
   cost_transport: number;
-  cost_disposal: number;
-  cost_fill_material: number;
-  cost_platform_prep: number;
+  cost_fill_import: number;
+  cost_gravel: number;
+  cost_compaction: number;
+  gravel_thickness: number;
   material_reuse: boolean;
   swell_factor: number;
   compaction_factor: number;
 }
 
 export interface CostCalculationResponse {
-  total_cost: number;
-  excavation_cost: number;
-  disposal_cost: number;
-  fill_cost: number;
-  platform_prep_cost: number;
+  cost_total: number;
+  cost_excavation: number;
+  cost_transport: number;
+  cost_fill: number;
+  cost_gravel: number;
+  cost_compaction: number;
+  cost_saving: number;
+  saving_pct: number;
+  gravel_vol: number;
+  cost_total_without_reuse: number;
+  cost_total_with_reuse: number;
   material_balance: {
     available: number;
     required: number;
@@ -101,11 +108,13 @@ export interface CostCalculationResponse {
 
 export interface CostRatesPreset {
   name: string;
+  description: string;
   cost_excavation: number;
   cost_transport: number;
-  cost_disposal: number;
-  cost_fill_material: number;
-  cost_platform_prep: number;
+  cost_fill_import: number;
+  cost_gravel: number;
+  cost_compaction: number;
+  gravel_thickness: number;
 }
 
 // Report types

@@ -90,9 +90,10 @@ const WKAForm: React.FC<WKAFormProps> = ({ site, onCalculationComplete }) => {
             platform_area: calculationResult.platform_area,
             cost_excavation: selectedPreset.cost_excavation,
             cost_transport: selectedPreset.cost_transport,
-            cost_disposal: selectedPreset.cost_disposal,
-            cost_fill_material: selectedPreset.cost_fill_material,
-            cost_platform_prep: selectedPreset.cost_platform_prep,
+            cost_fill_import: selectedPreset.cost_fill_import,
+            cost_gravel: selectedPreset.cost_gravel,
+            cost_compaction: selectedPreset.cost_compaction,
+            gravel_thickness: selectedPreset.gravel_thickness,
             material_reuse: materialReuse,
             swell_factor: 1.25,
             compaction_factor: 0.85,
@@ -110,7 +111,26 @@ const WKAForm: React.FC<WKAFormProps> = ({ site, onCalculationComplete }) => {
       onCalculationComplete(updatedSite);
     } catch (err: any) {
       console.error('Calculation error:', err);
-      setError(err.response?.data?.detail || err.message || 'Berechnung fehlgeschlagen');
+
+      // Handle FastAPI validation errors
+      let errorMessage = 'Berechnung fehlgeschlagen';
+      if (err.response?.data?.detail) {
+        const detail = err.response.data.detail;
+        // Check if it's an array of validation errors
+        if (Array.isArray(detail)) {
+          errorMessage = detail.map((e: any) =>
+            `${e.loc?.join?.(' -> ') || 'Fehler'}: ${e.msg}`
+          ).join(', ');
+        } else if (typeof detail === 'string') {
+          errorMessage = detail;
+        } else {
+          errorMessage = JSON.stringify(detail);
+        }
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+
+      setError(errorMessage);
     } finally {
       setIsCalculating(false);
     }
@@ -274,8 +294,8 @@ const WKAForm: React.FC<WKAFormProps> = ({ site, onCalculationComplete }) => {
                 style={styles.select}
               >
                 {costPresets.map((preset) => (
-                  <option key={preset.name} value={preset.name}>
-                    {preset.name.charAt(0).toUpperCase() + preset.name.slice(1)}
+                  <option key={preset.name} value={preset.name} title={preset.description}>
+                    {preset.description}
                   </option>
                 ))}
               </select>
@@ -347,26 +367,38 @@ const WKAForm: React.FC<WKAFormProps> = ({ site, onCalculationComplete }) => {
               <div style={styles.resultsGrid}>
                 <div style={styles.resultItem}>
                   <label>Aushub:</label>
-                  <strong>{site.cost.excavation_cost.toFixed(2)} €</strong>
+                  <strong>{site.cost.cost_excavation.toFixed(2)} €</strong>
                 </div>
                 <div style={styles.resultItem}>
-                  <label>Entsorgung:</label>
-                  <strong>{site.cost.disposal_cost.toFixed(2)} €</strong>
+                  <label>Transport:</label>
+                  <strong>{site.cost.cost_transport.toFixed(2)} €</strong>
                 </div>
                 <div style={styles.resultItem}>
                   <label>Auffüllung:</label>
-                  <strong>{site.cost.fill_cost.toFixed(2)} €</strong>
+                  <strong>{site.cost.cost_fill.toFixed(2)} €</strong>
                 </div>
                 <div style={styles.resultItem}>
-                  <label>Planiervorbereitung:</label>
-                  <strong>{site.cost.platform_prep_cost.toFixed(2)} €</strong>
+                  <label>Schotter:</label>
+                  <strong>{site.cost.cost_gravel.toFixed(2)} €</strong>
+                </div>
+                <div style={styles.resultItem}>
+                  <label>Verdichtung:</label>
+                  <strong>{site.cost.cost_compaction.toFixed(2)} €</strong>
                 </div>
                 <div style={styles.resultItem}>
                   <label>Gesamt:</label>
                   <strong style={{ fontSize: '18px', color: '#1F2937' }}>
-                    {site.cost.total_cost.toFixed(2)} €
+                    {site.cost.cost_total.toFixed(2)} €
                   </strong>
                 </div>
+                {materialReuse && site.cost.cost_saving > 0 && (
+                  <div style={styles.resultItem}>
+                    <label>Einsparung:</label>
+                    <strong style={{ color: '#10B981' }}>
+                      {site.cost.cost_saving.toFixed(2)} € ({site.cost.saving_pct.toFixed(1)}%)
+                    </strong>
+                  </div>
+                )}
               </div>
               {materialReuse && (
                 <div style={styles.materialBalance}>
