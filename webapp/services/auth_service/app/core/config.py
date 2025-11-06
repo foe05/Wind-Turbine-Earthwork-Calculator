@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "Geo-Engineering Auth Service"
     VERSION: str = "1.0.0"
-    DEBUG: bool = False
+    DEBUG: bool = True  # Default to True for development
 
     # Database
     DATABASE_URL: str
@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     MAGIC_LINK_EXPIRATION_MINUTES: int = 15
     MAGIC_LINK_SECRET: str = "magic-link-secret-change-in-production"
 
-    # SMTP
-    SMTP_HOST: str
+    # SMTP (all optional for development)
+    SMTP_HOST: str = ""  # Empty by default
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""

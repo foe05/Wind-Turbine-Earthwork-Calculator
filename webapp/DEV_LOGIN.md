@@ -108,22 +108,54 @@ In Production wird dieser Endpoint **automatisch deaktiviert**! 🔒
 ## 🧪 Vollständiger Test-Workflow
 
 ```bash
-# 1. Services starten
+# 1. Services starten (oder neustarten nach Config-Änderungen)
 cd webapp
-docker-compose up -d
+docker-compose down  # Falls schon läuft
+docker-compose up -d --build auth_service  # Auth Service neu bauen
 
 # 2. Warte bis alles läuft (ca. 30 Sekunden)
 docker-compose ps
+# Alle Services sollten "Up" sein
 
-# 3. Login mit Dev-Script
+# 3. Prüfe ob Dev-Mode aktiviert ist
+docker-compose logs auth_service | grep -i debug
+
+# 4. Login mit Dev-Script
 ./dev-login.sh test@example.com
 
-# 4. Kopiere den Magic Link und öffne ihn im Browser
+# Erwartete Ausgabe:
+# 📧 Email: test@example.com
+# Step 1: Requesting magic link...
+# ✅ Response: {"email":"test@example.com","message":"Magic link created..."}
+# Step 2: Fetching magic link from dev endpoint...
+# ✨ Your Magic Link:
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# http://localhost:3000/login?token=eyJhbGc...
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 5. Kopiere den Magic Link und öffne ihn im Browser
 # → Du wirst automatisch eingeloggt und zu /dashboard weitergeleitet
 
-# 5. Prüfe ob Login funktioniert hat
+# 6. Prüfe ob Login funktioniert hat
 curl -X GET http://localhost:8000/auth/me \
   -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### ⚠️ Nach Änderungen an der Config
+
+Wenn du die `docker-compose.yml` oder Config-Dateien geändert hast:
+
+```bash
+cd webapp
+
+# Auth Service neu starten
+docker-compose restart auth_service
+
+# Oder komplett neu bauen:
+docker-compose up -d --build auth_service
+
+# Logs prüfen:
+docker-compose logs -f auth_service
 ```
 
 ---

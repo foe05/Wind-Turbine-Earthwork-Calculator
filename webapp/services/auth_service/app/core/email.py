@@ -20,7 +20,7 @@ async def send_magic_link_email(email: str, token: str) -> bool:
     Returns:
         True if sent successfully
     """
-    magic_link = f"{settings.FRONTEND_URL}/auth/verify?token={token}"
+    magic_link = f"{settings.FRONTEND_URL}/login?token={token}"
 
     # Create HTML message
     html_content = f"""

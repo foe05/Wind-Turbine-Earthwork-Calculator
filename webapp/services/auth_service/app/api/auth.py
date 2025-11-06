@@ -62,18 +62,31 @@ async def request_magic_link(
     db.add(magic_link)
     db.commit()
 
-    # Send email
-    email_sent = await send_magic_link_email(request.email, token)
+    # Send email (skip if SMTP not configured for development)
+    email_sent = False
 
-    if not email_sent:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send email. Please try again."
-        )
+    try:
+        if settings.SMTP_HOST:
+            email_sent = await send_magic_link_email(request.email, token)
+        else:
+            # Development mode: Skip email sending
+            email_sent = True  # Pretend it worked
+    except Exception as e:
+        # In development, don't fail if email can't be sent
+        if settings.DEBUG:
+            email_sent = True  # Allow login without email in dev mode
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to send email: {str(e)}"
+            )
+
+    message = f"Magic link sent to {request.email}" if settings.SMTP_HOST else \
+              f"Magic link created for {request.email}. Use /auth/dev/magic-links/{request.email} to retrieve it."
 
     return MagicLinkResponse(
         email=request.email,
-        message=f"Magic link sent to {request.email}"
+        message=message
     )
 
 
