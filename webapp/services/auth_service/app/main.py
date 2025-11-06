@@ -2,11 +2,14 @@
 Auth Service - Main Application
 FastAPI app for authentication (Magic Links + JWT)
 """
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.api import auth
+from app.db.init_db import init_db
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Create app
@@ -17,6 +20,18 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on startup"""
+    try:
+        logger.info("Starting up auth service...")
+        init_db()
+        logger.info("Auth service started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start auth service: {e}")
+        raise
 
 # CORS middleware
 app.add_middleware(
