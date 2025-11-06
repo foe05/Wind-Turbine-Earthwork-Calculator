@@ -42,7 +42,7 @@ export interface WKACalculationRequest {
   center_y: number;
   foundation_diameter: number;
   foundation_depth: number;
-  foundation_type: number;
+  foundation_type: 'shallow' | 'deep' | 'pile';
   platform_length: number;
   platform_width: number;
   slope_width: number;

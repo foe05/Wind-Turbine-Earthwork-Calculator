@@ -16,7 +16,7 @@ const WKAForm: React.FC<WKAFormProps> = ({ site, onCalculationComplete }) => {
   // Form state
   const [foundationDiameter, setFoundationDiameter] = useState<number>(25);
   const [foundationDepth, setFoundationDepth] = useState<number>(3);
-  const [foundationType, setFoundationType] = useState<number>(0);
+  const [foundationType, setFoundationType] = useState<'shallow' | 'deep' | 'pile'>('shallow');
   const [platformLength, setPlatformLength] = useState<number>(50);
   const [platformWidth, setPlatformWidth] = useState<number>(40);
   const [slopeWidth, setSlopeWidth] = useState<number>(10);
@@ -197,12 +197,12 @@ const WKAForm: React.FC<WKAFormProps> = ({ site, onCalculationComplete }) => {
           <label style={styles.label}>Typ:</label>
           <select
             value={foundationType}
-            onChange={(e) => setFoundationType(parseInt(e.target.value))}
+            onChange={(e) => setFoundationType(e.target.value as 'shallow' | 'deep' | 'pile')}
             style={styles.select}
           >
-            <option value="0">Flachgründung</option>
-            <option value="1">Tiefgründung mit Konus</option>
-            <option value="2">Pfahlgründung</option>
+            <option value="shallow">Flachgründung</option>
+            <option value="deep">Tiefgründung mit Konus</option>
+            <option value="pile">Pfahlgründung</option>
           </select>
         </div>
       </div>
