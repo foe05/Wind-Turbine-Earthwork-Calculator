@@ -23,23 +23,6 @@ class MagicLinkResponse(BaseModel):
 
 
 # ============================================================================
-# Token Verify
-# ============================================================================
-
-class TokenVerifyRequest(BaseModel):
-    """Request to verify magic link token"""
-    token: str = Field(..., min_length=20)
-
-
-class TokenVerifyResponse(BaseModel):
-    """Response after verifying token"""
-    access_token: str
-    token_type: str = "bearer"
-    expires_at: datetime
-    user: "UserResponse"
-
-
-# ============================================================================
 # User
 # ============================================================================
 
@@ -53,6 +36,23 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============================================================================
+# Token Verify
+# ============================================================================
+
+class TokenVerifyRequest(BaseModel):
+    """Request to verify magic link token"""
+    token: str = Field(..., min_length=20)
+
+
+class TokenVerifyResponse(BaseModel):
+    """Response after verifying token"""
+    access_token: str
+    token_type: str = "bearer"
+    expires_at: datetime
+    user: UserResponse
 
 
 class UserCreate(BaseModel):

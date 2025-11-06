@@ -304,3 +304,98 @@ export interface AppState {
   solarProjects: SolarProject[];
   terrainProjects: TerrainProject[];
 }
+
+// =============================================================================
+// Phase 3: Project Management Types
+// =============================================================================
+
+export interface Project {
+  id: string;
+  user_id: string;
+  use_case: 'wka' | 'road' | 'solar' | 'terrain';
+  name: string;
+  description?: string;
+  crs: string;
+  utm_zone: number;
+  bounds?: any; // GeoJSON Polygon
+  metadata: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+  // Statistics
+  job_count?: number;
+  completed_jobs?: number;
+  last_calculation?: string;
+}
+
+export interface ProjectCreateRequest {
+  name: string;
+  description?: string;
+  use_case: 'wka' | 'road' | 'solar' | 'terrain';
+  crs: string;
+  utm_zone: number;
+  bounds?: any;
+  metadata?: Record<string, any>;
+}
+
+export interface ProjectUpdateRequest {
+  name?: string;
+  description?: string;
+  bounds?: any;
+  metadata?: Record<string, any>;
+}
+
+// =============================================================================
+// Phase 3: Jobs History Types
+// =============================================================================
+
+export interface JobHistory {
+  id: string;
+  project_id: string;
+  project_name?: string;
+  status: 'pending' | 'fetching_dem' | 'calculating' | 'computing_costs' | 'generating_report' | 'completed' | 'failed';
+  progress: number;
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+  site_count?: number;
+  created_at: string;
+}
+
+export interface JobDetails extends JobHistory {
+  input_data: any;
+  result_data?: any;
+  report_url?: string;
+  updated_at: string;
+}
+
+// =============================================================================
+// Phase 3: Batch Upload Types
+// =============================================================================
+
+export interface SiteImport {
+  name?: string;
+  lat?: number;
+  lng?: number;
+  utm_x?: number;
+  utm_y?: number;
+  utm_zone?: number;
+  foundation_diameter: number;
+  foundation_depth: number;
+  platform_length: number;
+  platform_width: number;
+}
+
+export interface BatchUploadRequest {
+  project_id: string;
+  sites: SiteImport[];
+  crs?: string;
+  cost_params?: any;
+  auto_start_jobs?: boolean;
+}
+
+export interface BatchUploadResponse {
+  project_id: string;
+  sites_imported: number;
+  jobs_created: string[];
+  errors: string[];
+}

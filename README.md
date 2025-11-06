@@ -527,6 +527,120 @@ MIT License - siehe [LICENSE](LICENSE) Datei.
 
 ---
 
+## 🌐 Web Application (Microservices Architecture)
+
+Neben dem QGIS Plugin bietet das Projekt auch eine **vollständige Web-Anwendung** mit Microservices-Architektur für skalierbare, cloud-basierte Berechnungen.
+
+### ✨ Features (Phase 1-3 Complete)
+
+**Phase 1: Core Infrastructure**
+- 🔐 Passwordless Authentication (Magic Link via Email)
+- 🗺️ Interactive Map with Drawing Tools (Leaflet)
+- 🏗️ WKA Site Calculations (Foundation + Platform)
+- 📊 Real-time Results Display
+- 🗄️ PostgreSQL/PostGIS Database
+
+**Phase 2: Multi-Use-Case Support**
+- 🛣️ Road Projects (Centerline-based calculations)
+- ☀️ Solar Parks (Polygon-based terrain analysis)
+- 🗺️ Terrain Analysis (Cut/Fill for any polygon)
+- 📄 PDF Report Generation
+- 🔄 Celery Background Jobs
+- 📡 WebSocket Real-time Progress Updates
+- 💾 Intelligent DEM Caching
+- 🧪 Integration Tests & Demo Data
+
+**Phase 3: User Experience** ⭐ **NEW**
+- 📂 **Projects Dashboard** - Project management with CRUD operations
+- 📊 **Jobs History** - View all calculations with filtering
+- 📦 **Batch Upload** - CSV/GeoJSON import (max 123 sites)
+  - Automatic UTM zone detection and conversion
+  - Validation and bulk job creation
+- 📤 **GeoPackage Export** - Professional GIS data export
+- 🚨 **Error Pages** - User-friendly 404 and error boundary
+- ⚡ **Lazy Loading** - Optimized frontend performance
+
+### 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Frontend (React)                        │
+│  Projects · Jobs · Calculator · Batch Upload · Export      │
+└────────────────┬────────────────────────────────────────────┘
+                 │
+┌────────────────▼────────────────────────────────────────────┐
+│                  API Gateway (FastAPI)                      │
+│  Authentication · Rate Limiting · WebSocket · Export       │
+└─────┬──────┬──────┬──────┬──────┬──────┬─────────────────┘
+      │      │      │      │      │      │
+┌─────▼──┐ ┌─▼───┐ ┌▼────┐ ┌▼───┐ ┌▼────┐ ┌▼──────────┐
+│  Auth  │ │ DEM │ │Calc │ │Cost│ │Report│ │ Database  │
+│Service │ │Svc  │ │Svc  │ │Svc │ │ Svc  │ │ Postgres  │
+└────────┘ └─────┘ └─────┘ └────┘ └──────┘ └───────────┘
+                                                │
+                                       ┌────────▼────────┐
+                                       │ Celery Workers  │
+                                       │ Background Jobs │
+                                       └─────────────────┘
+```
+
+### 🚀 Quick Start (Web App)
+
+```bash
+# 1. Start all services with Docker Compose
+cd webapp
+docker-compose up -d
+
+# 2. Access the application
+# Frontend: http://localhost:3000
+# API Docs: http://localhost:8000/docs
+# Database: localhost:5432
+```
+
+### 📖 API Documentation
+
+Key endpoints:
+- `POST /auth/request-login` - Request magic link
+- `GET /projects` - List user projects
+- `POST /batch/upload-csv` - Batch upload sites
+- `GET /exports/projects/{id}/geopackage` - Export project data
+- `POST /jobs` - Create calculation job
+- `WS /ws/job/{id}` - Real-time progress updates
+
+See full API documentation at `/docs` endpoint.
+
+### 🔧 Technology Stack
+
+**Frontend**:
+- React 18 + TypeScript
+- React Router (Lazy Loading)
+- Leaflet Maps + Drawing Tools
+- Axios HTTP Client
+- Vite Build Tool
+
+**Backend**:
+- FastAPI (Python 3.11+)
+- PostgreSQL + PostGIS
+- Celery + Redis
+- WebSockets
+- GeoPandas (GeoPackage export)
+
+**Infrastructure**:
+- Docker + Docker Compose
+- Nginx Reverse Proxy
+- Redis Cache
+- Microservices Architecture
+
+### 📚 Documentation
+
+Detailed documentation available in:
+- [`webapp/README.md`](webapp/README.md) - Backend services
+- [`webapp/frontend/README.md`](webapp/frontend/README.md) - Frontend app
+- [`docs/PHASE3_COMPLETE.md`](docs/PHASE3_COMPLETE.md) - Phase 3 features
+- [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) - Full project structure
+
+---
+
 ## 🙏 Danksagungen
 
 - **QGIS-Community** für das hervorragende Processing Framework

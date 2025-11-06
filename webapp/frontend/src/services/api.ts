@@ -14,6 +14,13 @@ import {
   CostRatesPreset,
   ReportRequest,
   ReportResponse,
+  Project,
+  ProjectCreateRequest,
+  ProjectUpdateRequest,
+  JobHistory,
+  JobDetails,
+  BatchUploadRequest,
+  BatchUploadResponse,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -257,6 +264,154 @@ class APIClient {
   async getServices() {
     const response = await this.client.get('/services');
     return response.data;
+  }
+
+  // =============================================================================
+  // Phase 3: Project Management methods
+  // =============================================================================
+
+  async createProject(data: ProjectCreateRequest): Promise<Project> {
+    const response = await this.client.post('/projects', data);
+    return response.data;
+  }
+
+  async listProjects(useCase?: string, limit: number = 100, offset: number = 0): Promise<Project[]> {
+    const response = await this.client.get('/projects', {
+      params: { use_case: useCase, limit, offset },
+    });
+    return response.data;
+  }
+
+  async getProject(projectId: string): Promise<Project> {
+    const response = await this.client.get(`/projects/${projectId}`);
+    return response.data;
+  }
+
+  async updateProject(projectId: string, data: ProjectUpdateRequest): Promise<Project> {
+    const response = await this.client.put(`/projects/${projectId}`, data);
+    return response.data;
+  }
+
+  async deleteProject(projectId: string): Promise<void> {
+    await this.client.delete(`/projects/${projectId}`);
+  }
+
+  // =============================================================================
+  // Phase 3: Jobs History methods
+  // =============================================================================
+
+  async getJobsHistory(
+    projectId?: string,
+    status?: string,
+    limit: number = 50,
+    offset: number = 0
+  ): Promise<JobHistory[]> {
+    const response = await this.client.get('/jobs/history', {
+      params: { project_id: projectId, status, limit, offset },
+    });
+    return response.data;
+  }
+
+  async getJobDetails(jobId: string): Promise<JobDetails> {
+    const response = await this.client.get(`/jobs/${jobId}/details`);
+    return response.data;
+  }
+
+  async deleteJob(jobId: string): Promise<void> {
+    await this.client.delete(`/jobs/${jobId}`);
+  }
+
+  async getJobStatus(jobId: string) {
+    const response = await this.client.get(`/job/${jobId}/status`);
+    return response.data;
+  }
+
+  async cancelJob(jobId: string) {
+    const response = await this.client.post(`/job/${jobId}/cancel`);
+    return response.data;
+  }
+
+  // =============================================================================
+  // Phase 3: Batch Upload methods
+  // =============================================================================
+
+  async batchUpload(data: BatchUploadRequest): Promise<BatchUploadResponse> {
+    const response = await this.client.post('/batch/upload', data);
+    return response.data;
+  }
+
+  async uploadCSV(
+    projectId: string,
+    file: File,
+    autoStartJobs: boolean = true
+  ): Promise<BatchUploadResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await this.client.post('/batch/upload-csv', formData, {
+      params: { project_id: projectId, auto_start_jobs: autoStartJobs },
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  }
+
+  async uploadGeoJSON(
+    projectId: string,
+    file: File,
+    autoStartJobs: boolean = true
+  ): Promise<BatchUploadResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await this.client.post('/batch/upload-geojson', formData, {
+      params: { project_id: projectId, auto_start_jobs: autoStartJobs },
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  }
+
+  // ========== Export Endpoints ==========
+
+  /**
+   * Export project as GeoPackage
+   */
+  async exportProjectGeoPackage(projectId: string): Promise<void> {
+    const response = await this.client.get(`/exports/projects/${projectId}/geopackage`, {
+      responseType: 'blob',
+    });
+
+    // Trigger download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `project_${projectId}.gpkg`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Export job result as GeoPackage
+   */
+  async exportJobGeoPackage(jobId: string): Promise<void> {
+    const response = await this.client.get(`/exports/jobs/${jobId}/geopackage`, {
+      responseType: 'blob',
+    });
+
+    // Trigger download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `job_${jobId}.gpkg`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   }
 }
 

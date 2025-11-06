@@ -13,11 +13,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy shared modules
-COPY ../../shared /shared
-
 # Copy application code
 COPY . .
+
+# Note: /shared is mounted as a volume in docker-compose.yml
 
 # Expose port
 EXPOSE 8003

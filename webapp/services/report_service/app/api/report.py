@@ -30,29 +30,80 @@ async def generate_report(request: ReportGenerateRequest):
     Generate report (HTML or PDF)
 
     Creates a formatted report from calculation results.
+    Supports multiple template types: WKA, Road, Solar, Terrain
     """
     logger.info("=" * 70)
     logger.info(f"Generating {request.format.upper()} report: {request.project_name}")
-    logger.info(f"Template: {request.template}, Sites: {len(request.sites)}")
+    logger.info(f"Template: {request.template}")
     logger.info("=" * 70)
 
-    # Prepare template data
-    sites_data = [site.dict() for site in request.sites]
+    # Prepare template data based on template type
+    data = {'project_name': request.project_name}
 
-    # Calculate totals
-    total_sites = len(sites_data)
-    total_cut = sum(s['total_cut'] for s in sites_data)
-    total_fill = sum(s['total_fill'] for s in sites_data)
-    total_cost = sum(s['cost_total'] for s in sites_data)
+    if request.template == 'wka':
+        # WKA template
+        if not request.sites:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="sites data required for WKA template"
+            )
 
-    data = {
-        'project_name': request.project_name,
-        'total_sites': total_sites,
-        'total_cut': total_cut,
-        'total_fill': total_fill,
-        'total_cost': total_cost,
-        'sites': sites_data
-    }
+        sites_data = [site.dict() for site in request.sites]
+        total_sites = len(sites_data)
+        total_cut = sum(s['total_cut'] for s in sites_data)
+        total_fill = sum(s['total_fill'] for s in sites_data)
+        total_cost = sum(s['cost_total'] for s in sites_data)
+
+        data.update({
+            'total_sites': total_sites,
+            'total_cut': total_cut,
+            'total_fill': total_fill,
+            'total_cost': total_cost,
+            'sites': sites_data
+        })
+
+    elif request.template == 'road':
+        # Road template
+        if not request.road_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="road_data required for Road template"
+            )
+        data.update(request.road_data.dict())
+
+    elif request.template == 'solar':
+        # Solar template
+        if not request.solar_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="solar_data required for Solar template"
+            )
+        data.update(request.solar_data.dict())
+
+    elif request.template == 'terrain':
+        # Terrain template
+        if not request.terrain_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="terrain_data required for Terrain template"
+            )
+
+        # Add human-readable analysis type label
+        analysis_type_labels = {
+            'cut_fill_balance': 'Aushub/Auftrag Balance-Optimierung',
+            'volume_calculation': 'Volumenberechnung',
+            'slope_analysis': 'Hangneigung-Analyse',
+            'contour_generation': 'Höhenlinien-Generierung'
+        }
+
+        terrain_dict = request.terrain_data.dict()
+        if 'analysis_type_label' not in terrain_dict or not terrain_dict['analysis_type_label']:
+            terrain_dict['analysis_type_label'] = analysis_type_labels.get(
+                terrain_dict['analysis_type'],
+                terrain_dict['analysis_type']
+            )
+
+        data.update(terrain_dict)
 
     # Generate report
     try:

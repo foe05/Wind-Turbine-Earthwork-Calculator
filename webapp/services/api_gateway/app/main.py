@@ -2,7 +2,7 @@
 API Gateway - Main Application
 Central entry point for all microservices
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -10,7 +10,7 @@ from slowapi.errors import RateLimitExceeded
 import logging
 
 from app.core.config import get_settings
-from app.api import proxy
+from app.api import proxy, websocket, jobs, projects, batch, exports
 
 # Configure logging
 logging.basicConfig(
@@ -47,11 +47,16 @@ app.add_middleware(
 
 # Include routers
 app.include_router(proxy.router)
+app.include_router(websocket.router)
+app.include_router(jobs.router)
+app.include_router(projects.router)
+app.include_router(batch.router)
+app.include_router(exports.router)
 
 
 @app.get("/")
 @limiter.limit("60/minute")
-async def root():
+async def root(request: Request):
     """Health check and service info"""
     return {
         "service": settings.APP_NAME,
@@ -68,7 +73,11 @@ async def root():
             "Service routing and proxying",
             "JWT authentication middleware",
             "Rate limiting",
-            "CORS support"
+            "CORS support",
+            "Background job processing (Celery)",
+            "WebSocket real-time progress updates",
+            "Project management (CRUD)",
+            "Batch upload (CSV/GeoJSON)"
         ]
     }
 

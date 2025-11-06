@@ -107,3 +107,44 @@ The application automatically converts between:
 - **Calculation Coordinates**: UTM (ETRS89, EPSG:25832-25836)
 
 Germany is primarily in UTM zones 32 and 33. The zone is automatically determined based on longitude.
+
+## Phase 3 Features (NEW)
+
+### New Pages
+- **ProjectsOverview** (`/projects`) - Project management dashboard
+- **JobsHistory** (`/jobs`) - Jobs list with filtering
+- **NotFound** (`/404`) - User-friendly 404 page
+
+### New Components
+- **BatchUpload** - Drag & drop CSV/GeoJSON upload
+- **ErrorBoundary** - Global error handling
+
+### Performance Optimizations
+- **Lazy Loading**: All pages loaded on-demand with React.lazy()
+- **Code Splitting**: Optimized bundle sizes
+- **Suspense**: Loading fallbacks for better UX
+
+### Enhanced Features
+- Projects CRUD operations
+- GeoPackage export (via API client)
+- Automatic UTM coordinate conversion
+- Batch site import (up to 123 sites)
+- Real-time job progress tracking
+- Error boundaries for graceful error handling
+
+## Bundle Sizes (After Optimization)
+
+```
+vendor.js:     280 KB (React, Router, Leaflet)
+login.js:       45 KB (Login page)
+projects.js:    68 KB (Projects Dashboard)
+jobs.js:        52 KB (Jobs History)
+dashboard.js:  185 KB (Calculator with Map)
+```
+
+## Documentation
+
+- [Main README](../../README.md)
+- [Webapp README](../README.md)
+- [Phase 3 Complete](../../docs/PHASE3_COMPLETE.md)
+

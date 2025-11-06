@@ -233,6 +233,90 @@ CREATE INDEX idx_reports_job_id ON reports(job_id);
 CREATE INDEX idx_reports_expires_at ON reports(expires_at);
 
 -- =============================================================================
+-- REPORT TEMPLATES (Phase 2b)
+-- =============================================================================
+
+-- Base Templates (Admin-managed)
+CREATE TABLE report_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(50) NOT NULL CHECK (type IN ('wka', 'road', 'solar', 'terrain')),
+    description TEXT,
+
+    -- Template Content
+    html_template TEXT NOT NULL,
+    css_template TEXT,
+
+    -- Default Variables
+    default_variables JSONB DEFAULT '{}'::jsonb,
+
+    -- Available Sections
+    available_sections JSONB DEFAULT '[]'::jsonb,
+
+    -- Permissions
+    is_public BOOLEAN DEFAULT TRUE,
+    created_by UUID REFERENCES users(id),
+
+    -- Metadata
+    version VARCHAR(20) DEFAULT '1.0',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_report_templates_type ON report_templates(type);
+CREATE INDEX idx_report_templates_created_by ON report_templates(created_by);
+
+-- User Template Overrides (User-specific customization)
+CREATE TABLE user_template_overrides (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    template_id UUID NOT NULL REFERENCES report_templates(id) ON DELETE CASCADE,
+
+    -- Level 1: Branding
+    logo_url TEXT,
+    company_name VARCHAR(255),
+    company_address TEXT,
+    company_email VARCHAR(255),
+    company_phone VARCHAR(50),
+    color_scheme VARCHAR(50) DEFAULT 'standard',
+
+    -- Level 2: Content Control
+    enabled_sections JSONB DEFAULT '[]'::jsonb, -- ["overview", "calculations", "costs"]
+    custom_text_blocks JSONB DEFAULT '[]'::jsonb, -- [{"position": "after_overview", "title": "...", "text": "..."}]
+    custom_fields JSONB DEFAULT '{}'::jsonb, -- {"order_number": "AUF-001", "project_number": "PRJ-042"}
+
+    -- Advanced (Level 3 - optional)
+    custom_css TEXT,
+    custom_layout JSONB,
+
+    -- Metadata
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    UNIQUE(user_id, template_id)
+);
+
+CREATE INDEX idx_user_template_overrides_user_id ON user_template_overrides(user_id);
+CREATE INDEX idx_user_template_overrides_template_id ON user_template_overrides(template_id);
+
+-- Template Usage Log (Analytics)
+CREATE TABLE report_template_usage (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    template_id UUID NOT NULL REFERENCES report_templates(id),
+    report_id UUID REFERENCES reports(id),
+
+    -- Metadata
+    generated_at TIMESTAMP DEFAULT NOW(),
+    format VARCHAR(10),
+    file_size BIGINT
+);
+
+CREATE INDEX idx_report_template_usage_user_id ON report_template_usage(user_id);
+CREATE INDEX idx_report_template_usage_template_id ON report_template_usage(template_id);
+CREATE INDEX idx_report_template_usage_generated_at ON report_template_usage(generated_at);
+
+-- =============================================================================
 -- TRIGGERS & FUNCTIONS
 -- =============================================================================
 

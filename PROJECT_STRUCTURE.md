@@ -1,246 +1,668 @@
 # Project Structure - Geo-Engineering Platform
 
-## 📁 Repository-Struktur (NEU ab v6.1)
+**Last Updated**: 2025 (Phase 3 Complete)
+
+## 📁 Repository-Struktur
 
 ```
 Wind-Turbine-Earthwork-Calculator/
 │
-├── plugin/                          # 🔧 QGIS Plugin (bestehend)
+├── plugin/                                    # 🔧 QGIS Plugin
 │   └── prototype/
-│       ├── WindTurbine_Earthwork_Calculator.py  ← QGIS Plugin v6.0
-│       ├── INSTALLATION_QGIS.md
-│       └── WORKFLOW_STANDFLAECHEN.md
+│       ├── WindTurbine_Earthwork_Calculator.py    ✅ QGIS Plugin v6.0
+│       ├── INSTALLATION_QGIS.md                   ✅ Installation Guide
+│       ├── WORKFLOW_STANDFLAECHEN.md              ✅ Workflow Documentation
+│       └── installationsanleitung.md              ✅ DE Installation
 │
-├── webapp/                          # 🌐 Web-Plattform (NEU)
+├── webapp/                                    # 🌐 Web-Plattform (Phase 1-3 Complete)
 │   ├── services/
-│   │   ├── api_gateway/            ⚠️ TODO
-│   │   ├── auth_service/           ✅ FERTIG
-│   │   ├── dem_service/            ✅ FERTIG
-│   │   ├── calculation_service/    ⚠️ TODO
-│   │   ├── cost_service/           ⚠️ TODO
-│   │   └── report_service/         ⚠️ TODO
-│   ├── frontend/                   ⚠️ TODO
-│   ├── docker-compose.yml          ✅ FERTIG
-│   ├── .env.example                ✅ FERTIG
-│   ├── init-db/                    ✅ FERTIG
-│   │   └── 01-init.sql
-│   └── README.md                   ✅ FERTIG
+│   │   ├── api_gateway/                           ✅ API Gateway (Phase 1-3)
+│   │   │   ├── app/
+│   │   │   │   ├── api/
+│   │   │   │   │   ├── proxy.py                   ✅ Service proxying
+│   │   │   │   │   ├── websocket.py               ✅ WebSocket support (Phase 2)
+│   │   │   │   │   ├── jobs.py                    ✅ Jobs management (Phase 2)
+│   │   │   │   │   ├── projects.py                ✅ Project CRUD (Phase 3)
+│   │   │   │   │   ├── batch.py                   ✅ Batch upload (Phase 3)
+│   │   │   │   │   └── exports.py                 ✅ GeoPackage export (Phase 3)
+│   │   │   │   ├── core/
+│   │   │   │   │   ├── config.py                  ✅ Configuration
+│   │   │   │   │   ├── auth.py                    ✅ JWT authentication (Phase 3)
+│   │   │   │   │   └── database.py                ✅ Database utils (Phase 3)
+│   │   │   │   └── main.py                        ✅ FastAPI app
+│   │   │   ├── requirements.txt                   ✅ Dependencies
+│   │   │   └── Dockerfile                         ✅ Container config
+│   │   │
+│   │   ├── auth_service/                          ✅ Authentication Service
+│   │   │   ├── app/
+│   │   │   │   ├── api/
+│   │   │   │   │   └── auth.py                    ✅ Magic link auth
+│   │   │   │   ├── core/
+│   │   │   │   │   ├── config.py
+│   │   │   │   │   ├── email.py                   ✅ Email sender
+│   │   │   │   │   └── tokens.py                  ✅ JWT tokens
+│   │   │   │   └── main.py
+│   │   │   ├── requirements.txt
+│   │   │   └── Dockerfile
+│   │   │
+│   │   ├── dem_service/                           ✅ DEM Service (Phase 1-2)
+│   │   │   ├── app/
+│   │   │   │   ├── api/
+│   │   │   │   │   └── dem.py                     ✅ DEM fetching & caching
+│   │   │   │   ├── core/
+│   │   │   │   │   ├── cache.py                   ✅ Intelligent caching (Phase 2)
+│   │   │   │   │   └── hoehendaten.py             ✅ API integration
+│   │   │   │   └── main.py
+│   │   │   ├── requirements.txt
+│   │   │   └── Dockerfile
+│   │   │
+│   │   ├── calculation_service/                   ✅ Calculation Service (Phase 1-2)
+│   │   │   ├── app/
+│   │   │   │   ├── api/
+│   │   │   │   │   └── calculation.py             ✅ Multi-use-case calc
+│   │   │   │   ├── modules/
+│   │   │   │   │   ├── wka.py                     ✅ WKA calculations (Phase 1)
+│   │   │   │   │   ├── road.py                    ✅ Road calculations (Phase 2)
+│   │   │   │   │   ├── solar.py                   ✅ Solar calculations (Phase 2)
+│   │   │   │   │   └── terrain.py                 ✅ Terrain analysis (Phase 2)
+│   │   │   │   └── main.py
+│   │   │   ├── requirements.txt
+│   │   │   └── Dockerfile
+│   │   │
+│   │   ├── cost_service/                          ✅ Cost Service
+│   │   │   ├── app/
+│   │   │   │   ├── api/
+│   │   │   │   │   └── costs.py                   ✅ Cost calculation
+│   │   │   │   └── main.py
+│   │   │   ├── requirements.txt
+│   │   │   └── Dockerfile
+│   │   │
+│   │   ├── report_service/                        ✅ Report Service (Phase 2)
+│   │   │   ├── app/
+│   │   │   │   ├── api/
+│   │   │   │   │   └── report.py                  ✅ PDF generation
+│   │   │   │   ├── templates/                     ✅ Report templates (Phase 2)
+│   │   │   │   │   ├── wka_report.html
+│   │   │   │   │   ├── road_report.html
+│   │   │   │   │   ├── solar_report.html
+│   │   │   │   │   └── terrain_report.html
+│   │   │   │   └── main.py
+│   │   │   ├── requirements.txt
+│   │   │   └── Dockerfile
+│   │   │
+│   │   └── celery_worker/                         ✅ Background Jobs (Phase 2)
+│   │       ├── app/
+│   │       │   ├── tasks.py                       ✅ Celery tasks
+│   │       │   └── worker.py                      ✅ Worker config
+│   │       ├── requirements.txt
+│   │       └── Dockerfile
+│   │
+│   ├── frontend/                                  ✅ React Frontend (Phase 1-3)
+│   │   ├── public/
+│   │   ├── src/
+│   │   │   ├── components/
+│   │   │   │   ├── Map.tsx                        ✅ Leaflet map
+│   │   │   │   ├── MapWithDrawing.tsx             ✅ Drawing tools
+│   │   │   │   ├── WKAForm.tsx                    ✅ WKA calculator (Phase 1)
+│   │   │   │   ├── RoadForm.tsx                   ✅ Road calculator (Phase 2)
+│   │   │   │   ├── SolarForm.tsx                  ✅ Solar calculator (Phase 2)
+│   │   │   │   ├── TerrainForm.tsx                ✅ Terrain calculator (Phase 2)
+│   │   │   │   ├── BatchUpload.tsx                ✅ Batch upload (Phase 3)
+│   │   │   │   └── ErrorBoundary.tsx              ✅ Error boundary (Phase 3)
+│   │   │   ├── pages/
+│   │   │   │   ├── Login.tsx                      ✅ Login page
+│   │   │   │   ├── Dashboard.tsx                  ✅ Main dashboard (Phase 1)
+│   │   │   │   ├── MultiTabDashboard.tsx          ✅ Multi-use dashboard (Phase 2)
+│   │   │   │   ├── ProjectsOverview.tsx           ✅ Projects page (Phase 3)
+│   │   │   │   ├── JobsHistory.tsx                ✅ Jobs page (Phase 3)
+│   │   │   │   └── NotFound.tsx                   ✅ 404 page (Phase 3)
+│   │   │   ├── services/
+│   │   │   │   └── api.ts                         ✅ API client (all phases)
+│   │   │   ├── types/
+│   │   │   │   └── index.ts                       ✅ TypeScript types
+│   │   │   ├── App.tsx                            ✅ Main app (lazy loading)
+│   │   │   ├── main.tsx                           ✅ Entry point
+│   │   │   └── index.css                          ✅ Global styles
+│   │   ├── package.json                           ✅ Dependencies
+│   │   ├── vite.config.ts                         ✅ Build config
+│   │   ├── tsconfig.json                          ✅ TypeScript config
+│   │   ├── Dockerfile                             ✅ Container config
+│   │   └── README.md                              ✅ Frontend docs
+│   │
+│   ├── init-db/                                   ✅ Database initialization
+│   │   ├── 01-init.sql                            ✅ Schema setup
+│   │   ├── 02-demo-data.sql                       ✅ Demo data (Phase 2)
+│   │   └── 03-test-data.sql                       ✅ Test data (Phase 2)
+│   │
+│   ├── docker-compose.yml                         ✅ Multi-service orchestration
+│   ├── .env.example                               ✅ Environment template
+│   ├── nginx.conf                                 ✅ Reverse proxy config
+│   └── README.md                                  ✅ Webapp documentation
 │
-├── shared/                          # 📦 Geteilte Berechnungslogik
-│   ├── core/
-│   │   ├── foundation.py           ✅ FERTIG
-│   │   ├── material_balance.py     ✅ FERTIG
-│   │   ├── costs.py                ✅ FERTIG
-│   │   ├── platform.py             ⚠️ TODO
-│   │   ├── volume.py               ⚠️ TODO
-│   │   └── optimization.py         ⚠️ TODO
-│   └── utils/
-│       ├── dem_processing.py       ⚠️ TODO
-│       └── geometry.py             ⚠️ TODO
+├── docs/                                          # 📚 Documentation
+│   ├── PHASE2_DESIGN.md                           ✅ Phase 2 design
+│   ├── PHASE2_COMPLETE.md                         ✅ Phase 2 completion
+│   └── PHASE3_COMPLETE.md                         ✅ Phase 3 completion (NEW)
 │
-├── tests/                           # 🧪 Tests
-│   ├── plugin/                     ⚠️ TODO
-│   ├── webapp/                     ⚠️ TODO
-│   └── shared/                     ⚠️ TODO
-│
-├── docs/                            # 📚 Dokumentation
-│   ├── plugin/                     ⚠️ TODO
-│   ├── webapp/                     ⚠️ TODO
-│   └── api/                        ⚠️ TODO
+├── tests/                                         # 🧪 Tests
+│   ├── integration/                               ✅ Integration tests (Phase 2)
+│   │   ├── test_wka_workflow.py
+│   │   ├── test_road_workflow.py
+│   │   ├── test_solar_workflow.py
+│   │   └── test_terrain_workflow.py
+│   └── unit/                                      ⚠️ TODO
 │
 ├── .github/
-│   └── workflows/
-│       ├── plugin-tests.yml        ⚠️ TODO
-│       └── webapp-deploy.yml       ⚠️ TODO
+│   └── workflows/                                 ⚠️ TODO
+│       ├── plugin-tests.yml
+│       └── webapp-deploy.yml
 │
-├── README.md                        ← Haupt-README
-├── PROJECT_STRUCTURE.md             ← Diese Datei
-├── CHANGELOG.md
-├── CONTRIBUTING.md
-└── LICENSE
+├── README.md                                      ✅ Main README (updated)
+├── PROJECT_STRUCTURE.md                           ✅ This file (updated)
+├── AGENTS.md                                      ✅ AI agents info
+├── CHANGELOG.md                                   ✅ Version history
+├── CONTRIBUTING.md                                ✅ Contribution guide
+└── LICENSE                                        ✅ MIT License
 ```
 
 ---
 
-## 🎯 Projekt-Übersicht
+## 🎯 Project Overview
 
-Dieses Repository enthält **zwei parallele Projekte**:
+This repository contains **two parallel projects**:
 
 ### 1. QGIS Plugin (`plugin/`)
-- **Status:** Produktiv (v6.0)
-- **Zielgruppe:** QGIS-Nutzer, Desktop-Anwendung
+- **Status:** Production (v6.0)
+- **Target Audience:** QGIS users, desktop application
 - **Features:**
-  - hoehendaten.de API Integration
-  - DEM-Cache mit LRU-Strategie
-  - GeoPackage Output
-  - Standort-basierte Kachel-Berechnung (250m Radius)
-- **Dokumentation:** `plugin/prototype/INSTALLATION_QGIS.md`
+  - hoehendaten.de API integration
+  - DEM cache with LRU strategy
+  - GeoPackage output
+  - Site-based tile calculation (250m radius)
+- **Documentation:** `plugin/prototype/INSTALLATION_QGIS.md`
 
-### 2. Web-Plattform (`webapp/`)
-- **Status:** In Entwicklung (v1.0 alpha)
-- **Zielgruppe:** Öffentlich zugängliche Web-App
-- **Features (geplant):**
-  - 4 Use-Cases: WKA, Straßenbau, Solar-Park, Geländeanalyse
-  - Microservices-Architektur
-  - Magic Link Authentifizierung
-  - Interaktive Leaflet-Karte
-  - Background Job Processing
-- **Dokumentation:** `webapp/README.md`
+### 2. Web Platform (`webapp/`)
+- **Status:** Production Ready (Phase 1-3 Complete)
+- **Target Audience:** Web users, multi-user cloud platform
+- **Architecture:** Microservices with FastAPI + React
+- **Features:**
+  - **Phase 1**: WKA calculations, passwordless auth, interactive maps
+  - **Phase 2**: Road/Solar/Terrain calculations, PDF reports, Celery jobs, WebSockets
+  - **Phase 3**: Projects dashboard, batch upload, GeoPackage export, error handling
+- **Documentation:** `webapp/README.md`
 
 ---
 
-## 🚀 Quick Start
+## 🏗️ Architecture Overview
 
-### QGIS Plugin verwenden
+### Microservices Architecture
 
-```bash
-# 1. Plugin-Datei kopieren
-cp plugin/prototype/WindTurbine_Earthwork_Calculator.py ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/
-
-# 2. QGIS neu starten
-
-# 3. Plugin in QGIS aktivieren
-# Menü: Plugins → Manage and Install Plugins → "Wind Turbine Earthwork Calculator"
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Users (Web Browser)                      │
+└────────────────┬────────────────────────────────────────────┘
+                 │
+┌────────────────▼────────────────────────────────────────────┐
+│              Frontend (React + TypeScript)                  │
+│  • Projects Dashboard      • Jobs History                   │
+│  • Multi-Tab Calculator    • Batch Upload                   │
+│  • Interactive Maps        • Error Boundaries               │
+└────────────────┬────────────────────────────────────────────┘
+                 │ HTTP/REST + WebSocket
+┌────────────────▼────────────────────────────────────────────┐
+│          API Gateway (FastAPI Port 8000)                    │
+│  • Request routing         • JWT authentication             │
+│  • Rate limiting          • WebSocket hub                   │
+│  • Project management     • Batch upload                    │
+│  • GeoPackage export      • Jobs orchestration              │
+└─────┬──────┬──────┬──────┬──────┬──────┬───────────────────┘
+      │      │      │      │      │      │
+┌─────▼──┐ ┌─▼────┐ ┌▼─────┐ ┌───▼──┐ ┌─▼────┐ ┌▼──────────┐
+│ Auth   │ │ DEM  │ │ Calc │ │ Cost │ │Report│ │ Postgres  │
+│Service │ │Service│ │Service│ │Service│ │Service│ │  +PostGIS │
+│Port    │ │Port   │ │Port  │ │Port  │ │Port  │ │Port 5432  │
+│8001    │ │8002   │ │8003  │ │8004  │ │8005  │ └───────────┘
+└────────┘ └───────┘ └──────┘ └──────┘ └──────┘
+                                                   ┌───────────┐
+                                                   │  Redis    │
+                                                   │Port 6379  │
+                                                   └─────┬─────┘
+                                                         │
+                                                   ┌─────▼─────┐
+                                                   │  Celery   │
+                                                   │  Workers  │
+                                                   └───────────┘
 ```
 
-Siehe: `plugin/prototype/INSTALLATION_QGIS.md`
+### Data Flow
 
-### Web-Plattform entwickeln
+#### 1. WKA Calculation Flow (Phase 1)
+```
+User → Frontend → API Gateway → Calculation Service
+                                      ↓
+                            DEM Service (fetch DEM)
+                                      ↓
+                            Cost Service (calculate costs)
+                                      ↓
+                            Report Service (generate PDF)
+                                      ↓
+                            Database (store results)
+                                      ↓
+                            Frontend (display results)
+```
+
+#### 2. Batch Upload Flow (Phase 3)
+```
+User → Upload CSV/GeoJSON → API Gateway
+                                ↓
+                       Validate & Parse
+                                ↓
+                       Auto-detect UTM zone
+                                ↓
+                       Convert coordinates (WGS84 → UTM)
+                                ↓
+                       Create sites in database
+                                ↓
+                       Create Celery jobs (background)
+                                ↓
+                       Return job IDs to frontend
+                                ↓
+                       WebSocket progress updates
+```
+
+#### 3. Export Flow (Phase 3)
+```
+User → Request Export → API Gateway
+                            ↓
+                    Query project data
+                            ↓
+                    Join sites + jobs + results
+                            ↓
+                    Create GeoDataFrame (geopandas)
+                            ↓
+                    Export to .gpkg
+                            ↓
+                    Return file to browser
+                            ↓
+                    Browser downloads file
+```
+
+---
+
+## 📦 Key Technologies
+
+### Backend
+- **FastAPI** 0.104+ - Modern Python web framework
+- **PostgreSQL** 15 + **PostGIS** - Spatial database
+- **Celery** 5.3+ - Background task queue
+- **Redis** 7 - Cache & message broker
+- **WeasyPrint** - PDF generation
+- **GeoPandas** - GIS data processing
+- **pyproj** - Coordinate transformations
+
+### Frontend
+- **React** 18 - UI framework
+- **TypeScript** 5 - Type safety
+- **Vite** 5 - Build tool & dev server
+- **React Router** 6 - Client-side routing
+- **Leaflet** 1.9 - Interactive maps
+- **Axios** - HTTP client
+
+### Infrastructure
+- **Docker** + **Docker Compose** - Containerization
+- **Nginx** - Reverse proxy
+- **Python** 3.11+ - Programming language
+- **Node.js** 20+ - Frontend build tools
+
+---
+
+## 🗄️ Database Schema
+
+### Core Tables
+
+```sql
+-- Users
+users (
+    id UUID PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+)
+
+-- Projects (Phase 3)
+projects (
+    id UUID PRIMARY KEY,
+    user_id UUID REFERENCES users(id),
+    use_case VARCHAR(50) CHECK (use_case IN ('wka', 'road', 'solar', 'terrain')),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    crs VARCHAR(50) NOT NULL,
+    utm_zone INTEGER,
+    bounds GEOMETRY(POLYGON, 4326),
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+)
+
+-- Sites
+sites (
+    id UUID PRIMARY KEY,
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    location_wgs84 GEOMETRY(POINT, 4326),
+    location_utm GEOMETRY(POINT),
+    foundation_type VARCHAR(50),
+    foundation_diameter FLOAT,
+    foundation_depth FLOAT,
+    soil_type VARCHAR(50),
+    bulk_density FLOAT,
+    platform_length FLOAT,
+    platform_width FLOAT,
+    created_at TIMESTAMP DEFAULT NOW()
+)
+
+-- Jobs (Phase 2)
+jobs (
+    id UUID PRIMARY KEY,
+    project_id UUID REFERENCES projects(id),
+    site_id UUID REFERENCES sites(id),
+    status VARCHAR(50) DEFAULT 'pending',
+    progress INTEGER DEFAULT 0,
+    results JSONB,
+    error_message TEXT,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+)
+
+-- Report Templates (Phase 2)
+report_templates (
+    id UUID PRIMARY KEY,
+    use_case VARCHAR(50),
+    name VARCHAR(255),
+    html_template TEXT,
+    css_styles TEXT,
+    is_default BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW()
+)
+```
+
+### Indexes
+```sql
+CREATE INDEX idx_projects_user_id ON projects(user_id);
+CREATE INDEX idx_projects_use_case ON projects(use_case);
+CREATE INDEX idx_sites_project_id ON sites(project_id);
+CREATE INDEX idx_jobs_project_id ON jobs(project_id);
+CREATE INDEX idx_jobs_status ON jobs(status);
+CREATE INDEX idx_jobs_created_at ON jobs(created_at DESC);
+CREATE INDEX idx_jobs_project_status ON jobs(project_id, status);
+```
+
+---
+
+## 🔌 API Endpoints Summary
+
+### Authentication
+- `POST /auth/request-login` - Request magic link
+- `GET /auth/verify/{token}` - Verify magic link
+- `GET /auth/me` - Get current user
+
+### Projects (Phase 3)
+- `POST /projects` - Create project
+- `GET /projects` - List projects
+- `GET /projects/{id}` - Get project details
+- `PUT /projects/{id}` - Update project
+- `DELETE /projects/{id}` - Delete project
+
+### Batch Upload (Phase 3)
+- `POST /batch/upload-csv` - Upload CSV
+- `POST /batch/upload-geojson` - Upload GeoJSON
+
+### Export (Phase 3)
+- `GET /exports/projects/{id}/geopackage` - Export project
+- `GET /exports/jobs/{id}/geopackage` - Export job
+
+### Jobs (Phase 2)
+- `POST /jobs` - Create job
+- `GET /jobs/history` - Get jobs history
+- `GET /jobs/{id}/details` - Get job details
+- `DELETE /jobs/{id}` - Delete job
+
+### DEM Service
+- `POST /dem/fetch` - Fetch DEM data
+- `GET /dem/{id}` - Get cached DEM
+- `GET /dem/cache/stats` - Cache statistics
+
+### Calculation Service (Phase 2)
+- `POST /calculation/wka/calculate` - WKA calculations
+- `POST /calculation/road/calculate` - Road calculations
+- `POST /calculation/solar/calculate` - Solar calculations
+- `POST /calculation/terrain/analyze` - Terrain analysis
+
+### Cost Service
+- `POST /costs/calculate` - Calculate costs
+- `GET /costs/presets` - Get cost presets
+
+### Report Service (Phase 2)
+- `POST /report/generate` - Generate PDF report
+- `GET /report/download/{id}/{filename}` - Download report
+
+### WebSocket
+- `WS /ws/job/{id}` - Real-time job progress
+
+---
+
+## 📁 File Organization
+
+### Backend Service Structure
+```
+service_name/
+├── app/
+│   ├── api/
+│   │   └── routes.py       # API endpoints
+│   ├── core/
+│   │   ├── config.py       # Configuration
+│   │   └── database.py     # DB connection
+│   ├── models/
+│   │   └── schemas.py      # Pydantic models
+│   ├── services/
+│   │   └── logic.py        # Business logic
+│   └── main.py             # FastAPI app
+├── tests/
+│   └── test_api.py
+├── requirements.txt
+├── Dockerfile
+└── README.md
+```
+
+### Frontend Structure
+```
+frontend/
+├── src/
+│   ├── components/         # Reusable UI components
+│   ├── pages/              # Page components (routes)
+│   ├── services/           # API clients
+│   ├── types/              # TypeScript types
+│   ├── utils/              # Helper functions
+│   ├── App.tsx             # Main app component
+│   └── main.tsx            # Entry point
+├── public/
+│   └── assets/             # Static assets
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+└── Dockerfile
+```
+
+---
+
+## 🚀 Development Workflow
+
+### Local Development
 
 ```bash
-# 1. Services starten
+# 1. Start backend services
 cd webapp
 docker-compose up -d postgres redis
 
-# 2. Services testen
-curl http://localhost:8001/health  # Auth Service
-curl http://localhost:8002/health  # DEM Service
+# 2. Run individual service
+cd webapp/services/api_gateway
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
 
-# 3. Dokumentation öffnen
-open http://localhost:8001/docs
-open http://localhost:8002/docs
+# 3. Run frontend
+cd webapp/frontend
+npm install
+npm run dev
 ```
 
-Siehe: `webapp/README.md`
+### Testing
 
----
+```bash
+# Backend unit tests
+pytest webapp/services/api_gateway/tests/
 
-## 🔄 Code-Sharing-Strategie
+# Integration tests (Phase 2)
+pytest tests/integration/
 
-Die Berechnungslogik ist in `shared/` extrahiert und wird von beiden Projekten genutzt:
-
-```
-QGIS Plugin          Web-Services
-     │                    │
-     ├────────┬───────────┤
-              ▼
-         shared/core/
-         ├── foundation.py
-         ├── costs.py
-         └── material_balance.py
+# Frontend tests
+cd webapp/frontend
+npm test
 ```
 
-**WICHTIG:**
-- QGIS Plugin nutzt weiterhin QGIS-APIs (QgsRasterLayer, etc.)
-- Web-Services nutzen rasterio, shapely, geopandas
-- Shared modules sind **framework-agnostisch** (nur NumPy, Python stdlib)
+### Building
+
+```bash
+# Backend
+docker build -t geo-api-gateway webapp/services/api_gateway
+
+# Frontend
+cd webapp/frontend
+npm run build
+```
 
 ---
 
-## 📊 Implementierungs-Status
+## 📝 Configuration Files
 
-| Component                    | Status      | Details                          |
-|------------------------------|-------------|----------------------------------|
-| **QGIS Plugin**             | ✅ Produktiv | v6.0 - Vollständig funktionsfähig |
-| **DB Schema**               | ✅ Fertig    | PostgreSQL + PostGIS            |
-| **Auth Service**            | ✅ Fertig    | Magic Link + JWT                |
-| **DEM Service**             | ✅ Fertig    | hoehendaten.de API + Cache      |
-| **Shared Core Modules**     | 🟨 Teilweise | foundation, costs, material     |
-| **Calculation Service**     | ⚠️ TODO     | WKA-Modul                       |
-| **Cost Service**            | ⚠️ TODO     | API-Wrapper um shared modules   |
-| **Report Service**          | ⚠️ TODO     | HTML/PDF Templates              |
-| **API Gateway**             | ⚠️ TODO     | Routing + Job Queue             |
-| **Frontend**                | ⚠️ TODO     | React + Leaflet                 |
-| **Tests**                   | ⚠️ TODO     | pytest                          |
-| **CI/CD**                   | ⚠️ TODO     | GitHub Actions                  |
+### Environment Variables
+```bash
+# .env
+DATABASE_URL=postgresql://user:pass@localhost:5432/geo_engineering
+REDIS_URL=redis://localhost:6379/0
+JWT_SECRET_KEY=your-secret-key-here
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USER=your-email@gmail.com
+EMAIL_PASSWORD=your-app-password
+```
 
----
+### Docker Compose
+```yaml
+version: '3.8'
+services:
+  api-gateway:
+    build: ./services/api_gateway
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
 
-## 🎓 Architektur-Entscheidungen
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
 
-### Warum Microservices?
+  postgres:
+    image: postgis/postgis:15-3.3
+    environment:
+      POSTGRES_DB: geo_engineering
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
 
-1. **Skalierbarkeit:** DEM-Fetching kann CPU-intensiv sein → eigener Service
-2. **Technologie-Auswahl:** Auth braucht Email, Calculation braucht rasterio
-3. **Team-Parallelität:** Teams können unabhängig arbeiten
-4. **Deployment:** Services können einzeln deployed werden
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
 
-### Warum Magic Links?
-
-1. **UX:** Keine Passwort-Verwaltung
-2. **Sicherheit:** Kein Passwort-Leak-Risiko
-3. **Einfachheit:** Kein "Forgot Password" Flow nötig
-
-### Warum Redis für DEM-Cache?
-
-1. **Performance:** In-Memory-Cache für häufige Zugriffe
-2. **TTL:** Automatisches Ablaufen nach 6 Monaten
-3. **Einfachheit:** Keine eigene Cache-Logik nötig
-
----
-
-## 🔧 Entwicklungs-Workflow
-
-### Neue Features im QGIS Plugin
-
-1. Änderungen in `plugin/prototype/WindTurbine_Earthwork_Calculator.py`
-2. Extrahiere shared logic nach `shared/core/` (falls wiederverwendbar)
-3. Teste in QGIS
-4. Commit mit Prefix `plugin: `
-
-### Neue Features in der Web-App
-
-1. Implementiere Service in `webapp/services/{service_name}/`
-2. Nutze `shared/core/` Module
-3. Schreibe Tests in `tests/webapp/`
-4. Update `webapp/docker-compose.yml` falls nötig
-5. Commit mit Prefix `webapp: `
-
-### Shared Module ändern
-
-1. Ändere Code in `shared/core/`
-2. **TESTE BEIDE:** QGIS Plugin UND Web-Services!
-3. Commit mit Prefix `shared: `
+volumes:
+  pgdata:
+```
 
 ---
 
-## 📚 Weitere Dokumentation
+## 🎯 Feature Status
 
-- **Web-App Setup:** `webapp/README.md`
-- **QGIS Plugin Installation:** `plugin/prototype/INSTALLATION_QGIS.md`
-- **Standflächenberechnung:** `plugin/prototype/WORKFLOW_STANDFLAECHEN.md`
-- **API-Referenz:** http://localhost:8000/docs (nach Start)
-- **Changelog:** `CHANGELOG.md`
-- **Contributing:** `CONTRIBUTING.md`
+### Phase 1 - Core Infrastructure ✅ COMPLETE
+- ✅ Passwordless authentication (magic link)
+- ✅ Interactive map with drawing tools
+- ✅ WKA site calculations
+- ✅ Real-time results display
+- ✅ PostgreSQL/PostGIS database
+- ✅ Microservices architecture
+
+### Phase 2 - Multi-Use-Case Support ✅ COMPLETE
+- ✅ Road construction calculations
+- ✅ Solar park calculations
+- ✅ Terrain analysis
+- ✅ PDF report generation
+- ✅ Celery background jobs
+- ✅ WebSocket real-time updates
+- ✅ DEM caching strategy
+- ✅ Integration tests
+- ✅ Demo data
+
+### Phase 3 - User Experience ✅ COMPLETE
+- ✅ Projects dashboard (CRUD)
+- ✅ Jobs history with filtering
+- ✅ Batch upload (CSV/GeoJSON)
+- ✅ Automatic UTM conversion
+- ✅ GeoPackage export
+- ✅ Error pages (404, boundary)
+- ✅ Frontend lazy loading
+- ✅ Code splitting
+
+### Phase 4 - Future Enhancements ⚠️ PLANNED
+- ⚠️ Email notifications
+- ⚠️ Advanced filtering
+- ⚠️ Project collaboration
+- ⚠️ Analytics dashboard
+- ⚠️ Mobile app
+- ⚠️ CI/CD pipeline
+- ⚠️ Monitoring & logging
+- ⚠️ Unit tests coverage
 
 ---
 
-## 🤝 Contributing
+## 📚 Documentation Links
 
-Siehe `CONTRIBUTING.md`
+- [Main README](README.md) - Project overview
+- [Webapp README](webapp/README.md) - Backend services
+- [Frontend README](webapp/frontend/README.md) - Frontend app
+- [Phase 2 Complete](docs/PHASE2_COMPLETE.md) - Phase 2 documentation
+- [Phase 3 Complete](docs/PHASE3_COMPLETE.md) - Phase 3 documentation
+- [AGENTS.md](AGENTS.md) - AI development agents
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines
 
 ---
 
-## 📄 License
+## 🔗 Quick Links
 
-MIT License - Siehe `LICENSE`
+**Development**:
+- Frontend: http://localhost:3000
+- API Gateway: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+- Database: localhost:5432
+
+**Production** (when deployed):
+- Frontend: https://geo-engineering.example.com
+- API: https://api.geo-engineering.example.com
 
 ---
 
-## 🐛 Issues & Support
-
-- **QGIS Plugin:** Issues mit Tag `plugin`
-- **Web-App:** Issues mit Tag `webapp`
-- **Shared Modules:** Issues mit Tag `shared`
-
-GitHub Issues: https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/issues
+**Last Updated**: 2025 (Phase 3 Complete)
+**Status**: Production Ready
+**Next**: Phase 4 Planning or Production Deployment

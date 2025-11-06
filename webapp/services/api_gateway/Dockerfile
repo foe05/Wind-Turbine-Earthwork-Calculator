@@ -1,5 +1,15 @@
 FROM python:3.11-slim
 
+# Install GDAL and system dependencies for geopandas
+RUN apt-get update && apt-get install -y \
+    gdal-bin \
+    libgdal-dev \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set GDAL environment variables
+ENV GDAL_CONFIG=/usr/bin/gdal-config
+
 WORKDIR /app
 
 # Install Python dependencies
