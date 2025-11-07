@@ -211,10 +211,10 @@ def save_raster_to_geopackage(raster_layer, gpkg_path, layer_name='dem_mosaic', 
             'TARGET_CRS': None,  # Behalte Original-CRS
             'NODATA': None,
             'COPY_SUBDATASETS': False,
-            'OPTIONS': '',
+            'OPTIONS': f'RASTER_TABLE={layer_name}|APPEND_SUBDATASET=YES',
             'EXTRA': '',
             'DATA_TYPE': 0,  # Use input layer data type
-            'OUTPUT': f'GPKG:{gpkg_path}:{layer_name}'
+            'OUTPUT': gpkg_path
         }
 
         result = processing.run('gdal:translate', params, feedback=feedback)
