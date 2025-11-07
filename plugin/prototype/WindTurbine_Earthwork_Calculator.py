@@ -178,22 +178,35 @@ def generate_geopackage_path(features, feedback=None):
 
 def save_raster_to_geopackage(raster_layer, gpkg_path, layer_name='dem_mosaic', feedback=None):
     """
-    Speichert ein Raster-Layer in ein GeoPackage.
+    Speichert ein Raster-Layer als GeoTIFF neben dem GeoPackage.
+
+    HINWEIS: GeoPackage Raster-Support ist in vielen QGIS-Versionen instabil.
+    Daher wird das DEM als separates GeoTIFF mit gleichem Basis-Namen gespeichert.
 
     Args:
         raster_layer: QgsRasterLayer
-        gpkg_path: Pfad zum GeoPackage
-        layer_name: Name des Layers im GeoPackage
+        gpkg_path: Pfad zum GeoPackage (z.B. /path/WKA_526739_5681865.gpkg)
+        layer_name: Name-Suffix für das GeoTIFF (Standard: 'dem_mosaic')
         feedback: QgsProcessingFeedback
 
     Returns:
-        True bei Erfolg, False bei Fehler
+        Pfad zur gespeicherten GeoTIFF-Datei oder None bei Fehler
     """
     if feedback:
-        feedback.pushInfo(f'\n💾 Speichere DEM in GeoPackage: {layer_name}')
+        feedback.pushInfo(f'\n💾 Speichere DEM als GeoTIFF...')
 
     try:
-        # Verwende gdal:translate zum Speichern ins GeoPackage
+        # Erstelle GeoTIFF-Pfad neben GeoPackage
+        # z.B. WKA_526739_5681865.gpkg -> WKA_526739_5681865_DEM.tif
+        import os
+        gpkg_dir = os.path.dirname(gpkg_path)
+        gpkg_basename = os.path.splitext(os.path.basename(gpkg_path))[0]
+        tif_path = os.path.join(gpkg_dir, f'{gpkg_basename}_DEM.tif')
+
+        if feedback:
+            feedback.pushInfo(f'   Ziel: {tif_path}')
+
+        # Verwende gdal:translate zum Speichern als GeoTIFF
         import processing
 
         params = {
@@ -204,22 +217,22 @@ def save_raster_to_geopackage(raster_layer, gpkg_path, layer_name='dem_mosaic', 
             'OPTIONS': '',
             'EXTRA': '',
             'DATA_TYPE': 0,  # Use input layer data type
-            'OUTPUT': f'GPKG:{gpkg_path}:{layer_name}'
+            'OUTPUT': tif_path
         }
 
         result = processing.run('gdal:translate', params, feedback=feedback)
 
         if feedback:
-            feedback.pushInfo(f'   ✓ DEM gespeichert als Layer "{layer_name}"')
+            feedback.pushInfo(f'   ✓ DEM gespeichert: {tif_path}')
 
-        return True
+        return tif_path
 
     except Exception as e:
         if feedback:
             feedback.reportError(f'   ✗ Fehler beim Speichern des DEM: {str(e)}')
             import traceback
             feedback.reportError(traceback.format_exc())
-        return False
+        return None
 
 
 # =============================================================================
@@ -1792,9 +1805,10 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         # =====================================================================
         feedback.pushInfo(f'\n📦 Kopiere alle Outputs ins GeoPackage...')
 
-        # 1. DEM ins GeoPackage speichern
+        # 1. DEM als GeoTIFF speichern (neben GeoPackage)
+        dem_tif_path = None
         if dem_layer and dem_layer.isValid():
-            save_raster_to_geopackage(dem_layer, gpkg_path, 'dem_mosaic', feedback)
+            dem_tif_path = save_raster_to_geopackage(dem_layer, gpkg_path, 'dem_mosaic', feedback)
 
         # 2. Vector-Layer ins GeoPackage kopieren
         from qgis.core import QgsVectorLayer, QgsVectorFileWriter
@@ -1863,6 +1877,8 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
 
         feedback.pushInfo(f'\n✅ Fertig!')
         feedback.pushInfo(f'   📦 GeoPackage: {gpkg_path}')
+        if dem_tif_path:
+            feedback.pushInfo(f'   🗺️  DEM GeoTIFF: {dem_tif_path}')
         feedback.pushInfo(f'   📄 HTML-Report: {report_file}')
 
         result_dict = {
