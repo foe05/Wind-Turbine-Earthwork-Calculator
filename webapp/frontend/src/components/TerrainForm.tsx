@@ -66,14 +66,14 @@ const TerrainForm: React.FC<TerrainFormProps> = ({ terrain, onAnalysisComplete }
         return [utm.easting, utm.northing];
       });
 
-      // Get center point for DEM
+      // Convert all polygon points to UTM coordinates for DEM fetch
+      const utmCoords = utmPolygon.map(coord => [coord[0], coord[1]] as [number, number]);
       const firstUTM = latLngToUTM(terrain.polygon[0]);
 
       // Step 1: Fetch DEM
       const demResponse = await apiClient.fetchDEM({
+        coordinates: utmCoords,
         crs: firstUTM.epsg,
-        center_x: firstUTM.easting,
-        center_y: firstUTM.northing,
         buffer_meters: 250,
       });
 

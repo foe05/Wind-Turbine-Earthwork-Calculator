@@ -62,14 +62,14 @@ const SolarForm: React.FC<SolarFormProps> = ({ solar, onCalculationComplete }) =
         return [utm.easting, utm.northing];
       });
 
-      // Get center point for DEM
+      // Convert all boundary points to UTM coordinates for DEM fetch
+      const utmCoords = utmBoundary.map(coord => [coord[0], coord[1]] as [number, number]);
       const firstUTM = latLngToUTM(solar.boundary[0]);
 
       // Step 1: Fetch DEM
       const demResponse = await apiClient.fetchDEM({
+        coordinates: utmCoords,
         crs: firstUTM.epsg,
-        center_x: firstUTM.easting,
-        center_y: firstUTM.northing,
         buffer_meters: 250,
       });
 

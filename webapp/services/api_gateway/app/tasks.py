@@ -91,7 +91,7 @@ def calculate_wka_site(
         self.update_progress(50, "Calculating earthwork volumes...")
         with httpx.Client(timeout=120.0) as client:
             calc_response = client.post(
-                f"{CALCULATION_SERVICE_URL}/calculate/wka",
+                f"{CALCULATION_SERVICE_URL}/calc/wka/site",
                 json={
                     "dem_id": dem_id,
                     **site_data
@@ -104,7 +104,7 @@ def calculate_wka_site(
         self.update_progress(70, "Calculating costs...")
         with httpx.Client(timeout=60.0) as client:
             cost_response = client.post(
-                f"{COST_SERVICE_URL}/cost/calculate",
+                f"{COST_SERVICE_URL}/costs/calculate",
                 json={
                     "foundation_volume": calc_data["foundation_volume"],
                     "crane_cut": calc_data["total_cut"],

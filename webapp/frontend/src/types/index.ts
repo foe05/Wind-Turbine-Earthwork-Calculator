@@ -17,25 +17,22 @@ export interface UTMCoordinate {
 
 // DEM types
 export interface DEMRequest {
-  crs: string;
-  center_x: number;
-  center_y: number;
+  coordinates: Array<[number, number]>; // List of [easting, northing] tuples in UTM
+  crs: string; // UTM CRS (e.g., 'EPSG:25832')
   buffer_meters: number;
+  force_refresh?: boolean;
 }
 
 export interface DEMResponse {
   dem_id: string;
-  crs: string;
-  center_x: number;
-  center_y: number;
-  bounds: {
-    minx: number;
-    miny: number;
-    maxx: number;
-    maxy: number;
-  };
   tiles_count: number;
-  cached: boolean;
+  utm_zone: number;
+  attribution: string;
+  cache_hits: number;
+  api_downloads: number;
+  file_path: string;
+  created_at: string;
+  expires_at: string;
 }
 
 // WKA Calculation types
@@ -45,7 +42,7 @@ export interface WKACalculationRequest {
   center_y: number;
   foundation_diameter: number;
   foundation_depth: number;
-  foundation_type: number;
+  foundation_type: 'shallow' | 'deep' | 'pile';
   platform_length: number;
   platform_width: number;
   slope_width: number;
@@ -76,20 +73,27 @@ export interface CostCalculationRequest {
   platform_area: number;
   cost_excavation: number;
   cost_transport: number;
-  cost_disposal: number;
-  cost_fill_material: number;
-  cost_platform_prep: number;
+  cost_fill_import: number;
+  cost_gravel: number;
+  cost_compaction: number;
+  gravel_thickness: number;
   material_reuse: boolean;
   swell_factor: number;
   compaction_factor: number;
 }
 
 export interface CostCalculationResponse {
-  total_cost: number;
-  excavation_cost: number;
-  disposal_cost: number;
-  fill_cost: number;
-  platform_prep_cost: number;
+  cost_total: number;
+  cost_excavation: number;
+  cost_transport: number;
+  cost_fill: number;
+  cost_gravel: number;
+  cost_compaction: number;
+  cost_saving: number;
+  saving_pct: number;
+  gravel_vol: number;
+  cost_total_without_reuse: number;
+  cost_total_with_reuse: number;
   material_balance: {
     available: number;
     required: number;
@@ -101,11 +105,13 @@ export interface CostCalculationResponse {
 
 export interface CostRatesPreset {
   name: string;
+  description: string;
   cost_excavation: number;
   cost_transport: number;
-  cost_disposal: number;
-  cost_fill_material: number;
-  cost_platform_prep: number;
+  cost_fill_import: number;
+  cost_gravel: number;
+  cost_compaction: number;
+  gravel_thickness: number;
 }
 
 // Report types
