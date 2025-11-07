@@ -1654,8 +1654,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         # =====================================================================
         (sink, dest_id) = self.parameterAsSink(
             parameters, self.OUTPUT_POINTS, context,
-            fields, QgsWkbTypes.Point, points_source.sourceCrs(),
-            QgsProcessing.TEMPORARY_OUTPUT)
+            fields, QgsWkbTypes.Point, points_source.sourceCrs())
 
         # Standflächen-Polygone (optional)
         platform_fields = self._create_platform_fields()
@@ -1665,8 +1664,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         if self.OUTPUT_PLATFORMS in parameters and parameters[self.OUTPUT_PLATFORMS] is not None:
             (platform_sink, platform_dest_id) = self.parameterAsSink(
                 parameters, self.OUTPUT_PLATFORMS, context,
-                platform_fields, QgsWkbTypes.Polygon, feature_source.sourceCrs(),
-                QgsProcessing.TEMPORARY_OUTPUT)
+                platform_fields, QgsWkbTypes.Polygon, feature_source.sourceCrs())
         
         total = feature_source.featureCount()
         results = []
@@ -1812,8 +1810,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
                 if self.OUTPUT_PROFILES in parameters and parameters[self.OUTPUT_PROFILES] is not None:
                     (profile_sink, profile_dest_id) = self.parameterAsSink(
                         parameters, self.OUTPUT_PROFILES, context,
-                        profile_fields, QgsWkbTypes.LineString, feature_source.sourceCrs(),
-                        QgsProcessing.TEMPORARY_OUTPUT)
+                        profile_fields, QgsWkbTypes.LineString, feature_source.sourceCrs())
                 
                 # Für jeden Standort Profile generieren
                 feature_source2 = self.parameterAsSource(parameters, self.INPUT_POINTS if not use_polygons else self.INPUT_POLYGONS, context)
