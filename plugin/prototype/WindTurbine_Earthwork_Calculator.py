@@ -1,8 +1,15 @@
 """
-Wind Turbine Earthwork Calculator - Version 6.0
+Wind Turbine Earthwork Calculator - Version 6.1
 ================================================
 
-NEUE FEATURES v6.0 (hoehendaten.de API Integration & GeoPackage Output):
+NEUE FEATURES v6.1 (DXF-Import für Kranstellflächen):
+- 📐 DXF-Datei-Import: Polylinien aus DXF-Dateien als Kranstellflächen verwenden
+- 📁 Multi-File-Support: Mehrere DXF-Dateien aus Ordner laden
+- 📋 Layer-Auswahl: Spezifische Layer aus DXF-Dateien filtern
+- 🔄 Automatische Konvertierung: Linien werden zu Polygonen konvertiert
+- 🔗 Kombination: DXF-Polygone mit bestehenden Polygonen kombinierbar
+
+FEATURES v6.0 (hoehendaten.de API Integration & GeoPackage Output):
 - 🌐 Automatischer DEM-Download von hoehendaten.de API
 - 💾 DEM-Cache mit LRU-Strategie (persistent, max 100 Kacheln ~500MB)
 - 📍 Standort-basierte Kachel-Berechnung (250m Radius pro Standort)
@@ -42,7 +49,7 @@ FEATURES v3.0:
 - Standflächen-Polygon-Export
 
 AUTOR: Windkraft-Standortplanung
-VERSION: 5.6 (hoehendaten.de API Integration)
+VERSION: 6.1 (DXF-Import Support)
 DATUM: November 2025
 """
 
@@ -56,6 +63,8 @@ from qgis.core import (
     QgsProcessingParameterFeatureSink,
     QgsProcessingParameterFileDestination,
     QgsProcessingParameterFolderDestination,
+    QgsProcessingParameterFile,
+    QgsProcessingParameterString,
     QgsProcessingParameterEnum,
     QgsProcessingParameterBoolean,
     QgsFeature,
@@ -66,6 +75,7 @@ from qgis.core import (
     QgsWkbTypes,
     QgsProcessingException,
     QgsRasterLayer,
+    QgsVectorLayer,
     QgsProject,
     QgsRaster
 )
@@ -1112,6 +1122,9 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
     FORCE_DEM_REFRESH = 'FORCE_DEM_REFRESH'
     INPUT_POINTS = 'INPUT_POINTS'
     INPUT_POLYGONS = 'INPUT_POLYGONS'
+    INPUT_DXF_FILE = 'INPUT_DXF_FILE'
+    INPUT_DXF_FOLDER = 'INPUT_DXF_FOLDER'
+    DXF_LAYER_NAME = 'DXF_LAYER_NAME'
     PLATFORM_LENGTH = 'PLATFORM_LENGTH'
     PLATFORM_WIDTH = 'PLATFORM_WIDTH'
     MAX_SLOPE = 'MAX_SLOPE'
@@ -1154,7 +1167,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         return 'windturbineearthworkv3'
     
     def displayName(self):
-        return self.tr('Wind Turbine Earthwork Calculator v5.6')
+        return self.tr('Wind Turbine Earthwork Calculator v6.1')
     
     def group(self):
         return self.tr('Windkraft')
@@ -1164,9 +1177,18 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
     
     def shortHelpString(self):
         return self.tr("""
-        <b>Windkraftanlagen Erdarbeitsrechner v5.6</b>
+        <b>Windkraftanlagen Erdarbeitsrechner v6.1</b>
 
-        <p><b>🌐 NEU: hoehendaten.de API Integration</b></p>
+        <p><b>📐 NEU in v6.1: DXF-Import für Kranstellflächen</b></p>
+        <ul>
+            <li><b>DXF-Datei-Import</b>: Polylinien aus DXF-Dateien als Kranstellflächen verwenden</li>
+            <li><b>Multi-File-Support</b>: Mehrere DXF-Dateien aus Ordner laden</li>
+            <li><b>Layer-Auswahl</b>: Spezifische Layer aus DXF filtern oder alle importieren</li>
+            <li><b>Automatische Konvertierung</b>: Linien/Polylinien werden automatisch zu Polygonen konvertiert</li>
+            <li><b>Kombination möglich</b>: DXF-Polygone mit manuell erstellten Polygonen kombinierbar</li>
+        </ul>
+
+        <p><b>🌐 Feature v6.0: hoehendaten.de API Integration</b></p>
         <ul>
             <li><b>Automatischer DEM-Download</b>: DEM-Daten automatisch von hoehendaten.de beziehen</li>
             <li><b>Kein manueller Upload nötig</b>: Einfach WKA-Standorte angeben und API aktivieren</li>
@@ -1174,7 +1196,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             <li><b>Multi-Kachel-Support</b>: Automatisches Mosaik bei mehreren benötigten Kacheln</li>
         </ul>
 
-        <p><b>🆕 NEU in Version 5.5:</b></p>
+        <p><b>🆕 Feature v5.5:</b></p>
         <ul>
             <li><b>Beliebige Polygon-Formen</b>: L, Trapez, Kreis, Freiform für Kranstellflächen</li>
             <li><b>Polygon-Fundamente</b>: Oktagon, Quadrat, etc. als Alternative zu Kreis</li>
@@ -1215,9 +1237,20 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         <p><i>💡 Tipps:</i></p>
         <ul>
             <li><b>API-Modus</b>: Aktivieren Sie "DEM von API beziehen" für automatischen DEM-Download (benötigt UTM-Koordinaten)</li>
+            <li><b>DXF-Import</b>: Laden Sie Kranstellflächen direkt aus DXF-Dateien (einzeln oder Ordner)</li>
             <li>Aktivieren Sie "Standflächen (Polygone)" Output in Schritt 1!</li>
             <li>Auto-Rotation findet beste Ausrichtung (testet 0°-360° in konfigurierbaren Schritten)</li>
             <li>Im Polygon-Modus wird Rotation automatisch aus Geometrie extrahiert</li>
+        </ul>
+
+        <p><i>📐 Hinweise zu DXF-Import:</i></p>
+        <ul>
+            <li>DXF-Dateien müssen Polylinien (LWPOLYLINE, POLYLINE, LINE) enthalten</li>
+            <li>Koordinatensystem: DXF sollte in projiziertem CRS vorliegen (z.B. EPSG:25832, EPSG:25833)</li>
+            <li>Layer-Auswahl: Leer lassen für alle Layer oder spezifischen Layer-Namen eingeben</li>
+            <li>Offene Polylinien werden automatisch geschlossen (erster = letzter Punkt)</li>
+            <li>DXF-Polygone können mit manuell erstellten Polygonen kombiniert werden</li>
+            <li>Multi-File: Ordner-Option lädt automatisch alle *.dxf/*.DXF Dateien</li>
         </ul>
 
         <p><i>⚠️ Hinweise zur API:</i></p>
@@ -1254,7 +1287,26 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             self.INPUT_POLYGONS, self.tr('🔄 WKA-Standflächen (Polygone)'),
             [QgsProcessing.TypeVectorPolygon],
             optional=True))
-        
+
+        self.addParameter(QgsProcessingParameterFile(
+            self.INPUT_DXF_FILE,
+            self.tr('📐 DXF-Datei mit Kranstellflächen (Polylinien)'),
+            behavior=QgsProcessingParameterFile.File,
+            fileFilter='DXF-Dateien (*.dxf *.DXF)',
+            optional=True))
+
+        self.addParameter(QgsProcessingParameterFile(
+            self.INPUT_DXF_FOLDER,
+            self.tr('📁 DXF-Ordner (alle DXF-Dateien im Ordner laden)'),
+            behavior=QgsProcessingParameterFile.Folder,
+            optional=True))
+
+        self.addParameter(QgsProcessingParameterString(
+            self.DXF_LAYER_NAME,
+            self.tr('📋 DXF Layer-Name (leer = alle Layer)'),
+            defaultValue='',
+            optional=True))
+
         self.addParameter(QgsProcessingParameterNumber(
             self.PLATFORM_LENGTH, self.tr('Plattformlänge (m)'),
             type=QgsProcessingParameterNumber.Double,
@@ -1411,7 +1463,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         """Hauptverarbeitung"""
         
         feedback.pushInfo('=' * 70)
-        feedback.pushInfo('Wind Turbine Earthwork Calculator v5.6')
+        feedback.pushInfo('Wind Turbine Earthwork Calculator v6.1')
         feedback.pushInfo('=' * 70)
 
         # Parameter auslesen
@@ -1419,6 +1471,53 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         force_dem_refresh = self.parameterAsBool(parameters, self.FORCE_DEM_REFRESH, context)
         points_source = self.parameterAsSource(parameters, self.INPUT_POINTS, context)
         polygons_source = self.parameterAsSource(parameters, self.INPUT_POLYGONS, context)
+
+        # DXF-Parameter (NEU in v6.1)
+        dxf_file = self.parameterAsFile(parameters, self.INPUT_DXF_FILE, context)
+        dxf_folder = self.parameterAsFile(parameters, self.INPUT_DXF_FOLDER, context)
+        dxf_layer_name = self.parameterAsString(parameters, self.DXF_LAYER_NAME, context)
+
+        # DXF-Verarbeitung: Lade und konvertiere DXF zu Polygonen
+        dxf_polygon_layer = None
+        if dxf_file or dxf_folder:
+            # Lade DXF-Dateien
+            line_layers = self._load_dxf_files(dxf_file, dxf_folder, dxf_layer_name, feedback)
+
+            if line_layers:
+                # Konvertiere Linien zu Polygonen
+                dxf_polygon_layer = self._convert_lines_to_polygons(line_layers, context, feedback)
+
+                if dxf_polygon_layer:
+                    # Kombiniere mit bestehenden Polygonen (falls vorhanden)
+                    if polygons_source and polygons_source.featureCount() > 0:
+                        feedback.pushInfo('\n🔗 Kombiniere DXF-Polygone mit bestehenden Polygonen...')
+
+                        # Erstelle kombinierten Layer
+                        combined_layer = QgsVectorLayer(
+                            f"Polygon?crs={polygons_source.sourceCrs().authid()}",
+                            "Combined_Polygons",
+                            "memory"
+                        )
+                        provider = combined_layer.dataProvider()
+                        combined_layer.startEditing()
+
+                        # Füge bestehende Polygone hinzu
+                        for feature in polygons_source.getFeatures():
+                            provider.addFeatures([feature])
+
+                        # Füge DXF-Polygone hinzu
+                        for feature in dxf_polygon_layer.getFeatures():
+                            provider.addFeatures([feature])
+
+                        combined_layer.commitChanges()
+
+                        # Verwende kombinierten Layer
+                        polygons_source = combined_layer
+                        feedback.pushInfo(f'   ✓ {combined_layer.featureCount()} Polygone insgesamt')
+                    else:
+                        # Nur DXF-Polygone verwenden
+                        polygons_source = dxf_polygon_layer
+                        feedback.pushInfo(f'   ✓ Verwende {polygons_source.featureCount()} DXF-Polygon(e)')
 
         # Modus bestimmen: Polygone überschreiben Punkte
         use_polygons = (polygons_source is not None and polygons_source.featureCount() > 0)
@@ -2084,7 +2183,164 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
             'depth': depth,
             'type': foundation_type
         }
-    
+
+    def _load_dxf_files(self, dxf_file_path, dxf_folder_path, layer_name, feedback):
+        """
+        Lädt DXF-Dateien von einzelner Datei oder Ordner (NEU in v6.1)
+
+        Args:
+            dxf_file_path: str - Pfad zu einzelner DXF-Datei (optional)
+            dxf_folder_path: str - Pfad zu Ordner mit DXF-Dateien (optional)
+            layer_name: str - Layer-Name zum Filtern (leer = alle Layer)
+            feedback: QgsProcessingFeedback
+
+        Returns:
+            list of QgsVectorLayer - Liste aller geladenen DXF-Layer mit Linien
+        """
+        dxf_files = []
+
+        # Sammle DXF-Dateipfade
+        if dxf_file_path:
+            dxf_files.append(dxf_file_path)
+
+        if dxf_folder_path:
+            import glob
+            folder_dxf_files = glob.glob(os.path.join(dxf_folder_path, '*.dxf'))
+            folder_dxf_files.extend(glob.glob(os.path.join(dxf_folder_path, '*.DXF')))
+            dxf_files.extend(folder_dxf_files)
+
+        if not dxf_files:
+            return []
+
+        feedback.pushInfo(f'\n📐 DXF-Import: {len(dxf_files)} Datei(en) gefunden')
+
+        loaded_layers = []
+
+        for dxf_file in dxf_files:
+            if not os.path.exists(dxf_file):
+                feedback.reportError(f'DXF-Datei nicht gefunden: {dxf_file}')
+                continue
+
+            feedback.pushInfo(f'   Lade: {os.path.basename(dxf_file)}')
+
+            # Lade DXF mit QGIS
+            # Format: "file.dxf|layername=layer1|geometrytype=LineString"
+            base_uri = dxf_file
+
+            # Wenn Layer-Name angegeben, nur diesen Layer laden
+            if layer_name and layer_name.strip():
+                uri = f"{base_uri}|layername={layer_name.strip()}"
+                layer = QgsVectorLayer(uri, f"DXF_{os.path.basename(dxf_file)}_{layer_name}", "ogr")
+
+                if layer.isValid():
+                    # Prüfe ob Layer Linien enthält
+                    geom_type = layer.geometryType()
+                    if geom_type == QgsWkbTypes.LineGeometry:
+                        loaded_layers.append(layer)
+                        feedback.pushInfo(f'      → Layer "{layer_name}" geladen ({layer.featureCount()} Features)')
+                    else:
+                        feedback.pushInfo(f'      → Layer "{layer_name}" übersprungen (keine Linien)')
+                else:
+                    feedback.reportError(f'      → Layer "{layer_name}" konnte nicht geladen werden')
+            else:
+                # Alle Layer laden
+                layer = QgsVectorLayer(base_uri, f"DXF_{os.path.basename(dxf_file)}", "ogr")
+
+                if layer.isValid():
+                    # Hole alle verfügbaren Layer/Sublayer
+                    sublayers = layer.dataProvider().subLayers()
+
+                    if sublayers:
+                        feedback.pushInfo(f'      → {len(sublayers)} Sublayer gefunden')
+                        for sublayer in sublayers:
+                            # Format: "0:layername:featurecount:geometrytype"
+                            parts = sublayer.split(':')
+                            if len(parts) >= 2:
+                                sublayer_name = parts[1]
+                                uri_sublayer = f"{base_uri}|layername={sublayer_name}"
+                                sublayer_obj = QgsVectorLayer(uri_sublayer, sublayer_name, "ogr")
+
+                                if sublayer_obj.isValid():
+                                    geom_type = sublayer_obj.geometryType()
+                                    if geom_type == QgsWkbTypes.LineGeometry:
+                                        loaded_layers.append(sublayer_obj)
+                                        feedback.pushInfo(f'         • "{sublayer_name}" ({sublayer_obj.featureCount()} Linien)')
+                                    else:
+                                        feedback.pushInfo(f'         • "{sublayer_name}" übersprungen (keine Linien)')
+                    else:
+                        # Keine Sublayer, verwende Hauptlayer
+                        geom_type = layer.geometryType()
+                        if geom_type == QgsWkbTypes.LineGeometry:
+                            loaded_layers.append(layer)
+                            feedback.pushInfo(f'      → Geladen ({layer.featureCount()} Linien)')
+                else:
+                    feedback.reportError(f'      → Konnte nicht geladen werden')
+
+        feedback.pushInfo(f'   ✓ Insgesamt {len(loaded_layers)} Linien-Layer geladen')
+        return loaded_layers
+
+    def _convert_lines_to_polygons(self, line_layers, context, feedback):
+        """
+        Konvertiert Linien-Layer zu Polygonen (NEU in v6.1)
+        Orientiert sich am QGIS "Linien zu Polygonen" Werkzeug
+
+        Args:
+            line_layers: list of QgsVectorLayer - Layer mit Linien
+            context: QgsProcessingContext
+            feedback: QgsProcessingFeedback
+
+        Returns:
+            QgsVectorLayer - Layer mit Polygonen
+        """
+        if not line_layers:
+            return None
+
+        feedback.pushInfo('\n🔄 Konvertiere Linien zu Polygonen...')
+
+        all_polygon_features = []
+
+        for line_layer in line_layers:
+            try:
+                # Verwende QGIS native "lines to polygons" Algorithmus
+                result = processing.run("native:linestopolygons", {
+                    'INPUT': line_layer,
+                    'OUTPUT': 'memory:'
+                }, context=context, feedback=feedback)
+
+                polygon_layer = result['OUTPUT']
+
+                if polygon_layer and polygon_layer.isValid():
+                    feature_count = polygon_layer.featureCount()
+                    feedback.pushInfo(f'   ✓ {feature_count} Polygon(e) aus "{line_layer.name()}" erstellt')
+
+                    # Features sammeln
+                    for feature in polygon_layer.getFeatures():
+                        all_polygon_features.append(feature)
+                else:
+                    feedback.reportError(f'   ✗ Konvertierung fehlgeschlagen für "{line_layer.name()}"')
+
+            except Exception as e:
+                feedback.reportError(f'   ✗ Fehler bei Konvertierung von "{line_layer.name()}": {str(e)}')
+
+        if not all_polygon_features:
+            feedback.reportError('Keine Polygone aus DXF-Linien erstellt')
+            return None
+
+        # Erstelle neuen Memory-Layer mit allen Polygonen
+        crs = line_layers[0].crs()
+        merged_layer = QgsVectorLayer(f"Polygon?crs={crs.authid()}", "DXF_Polygons", "memory")
+
+        provider = merged_layer.dataProvider()
+        merged_layer.startEditing()
+
+        # Features hinzufügen
+        provider.addFeatures(all_polygon_features)
+        merged_layer.commitChanges()
+
+        feedback.pushInfo(f'   ✓ {len(all_polygon_features)} Polygon(e) insgesamt erstellt')
+
+        return merged_layer
+
     def _get_foundation_polygon_for_site(self, site_id, foundation_polygon_layer):
         """
         Findet Fundament-Polygon für gegebenen Standort (NEU in v5.5)
