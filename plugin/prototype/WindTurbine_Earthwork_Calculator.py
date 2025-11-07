@@ -1498,13 +1498,15 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
 
                         combined_layer.commitChanges()
 
-                        # Verwende kombinierten Layer
-                        polygons_source = combined_layer
+                        # Verwende kombinierten Layer - als FeatureSource wrappen
+                        from qgis.core import QgsProcessingFeatureSource
+                        polygons_source = QgsProcessingFeatureSource(combined_layer, context)
                         feedback.pushInfo(f'   ✓ {combined_layer.featureCount()} Polygone insgesamt')
                     else:
-                        # Nur DXF-Polygone verwenden
-                        polygons_source = dxf_polygon_layer
-                        feedback.pushInfo(f'   ✓ Verwende {polygons_source.featureCount()} DXF-Polygon(e)')
+                        # Nur DXF-Polygone verwenden - als FeatureSource wrappen
+                        from qgis.core import QgsProcessingFeatureSource
+                        polygons_source = QgsProcessingFeatureSource(dxf_polygon_layer, context)
+                        feedback.pushInfo(f'   ✓ Verwende {dxf_polygon_layer.featureCount()} DXF-Polygon(e)')
 
         # Modus bestimmen: Polygone überschreiben Punkte
         use_polygons = (polygons_source is not None and polygons_source.featureCount() > 0)
