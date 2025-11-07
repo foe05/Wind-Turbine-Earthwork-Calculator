@@ -3384,11 +3384,7 @@ class WindTurbineEarthworkCalculatorV3(QgsProcessingAlgorithm):
         # Validierung: Minimale Größe
         if length < 10.0 or width < 10.0:
             raise QgsProcessingException(f'Polygon zu klein! Länge: {length:.1f}m, Breite: {width:.1f}m (Min: 10m)')
-        
-        # Validierung: Maximale Größe
-        if length > 200.0 or width > 200.0:
-            raise QgsProcessingException(f'Polygon zu groß! Länge: {length:.1f}m, Breite: {width:.1f}m (Max: 200m)')
-        
+
         # Rotation berechnen
         rotation = self._calculate_polygon_rotation(geom)
         
