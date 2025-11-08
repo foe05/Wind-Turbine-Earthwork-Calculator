@@ -1,0 +1,369 @@
+# PLUGIN-ARCHITEKTUR-ÜBERSICHT
+# Windturbine Optimizer für QGIS
+
+## 📊 DATENFLUSS-DIAGRAMM
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         USER INTERFACE (QGIS)                           │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │        QGIS Processing Toolbox                                  │  │
+│  │  ┌────────────────────────────────────────────────────────┐     │  │
+│  │  │  "Optimize Wind Turbine Platform" Algorithm           │     │  │
+│  │  │                                                        │     │  │
+│  │  │  Input:                                               │     │  │
+│  │  │  • DXF File                                          │     │  │
+│  │  │  • Min/Max Height                                    │     │  │
+│  │  │  • Configuration Parameters                          │     │  │
+│  │  │                                                        │     │  │
+│  │  │  Output:                                              │     │  │
+│  │  │  • GeoPackage with Layers                            │     │  │
+│  │  │  • HTML Report                                        │     │  │
+│  │  └────────────────────────────────────────────────────────┘     │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+└───────────────────────────┬─────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    PROCESSING ALGORITHM                                 │
+│                  (optimize_algorithm.py)                                │
+│                                                                         │
+│  1. Validate Input Parameters                                          │
+│  2. Call Core Modules in Sequence                                      │
+│  3. Handle Errors & Progress Updates                                   │
+│  4. Return Results                                                      │
+└───────────┬─────────────────────────────────────────────────────────────┘
+            │
+            ├────────────────┬────────────────┬────────────────┬──────────
+            ▼                ▼                ▼                ▼
+┌───────────────────┐ ┌───────────────┐ ┌─────────────┐ ┌─────────────────┐
+│  DXF IMPORTER     │ │ DEM DOWNLOADER│ │ EARTHWORK   │ │   PROFILE       │
+│  (Module 1)       │ │  (Module 2)   │ │ CALCULATOR  │ │   GENERATOR     │
+│                   │ │               │ │  (Module 3) │ │   (Module 4)    │
+├───────────────────┤ ├───────────────┤ ├─────────────┤ ├─────────────────┤
+│ • Read DXF        │ │ • API Calls   │ │ • Sample    │ │ • Create        │
+│ • Extract Lines   │ │ • Cache Mgmt  │ │   DEM       │ │   Profiles      │
+│ • Connect to      │ │ • Mosaic      │ │ • Calculate │ │ • Plot with     │
+│   Polygon         │ │   Creation    │ │   Volumes   │ │   Matplotlib    │
+│ • Validate        │ │ • GeoPackage  │ │ • Optimize  │ │ • Export PNG    │
+│   Topology        │ │   Export      │ │   Height    │ │                 │
+│                   │ │               │ │ • Cost Calc │ │                 │
+└─────────┬─────────┘ └───────┬───────┘ └──────┬──────┘ └────────┬────────┘
+          │                   │                 │                  │
+          │                   │                 │                  │
+          └───────────────────┴─────────────────┴──────────────────┘
+                                      │
+                                      ▼
+                         ┌─────────────────────────┐
+                         │   REPORT GENERATOR      │
+                         │     (Module 5)          │
+                         │                         │
+                         │ • Collect Results       │
+                         │ • Generate Map PNG      │
+                         │ • Create HTML Report    │
+                         │ • Embed Images          │
+                         └────────────┬────────────┘
+                                      │
+                                      ▼
+                         ┌─────────────────────────┐
+                         │        OUTPUT           │
+                         │                         │
+                         │ 📦 GeoPackage:          │
+                         │   • standflaeche        │
+                         │   • profile_lines       │
+                         │   • dem_mosaic          │
+                         │                         │
+                         │ 📄 report.html          │
+                         │                         │
+                         │ 🖼️  profile_*.png       │
+                         └─────────────────────────┘
+```
+
+---
+
+## 🗂️ DATEISTRUKTUR
+
+```
+windturbine_optimizer/
+│
+├── 📄 __init__.py                    # Plugin Entry Point
+├── 📄 metadata.txt                   # Plugin Metadata
+├── 🖼️  icon.png                      # Plugin Icon
+├── 📄 README.md                      # Dokumentation
+├── 📄 requirements.txt               # Python Dependencies
+│
+├── 📁 processing_provider/           # Processing Framework Integration
+│   ├── 📄 __init__.py
+│   ├── 📄 provider.py                # Processing Provider Class
+│   └── 📄 optimize_algorithm.py      # Main Algorithm Implementation
+│
+├── 📁 core/                          # Core Business Logic
+│   ├── 📄 __init__.py
+│   ├── 📄 dxf_importer.py            # DXF → Polygon Conversion
+│   │   └── class DXFImporter:
+│   │       ├── extract_polylines()
+│   │       ├── connect_polylines()
+│   │       ├── to_qgs_polygon()
+│   │       └── validate_polygon()
+│   │
+│   ├── 📄 dem_downloader.py          # Height Data API & Caching
+│   │   └── class DEMDownloader:
+│   │       ├── calculate_tiles()
+│   │       ├── download_tile()
+│   │       ├── create_mosaic()
+│   │       └── save_to_geopackage()
+│   │
+│   ├── 📄 earthwork_calculator.py    # Earthwork Calculations
+│   │   └── class EarthworkCalculator:
+│   │       ├── calculate_scenario()
+│   │       ├── find_optimum()
+│   │       └── calculate_costs()
+│   │
+│   ├── 📄 profile_generator.py       # Terrain Profile Creation
+│   │   └── class ProfileGenerator:
+│   │       ├── generate_auto_profiles()
+│   │       ├── extract_profile_data()
+│   │       └── plot_profile()
+│   │
+│   └── 📄 report_generator.py        # HTML Report Generation
+│       └── class ReportGenerator:
+│           ├── generate_map()
+│           └── generate_html()
+│
+├── 📁 utils/                         # Helper Functions
+│   ├── 📄 __init__.py
+│   ├── 📄 validation.py              # Input Validation
+│   ├── 📄 geometry_utils.py          # Geometry Helper Functions
+│   └── 📄 logging_utils.py           # Logging Configuration
+│
+└── 📁 tests/                         # Unit Tests (Optional)
+    ├── 📄 __init__.py
+    ├── 📄 test_dxf_importer.py
+    ├── 📄 test_dem_downloader.py
+    └── 📄 test_earthwork_calculator.py
+```
+
+---
+
+## 🔄 AUSFÜHRUNGS-SEQUENZ
+
+```
+START
+  │
+  ├─[1]─► Validate Input Parameters
+  │        ├─ CRS check (EPSG:25832?)
+  │        ├─ File exists?
+  │        └─ Height range valid?
+  │
+  ├─[2]─► Import DXF File
+  │        ├─ Read with ezdxf
+  │        ├─ Extract LWPOLYLINE entities
+  │        ├─ Connect lines to polygon
+  │        └─ Validate topology
+  │              │
+  │              ├─ Valid? ───► Continue
+  │              └─ Invalid? ─► ERROR & STOP
+  │
+  ├─[3]─► Download DEM Data
+  │        ├─ Calculate 250m buffer around polygon
+  │        ├─ Determine affected 1km tiles
+  │        ├─ For each tile:
+  │        │    ├─ Check cache
+  │        │    ├─ Download if needed (API call)
+  │        │    └─ Save to cache
+  │        └─ Create mosaic from tiles
+  │
+  ├─[4]─► Optimize Platform Height
+  │        ├─ For h = min_height to max_height (step=0.1m):
+  │        │    ├─ Sample DEM within polygon
+  │        │    ├─ Calculate cut volume
+  │        │    ├─ Calculate fill volume
+  │        │    ├─ Calculate slope volume
+  │        │    ├─ Calculate foundation volume
+  │        │    ├─ Calculate costs
+  │        │    └─ Store results
+  │        │
+  │        └─ Find minimum total_volume_moved
+  │              └─ optimal_height = argmin(scenarios)
+  │
+  ├─[5]─► Generate Terrain Profiles
+  │        ├─ Create 8 radial profile lines
+  │        ├─ For each line:
+  │        │    ├─ Sample DEM along line
+  │        │    ├─ Plot with matplotlib
+  │        │    ├─ Overlay planned platform
+  │        │    ├─ Color-code cut/fill areas
+  │        │    └─ Export to PNG
+  │        └─ Save profile lines to GeoPackage
+  │
+  ├─[6]─► Generate Report
+  │        ├─ Collect all results
+  │        ├─ Create map PNG (1:1000)
+  │        ├─ Generate HTML with:
+  │        │    ├─ Project parameters
+  │        │    ├─ Optimization result
+  │        │    ├─ Volume tables
+  │        │    ├─ Cost breakdown
+  │        │    ├─ Embedded map
+  │        │    └─ Embedded profile PNGs
+  │        └─ Write report.html
+  │
+  └─[7]─► Save Outputs
+           ├─ GeoPackage with 3 layers:
+           │    ├─ standflaeche (Polygon)
+           │    ├─ profile_lines (LineString)
+           │    └─ dem_mosaic (Raster)
+           │
+           ├─ HTML Report
+           └─ Profile PNGs
+                 │
+                 ▼
+               DONE ✓
+```
+
+---
+
+## 🔌 MODULE-ABHÄNGIGKEITEN
+
+```
+optimize_algorithm.py
+        │
+        ├─► DXFImporter
+        │      └─► ezdxf
+        │
+        ├─► DEMDownloader
+        │      ├─► requests (HTTP)
+        │      └─► GDAL (mosaic)
+        │
+        ├─► EarthworkCalculator
+        │      ├─► numpy
+        │      └─► QGIS raster API
+        │
+        ├─► ProfileGenerator
+        │      ├─► matplotlib
+        │      └─► numpy
+        │
+        └─► ReportGenerator
+               └─► base64 (image embedding)
+```
+
+---
+
+## 📦 DATENFORMAT-ÜBERSICHT
+
+### Input
+```
+DXF File
+├─ Format: AutoCAD DXF R2000+
+├─ Entities: LWPOLYLINE
+├─ CRS: EPSG:25832 (UTM 32N)
+└─ Size: Typically < 100 KB
+```
+
+### Intermediate
+```
+Cache Directory (~/.qgis3/windturbine_plugin_cache/)
+├─ dgm1_32_492_5702_1m.tif
+├─ dgm1_32_493_5702_1m.tif
+└─ ... (max ~4 tiles per site)
+
+Size: ~10-20 MB per tile
+Format: GeoTIFF (1m resolution)
+```
+
+### Output
+```
+Project Output Directory
+├─ WKA_492000_5702000.gpkg          # GeoPackage (5-50 MB)
+│  ├─ Layer: standflaeche            # Polygon
+│  ├─ Layer: profile_lines           # LineStrings
+│  └─ Raster: dem_mosaic             # Raster (4-40 MB)
+│
+├─ report.html                        # HTML Report (500 KB - 2 MB)
+│
+└─ profiles/
+   ├─ profile_001.png                 # 300 DPI PNG (~500 KB each)
+   ├─ profile_002.png
+   ├─ ...
+   └─ profile_008.png
+```
+
+---
+
+## ⚙️ KONFIGURATIONS-PARAMETER
+
+### Essential (Required)
+| Parameter          | Type   | Default | Description                  |
+|--------------------|--------|---------|------------------------------|
+| INPUT_DXF          | File   | -       | Path to DXF file             |
+| MIN_HEIGHT         | Float  | -       | Min platform height (m ü.NN) |
+| MAX_HEIGHT         | Float  | -       | Max platform height (m ü.NN) |
+| OUTPUT_GPKG        | File   | -       | Output GeoPackage path       |
+
+### Advanced (Optional)
+| Parameter              | Type    | Default | Range       |
+|------------------------|---------|---------|-------------|
+| HEIGHT_STEP            | Float   | 0.1     | 0.01-1.0    |
+| DXF_TOLERANCE          | Float   | 0.01    | 0.001-1.0   |
+| FORCE_REFRESH          | Boolean | False   | -           |
+| FOUNDATION_DIAMETER    | Float   | 20.0    | 5.0-50.0    |
+| FOUNDATION_DEPTH       | Float   | 3.0     | 1.0-10.0    |
+| SLOPE_ANGLE            | Float   | 45.0    | 15.0-60.0   |
+| SWELL_FACTOR           | Float   | 1.25    | 1.0-1.5     |
+| COMPACTION_FACTOR      | Float   | 0.9     | 0.8-1.0     |
+| MATERIAL_REUSE         | Boolean | True    | -           |
+| HEIGHT_EXAGGERATION    | Float   | 2.0     | 1.0-5.0     |
+| NUM_AUTO_PROFILES      | Integer | 8       | 4-16        |
+
+---
+
+## 🎯 PERFORMANCE-ERWARTUNGEN
+
+| Operation                  | Expected Time | Notes                      |
+|----------------------------|---------------|----------------------------|
+| DXF Import                 | < 2 sec       | For typical 42 polylines   |
+| Tile Calculation           | < 1 sec       | Geometry operations        |
+| DEM Download (per tile)    | 5-30 sec      | Depends on connection      |
+| Mosaic Creation            | 2-5 sec       | GDAL operation             |
+| Optimization (100 steps)   | 30-60 sec     | DEM sampling intensive     |
+| Profile Generation (8x)    | 10-20 sec     | Matplotlib rendering       |
+| Report Generation          | 5-10 sec      | HTML + image embedding     |
+| **TOTAL**                  | **~2-3 min**  | For standard workflow      |
+
+---
+
+## 🛡️ ERROR-HANDLING-MATRIX
+
+| Error Type              | Detection                | Handling                    |
+|-------------------------|--------------------------|----------------------------|
+| Invalid DXF             | Parse exception          | Show error, suggest fix    |
+| Unclosed polygon        | Topology validation      | Attempt auto-close, warn   |
+| Wrong CRS               | CRS check                | Show error, stop           |
+| API timeout             | HTTP timeout (30s)       | Retry 3x, then fail        |
+| Missing DEM coverage    | Bbox check               | Show affected tiles, stop  |
+| Network error           | Connection exception     | Clear message, suggest fix |
+| Invalid height range    | Parameter validation     | Show error, suggest fix    |
+| NoData in polygon       | Raster sampling          | Warn, interpolate if <5%   |
+
+---
+
+## 📈 ZUKUNFTS-ERWEITERUNGEN (Nice-to-Have)
+
+### Phase 5 (Optional)
+- Multi-site optimization (mehrere WKAs gleichzeitig)
+- 3D-Visualisierung mit Qgis2threejs
+- Export nach AutoCAD (DWG)
+- Batch-Processing-Support
+- GUI-Dialog zusätzlich zu Processing
+- Anbindung anderer DEM-Quellen (SRTM, ASTER, etc.)
+- KML/KMZ Export für Google Earth
+- PDF-Report zusätzlich zu HTML
+
+---
+
+**Diese Architektur ist designed für:**
+✓ Wartbarkeit (modularer Aufbau)
+✓ Testbarkeit (unabhängige Module)
+✓ Erweiterbarkeit (klare Schnittstellen)
+✓ QGIS Best Practices (Processing Framework)
