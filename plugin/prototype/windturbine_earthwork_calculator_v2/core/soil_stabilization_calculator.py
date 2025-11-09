@@ -51,6 +51,16 @@ GRAVEL_THICKNESS_TABLE = [
     (0, 0.40)
 ]
 
+# Typische optimale Wassergehalte nach Proctor (%)
+# Basierend auf DIN 18127 Erfahrungswerte
+OPTIMUM_WATER_CONTENT = {
+    'Ton': 16.0,      # Bindige Böden: höherer Optimum-Wassergehalt
+    'Schluff': 18.0,  # Mittlere Bindigkeit
+    'Lehm': 15.0,     # Gemischtkörnig
+    'Sand': 10.0,     # Nicht-bindig: niedriger Optimum-Wassergehalt
+    'Kies': 8.0       # Grobkörnig: sehr niedriger Optimum-Wassergehalt
+}
+
 # DIN 18196 Bodenklassen-Mapping
 DIN_SOIL_CLASSIFICATION = {
     'TL': 'Ton',

@@ -269,10 +269,17 @@ class MainDialog(QDialog):
         self.input_ev2_bestand.setDecimals(1)
         self.input_ev2_bestand.setSuffix(" MN/m²")
         self.input_ev2_bestand.setToolTip(
-            "Verformungsmodul des anstehenden Bodens (Plattendruckversuch)"
+            "Verformungsmodul des anstehenden Bodens (Plattendruckversuch DIN 18134)\n"
+            "Typische Bereiche werden basierend auf gewählter Bodenart angezeigt"
         )
 
         form_soil.addRow("Ev2 Bestand:", self.input_ev2_bestand)
+
+        # Info-Label für typische Ev2-Bereiche (wird dynamisch aktualisiert)
+        self.label_ev2_range = QLabel("<i>Typisch für Schluff (weich): 20-35 MN/m²</i>")
+        self.label_ev2_range.setWordWrap(True)
+        self.label_ev2_range.setStyleSheet("QLabel { color: #666; font-size: 10pt; }")
+        form_soil.addRow("", self.label_ev2_range)
 
         # Wassergehalt (optional)
         self.input_water_content = QDoubleSpinBox()
@@ -290,18 +297,23 @@ class MainDialog(QDialog):
         # Optimaler Wassergehalt (optional)
         self.input_optimum_water = QDoubleSpinBox()
         self.input_optimum_water.setRange(0, 50)
-        self.input_optimum_water.setValue(0)
+        self.input_optimum_water.setValue(18.0)  # Default für Schluff
         self.input_optimum_water.setDecimals(1)
         self.input_optimum_water.setSuffix(" %")
         self.input_optimum_water.setSpecialValueText("Unbekannt")
         self.input_optimum_water.setToolTip(
-            "Optimaler Wassergehalt nach Proctor (optional)"
+            "Optimaler Wassergehalt nach Proctor (DIN 18127)\n"
+            "Wird automatisch für gewählte Bodenart vorgeschlagen\n"
+            "Kann manuell überschrieben werden"
         )
 
         form_soil.addRow("Optimum Wassergehalt:", self.input_optimum_water)
 
         group_soil.setLayout(form_soil)
         layout.addWidget(group_soil)
+
+        # Connect signal to auto-fill optimum water content when soil type changes
+        self.input_soil_type.currentTextChanged.connect(self._on_soil_type_changed)
 
         # Berechnungsoptionen
         group_options = QGroupBox("Berechnungsoptionen")
@@ -408,6 +420,64 @@ class MainDialog(QDialog):
         """Connect button signals."""
         self.btn_start.clicked.connect(self._on_start)
         self.btn_cancel.clicked.connect(self.reject)
+
+    def _on_soil_type_changed(self, soil_type_text):
+        """
+        Auto-fill optimum water content and update Ev2 range hint when soil type changes.
+
+        Args:
+            soil_type_text: Text from combo box (e.g. "Ton (weich)")
+        """
+        # Import the constants
+        from ..core.soil_stabilization_calculator import (
+            OPTIMUM_WATER_CONTENT,
+            SOIL_EV2_RANGES
+        )
+
+        # Extract base soil type and consistency
+        if soil_type_text == 'Unbekannt - Standardwert verwenden':
+            base_type = 'Schluff'  # Default
+            consistency = 'weich'
+            full_key = 'Schluff_weich'
+        else:
+            parts = soil_type_text.replace('(', '').replace(')', '').split()
+            base_type = parts[0]  # "Ton", "Schluff", etc.
+            consistency = parts[1] if len(parts) > 1 else 'weich'
+            full_key = f"{base_type}_{consistency}"
+
+        # Update optimum water content
+        if base_type in OPTIMUM_WATER_CONTENT:
+            optimum = OPTIMUM_WATER_CONTENT[base_type]
+
+            # Auto-update if current value is a typical value
+            current_value = self.input_optimum_water.value()
+            typical_values = list(OPTIMUM_WATER_CONTENT.values()) + [0]
+
+            if current_value in typical_values or current_value == 0:
+                self.input_optimum_water.setValue(optimum)
+                self.logger.info(
+                    f"Auto-updated optimum water content: {optimum}% for {base_type}"
+                )
+
+        # Update Ev2 range hint
+        if full_key in SOIL_EV2_RANGES:
+            ev2_min, ev2_max = SOIL_EV2_RANGES[full_key]
+            self.label_ev2_range.setText(
+                f"<i>Typisch für {soil_type_text}: {ev2_min}-{ev2_max} MN/m²</i>"
+            )
+        else:
+            # Fallback: try to find similar entry
+            matching_keys = [k for k in SOIL_EV2_RANGES.keys() if base_type in k]
+            if matching_keys:
+                # Take first match
+                ev2_min, ev2_max = SOIL_EV2_RANGES[matching_keys[0]]
+                self.label_ev2_range.setText(
+                    f"<i>Typisch für {base_type}: ca. {ev2_min}-{ev2_max} MN/m²</i>"
+                )
+            else:
+                self.label_ev2_range.setText(
+                    f"<i>Typische Werte für {base_type} nicht verfügbar</i>"
+                )
     
     def _browse_dxf(self):
         """Browse for DXF file."""
