@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 from qgis.PyQt.QtCore import QCoreApplication
+from qgis.PyQt.QtGui import QColor
 from qgis.core import (
     QgsProcessing,
     QgsProcessingAlgorithm,
@@ -28,6 +29,10 @@ from qgis.core import (
     QgsWkbTypes,
     QgsRasterLayer,
     QgsVectorLayer,
+    QgsSimpleFillSymbolLayer,
+    QgsSimpleLineSymbolLayer,
+    QgsFillSymbol,
+    QgsLineSymbol,
     QgsVectorFileWriter,
     QgsProject,
     QgsCoordinateReferenceSystem
@@ -462,8 +467,62 @@ class OptimizePlatformHeightAlgorithm(QgsProcessingAlgorithm):
             if not report_path:
                 report_path = str(Path(output_gpkg).with_suffix('.html'))
 
-            report_gen = ReportGenerator(results, polygon, dem_layer)
-            report_gen.generate_html(report_path, profile_pngs, config)
+            # Create memory layers for overview map
+            crs = dem_layer.crs()
+            
+            # Platform polygon layer with black hatched symbology
+            platform_layer = QgsVectorLayer(f"Polygon?crs={crs.authid()}", "Plattform", "memory")
+            platform_prov = platform_layer.dataProvider()
+            platform_feat = QgsFeature()
+            platform_feat.setGeometry(polygon)
+            platform_prov.addFeatures([platform_feat])
+            platform_layer.updateExtents()
+            
+            # Apply black hatched fill
+            symbol = QgsFillSymbol.createSimple({
+                'color': '0,0,0,255',
+                'style': 'dense4',  # Hatched pattern
+                'outline_color': '0,0,0,255',
+                'outline_width': '0.5'
+            })
+            platform_layer.renderer().setSymbol(symbol)
+            
+            # Profile lines layer with white lines
+            profile_lines_layer = QgsVectorLayer(f"LineString?crs={crs.authid()}", "Geländeschnitte", "memory")
+            profile_lines_prov = profile_lines_layer.dataProvider()
+            profile_features = []
+            for profile in profiles:
+                profile_feat = QgsFeature()
+                profile_feat.setGeometry(profile['geometry'])
+                profile_features.append(profile_feat)
+            profile_lines_prov.addFeatures(profile_features)
+            profile_lines_layer.updateExtents()
+            
+            # Apply white line symbology
+            line_symbol = QgsLineSymbol.createSimple({
+                'color': '255,255,255,255',
+                'width': '0.8',
+                'capstyle': 'round'
+            })
+            profile_lines_layer.renderer().setSymbol(line_symbol)
+            
+            # DXF layer (if imported)
+            dxf_layer = None
+            dxf_import = self.parameterAsVectorLayer(parameters, self.INPUT_DXF, context)
+            if dxf_import:
+                dxf_layer = dxf_import
+
+            # Generate report with layers and profiles directory
+            report_gen = ReportGenerator(
+                results, polygon, dem_layer,
+                platform_layer=platform_layer,
+                profile_lines_layer=profile_lines_layer,
+                dxf_layer=dxf_layer
+            )
+            report_gen.generate_html(
+                report_path, profile_pngs, config,
+                profiles_dir=str(profile_dir)
+            )
 
             feedback.pushInfo(f"✓ HTML-Bericht erstellt: {report_path}")
 

@@ -545,7 +545,7 @@ def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent
 
                     cross_section = {
                         'geometry': line_geom,
-                        'type': f'cross_section_{i+1:03d}',
+                        'type': f'Schnitt {i+1:02d}',
                         'main_angle': main_angle,
                         'cross_angle': cross_angle,
                         'center_point': true_center,

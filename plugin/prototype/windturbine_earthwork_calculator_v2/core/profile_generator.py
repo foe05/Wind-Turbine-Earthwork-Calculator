@@ -225,7 +225,9 @@ class ProfileGenerator:
                     profile_type: str = "profile",
                     vertical_exaggeration: float = 1.0,
                     volume_info: Optional[Dict] = None,
-                    line_length: Optional[float] = None) -> str:
+                    line_length: Optional[float] = None,
+                    xlim: Optional[Tuple[float, float]] = None,
+                    ylim: Optional[Tuple[float, float]] = None) -> str:
         """
         Create matplotlib plot of terrain profile.
 
@@ -236,6 +238,8 @@ class ProfileGenerator:
             vertical_exaggeration (float): Vertical exaggeration factor
             volume_info (Dict): Optional volume info for annotation
             line_length (float): Optional total line length for x-axis scaling
+            xlim (Tuple[float, float]): Optional x-axis limits (min, max)
+            ylim (Tuple[float, float]): Optional y-axis limits (min, max)
 
         Returns:
             str: Path to created PNG file
@@ -244,14 +248,11 @@ class ProfileGenerator:
             Exception: If plotting fails
         """
         try:
-            # Determine figure width based on line length for better aspect ratio
-            if line_length and line_length > 0:
-                # Scale figure width based on line length (min 8, max 16 inches)
-                fig_width = min(16, max(8, line_length / 10))
-            else:
-                fig_width = 12
+            # Fixed aspect ratio 3:2 (width:height) for consistent image sizes
+            fig_width = 12  # inches
+            fig_height = 8  # inches (12/8 = 3/2 = 1.5)
 
-            fig, ax = plt.subplots(figsize=(fig_width, 6), dpi=300)
+            fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=300)
 
             distances = profile_data['distances']
             existing = profile_data['existing_z']
@@ -259,8 +260,8 @@ class ProfileGenerator:
             cut_fill = profile_data['cut_fill']
 
             # Plot terrain and platform lines
-            ax.plot(distances, existing, 'k-', linewidth=2, label='Existing Terrain')
-            ax.plot(distances, planned, 'b-', linewidth=2, label='Planned Platform')
+            ax.plot(distances, existing, 'k-', linewidth=2, label='Bestehendes Gelände')
+            ax.plot(distances, planned, 'b-', linewidth=2, label='Geplante Plattform')
 
             # Fill areas
             # Cut (red) - where existing > planned
@@ -269,7 +270,7 @@ class ProfileGenerator:
                 ax.fill_between(
                     distances, existing, planned,
                     where=cut_mask,
-                    color='red', alpha=0.3, label='Cut'
+                    color='red', alpha=0.3, label='Abtrag'
                 )
 
             # Fill (green) - where existing < planned
@@ -278,47 +279,40 @@ class ProfileGenerator:
                 ax.fill_between(
                     distances, existing, planned,
                     where=fill_mask,
-                    color='green', alpha=0.3, label='Fill'
+                    color='green', alpha=0.3, label='Auftrag'
                 )
 
             # Labels and title with actual distance range
             max_distance = distances[-1] if len(distances) > 0 else 0
-            ax.set_xlabel(f'Distance [m] (0 - {max_distance:.1f} m)', fontsize=12, fontweight='bold')
-            ax.set_ylabel('Elevation [m ü.NN]', fontsize=12, fontweight='bold')
+            ax.set_xlabel(f'Entfernung [m] (0 - {max_distance:.1f} m)', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Höhe [m ü.NN]', fontsize=12, fontweight='bold')
 
             # Set title with line length info
             if line_length:
-                title = f'Cross-Section Profile: {profile_type} (Length: {line_length:.1f} m)'
+                title = f'Geländeschnitt: {profile_type} (Länge: {line_length:.1f} m)'
             else:
-                title = f'Terrain Profile: {profile_type}'
+                title = f'Geländeschnitt: {profile_type}'
 
             if vertical_exaggeration != 1.0:
-                title += f' (V.E. {vertical_exaggeration}x)'
+                title += f' (Überhöhung {vertical_exaggeration}x)'
 
             ax.set_title(title, fontsize=14, fontweight='bold')
 
             # Enhanced grid
             ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
-            ax.legend(loc='best', fontsize=10)
+            
+            # Legend below plot (horizontal)
+            ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08), 
+                     ncol=4, fontsize=10, frameon=True, fancybox=True)
 
-            # Set x-axis limits to actual data range
-            ax.set_xlim(0, max_distance)
-
-            # Add info box if volume info provided
-            if volume_info:
-                textstr = (
-                    f"Total Cut: {volume_info.get('total_cut', 0):.0f} m³\n"
-                    f"Total Fill: {volume_info.get('total_fill', 0):.0f} m³\n"
-                    f"Platform Height: {self.platform_height:.2f} m ü.NN"
-                )
-                props = dict(boxstyle='round', facecolor='wheat', alpha=0.7)
-                ax.text(
-                    0.02, 0.98, textstr,
-                    transform=ax.transAxes,
-                    fontsize=10,
-                    verticalalignment='top',
-                    bbox=props
-                )
+            # Set axis limits
+            if xlim:
+                ax.set_xlim(xlim)
+            else:
+                ax.set_xlim(0, max_distance)
+            
+            if ylim:
+                ax.set_ylim(ylim)
 
             # Save figure
             plt.tight_layout()
@@ -369,17 +363,46 @@ class ProfileGenerator:
         if feedback:
             feedback.pushInfo(f"  Created {len(profiles)} cross-section lines")
 
+        # First pass: Extract all profile data to determine global scale
+        all_profile_data = []
+        max_line_length = 0
+        min_elevation = float('inf')
+        max_elevation = float('-inf')
+
+        for profile in profiles:
+            try:
+                profile_data = self.extract_profile_data(profile['geometry'])
+                all_profile_data.append((profile, profile_data))
+                
+                # Track maximum line length
+                max_line_length = max(max_line_length, profile['length'])
+                
+                # Track elevation range
+                min_elevation = min(min_elevation, np.min(profile_data['existing_z']))
+                max_elevation = max(max_elevation, np.max(profile_data['existing_z']))
+                min_elevation = min(min_elevation, np.min(profile_data['planned_z']))
+                max_elevation = max(max_elevation, np.max(profile_data['planned_z']))
+                
+            except Exception as e:
+                self.logger.error(f"Failed to extract data for profile {profile['type']}: {e}")
+
+        # Add padding to elevation range (5%)
+        elevation_range = max_elevation - min_elevation
+        elevation_padding = elevation_range * 0.05
+        global_ylim = (min_elevation - elevation_padding, max_elevation + elevation_padding)
+        
+        if feedback:
+            feedback.pushInfo(f"  Global scale - Length: {max_line_length:.1f}m, Elevation: {global_ylim[0]:.1f} - {global_ylim[1]:.1f} m")
+
+        # Second pass: Create plots with unified scale
         results = []
 
-        for i, profile in enumerate(profiles):
+        for profile, profile_data in all_profile_data:
             if feedback and feedback.isCanceled():
                 break
 
             try:
-                # Extract profile data
-                profile_data = self.extract_profile_data(profile['geometry'])
-
-                # Create plot with actual line length
+                # Create plot with unified scale
                 png_filename = f"{profile['type']}.png"
                 png_path = output_path / png_filename
 
@@ -389,7 +412,9 @@ class ProfileGenerator:
                     profile_type=profile['type'],
                     vertical_exaggeration=vertical_exaggeration,
                     volume_info=volume_info,
-                    line_length=profile['length']
+                    line_length=profile['length'],
+                    xlim=(0, max_line_length),
+                    ylim=global_ylim
                 )
 
                 # Add to results
