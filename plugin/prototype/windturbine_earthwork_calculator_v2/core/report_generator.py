@@ -98,6 +98,8 @@ class ReportGenerator:
         html_summary = self._generate_summary()
         html_parameters = self._generate_parameters(config)
         html_results = self._generate_results()
+        html_stabilization = self._generate_stabilization_section()
+        html_quality = self._generate_quality_assurance_section() if self.results.get('stabilization') else ""
         html_overview = self._generate_overview_section(overview_map_path)
         html_profiles = self._generate_profiles_section(profile_pngs)
         html_footer = self._generate_footer()
@@ -117,6 +119,8 @@ class ReportGenerator:
         {html_summary}
         {html_parameters}
         {html_results}
+        {html_stabilization}
+        {html_quality}
         {html_overview}
         {html_profiles}
     </div>
@@ -625,6 +629,257 @@ class ReportGenerator:
         # Save image
         image.save(output_path)
         self.logger.info(f"Overview map saved: {output_path} ({width_pixels}×{height_pixels})")
+
+    def _generate_stabilization_section(self) -> str:
+        """Generiert Abschnitt zu Bodenstabilisierung."""
+
+        if not self.results.get('stabilization'):
+            return ""
+
+        stab = self.results['stabilization']
+
+        # Kalkbehandlung
+        lime_html = ""
+        if stab.get('lime_treatment'):
+            lime = stab['lime_treatment']
+            lime_html = f"""
+        <h3>Kalkstabilisierung</h3>
+        <table>
+            <tr>
+                <th>Parameter</th>
+                <th>Wert</th>
+                <th>Einheit</th>
+            </tr>
+            <tr>
+                <td>Dosierung (% Masse)</td>
+                <td>{lime['percentage']:.1f}</td>
+                <td>%</td>
+            </tr>
+            <tr>
+                <td>Flächenspezifisch</td>
+                <td>{lime['kg_per_m2']:.1f}</td>
+                <td>kg/m²</td>
+            </tr>
+            <tr>
+                <td>Volumenbezogen</td>
+                <td>{lime['kg_per_m3']:.1f}</td>
+                <td>kg/m³</td>
+            </tr>
+            <tr>
+                <td>Gesamtmenge</td>
+                <td>{stab['total_lime_tons']:.1f}</td>
+                <td>Tonnen</td>
+            </tr>
+            <tr>
+                <td>Behandlungstiefe</td>
+                <td>{lime['treatment_depth_m']*100:.0f}</td>
+                <td>cm</td>
+            </tr>
+            <tr>
+                <td>Erwarteter Ev2 nach Behandlung</td>
+                <td>{lime['expected_ev2_after']:.1f}</td>
+                <td>MN/m²</td>
+            </tr>
+        </table>
+        """
+        else:
+            lime_html = """
+        <p><i>Keine Kalkstabilisierung erforderlich (Ev2 ≥ 45 MN/m²)</i></p>
+        """
+
+        # Schottertragschicht
+        gravel = stab['gravel_layer']
+        gravel_html = f"""
+        <h3>Schottertragschicht</h3>
+        <table>
+            <tr>
+                <th>Parameter</th>
+                <th>Wert</th>
+                <th>Einheit</th>
+            </tr>
+            <tr>
+                <td>Schichtdicke (verdichtet)</td>
+                <td>{gravel['thickness_m']*100:.0f}</td>
+                <td>cm</td>
+            </tr>
+            <tr>
+                <td>Volumen verdichtet</td>
+                <td>{gravel['compacted_volume_m3']:.1f}</td>
+                <td>m³</td>
+            </tr>
+            <tr>
+                <td>Volumen lose (Auflockerung 1,15)</td>
+                <td>{gravel['loose_volume_m3']:.1f}</td>
+                <td>m³</td>
+            </tr>
+            <tr>
+                <td>Masse (Rohdichte 2,1 t/m³)</td>
+                <td>{gravel['mass_tons']:.0f}</td>
+                <td>Tonnen</td>
+            </tr>
+            <tr>
+                <td>Flächenspezifisch</td>
+                <td>{gravel['area_specific_kg_m2']:.0f}</td>
+                <td>kg/m²</td>
+            </tr>
+        </table>
+        """
+
+        # Qualitätshinweise
+        notes_html = ""
+        if stab.get('quality_notes'):
+            notes_items = "".join([f"<li>{note}</li>" for note in stab['quality_notes']])
+            notes_html = f"""
+        <div class="highlight-box">
+            <h4>⚠️ Hinweise zur Bauausführung</h4>
+            <ul>
+                {notes_items}
+            </ul>
+        </div>
+        """
+
+        return f"""
+    <div class="section">
+        <h2>🏗️ Bodenstabilisierung und Materialmengen</h2>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Bodenart</h3>
+                <div class="value">{stab['soil_type']}</div>
+            </div>
+            <div class="card">
+                <h3>Ausgangs-Ev2</h3>
+                <div class="value">{stab['initial_ev2']:.1f}</div>
+                <div class="unit">MN/m²</div>
+            </div>
+            <div class="card">
+                <h3>Ev2 nach Behandlung</h3>
+                <div class="value">{stab['ev2_after_lime']:.1f}</div>
+                <div class="unit">MN/m²</div>
+            </div>
+            <div class="card">
+                <h3>Finaler Ev2 (erwartet)</h3>
+                <div class="value">{stab['final_ev2_expected']:.1f}</div>
+                <div class="unit">MN/m²</div>
+            </div>
+        </div>
+
+        {lime_html}
+        {gravel_html}
+        {notes_html}
+    </div>
+    """
+
+    def _generate_quality_assurance_section(self) -> str:
+        """Generiert Abschnitt zu Qualitätssicherung und Datenqualität."""
+
+        reliability = self.results.get('stabilization', {}).get('reliability_rating', 'medium')
+
+        reliability_text = {
+            'high': 'Hoch - Berechnung basiert auf Standardwerten nach DIN/ZTV',
+            'medium': 'Mittel - Standortspezifische Prüfung empfohlen',
+            'low': 'Niedrig - Eignungsprüfung zwingend erforderlich'
+        }
+
+        return f"""
+    <div class="section">
+        <h2>📋 Qualitätssicherung und Hinweise</h2>
+
+        <div class="highlight-box">
+            <h3>Zuverlässigkeit der Berechnung</h3>
+            <p><strong>{reliability_text.get(reliability, 'Unbekannt')}</strong></p>
+        </div>
+
+        <h3>Wichtige Randbedingungen</h3>
+        <ul>
+            <li><strong>Standortvariabilität:</strong> Alle Werte sind typische Bereiche.
+                Standortspezifische Eignungsprüfungen nach TP BF-StB obligatorisch vor Ausführung.</li>
+            <li><strong>Feuchteempfindlichkeit:</strong> Bindige Bodenparameter stark wassergehaltsabhängig.
+                Ev2 kann bei Durchfeuchtung um 30-60% abfallen. Drainage und Oberflächenentwässerung kritisch.</li>
+            <li><strong>Verdichtungsqualität:</strong> Erreichbare Ev2-Werte abhängig von korrekter Verdichtungstechnik.
+                Plattendruckversuche nach DIN 18134 alle 200-500m² erforderlich.</li>
+            <li><strong>Zeitfaktoren:</strong> Kalkstabilisierung benötigt 7-28 Tage für volle Festigkeitsentwicklung.
+                Frosteinwirkung während Erhärtung vermeiden (Verarbeitung nur bei >5°C).</li>
+            <li><strong>Mischbinder-Optimierung:</strong> Kombinierte Kalk/Zement-Bindemittel oft leistungsfähiger,
+                besonders bei gemischkörnigen Böden.</li>
+        </ul>
+
+        <h3>Datenqualität und Prüfanforderungen</h3>
+
+        <h4>Hohe Zuverlässigkeit:</h4>
+        <ul>
+            <li>Ev2-Bereiche nach DIN-Standards</li>
+            <li>Verdichtungsfaktoren aus ZTV E-StB</li>
+            <li>Schotterdicken nach RStO 12</li>
+        </ul>
+
+        <h4>Mittlere Zuverlässigkeit (Eignungsprüfung erforderlich):</h4>
+        <ul>
+            <li>Kalkdosierungen (bodenabhängig)</li>
+            <li>Ev2-Verbesserungsfaktoren (2-5×, stark streuend)</li>
+            <li>Wassergehaltseinfluß</li>
+        </ul>
+
+        <h4>Standortspezifisch zu prüfen:</h4>
+        <ul>
+            <li>Exakte Ev2-Werte (nur durch Plattendruckversuch DIN 18134)</li>
+            <li>Detaillierte Plastizitätswerte (Laboruntersuchung)</li>
+            <li>Langzeitfestigkeit (zeitabhängig)</li>
+            <li>Frostsicherheit (Frost-Tau-Wechsel-Test)</li>
+        </ul>
+
+        <h3>Empfohlene Prüfungen</h3>
+        <table>
+            <tr>
+                <th>Prüfung</th>
+                <th>Norm/Richtlinie</th>
+                <th>Phase</th>
+            </tr>
+            <tr>
+                <td>Bodenkennwerte (Korngrößenverteilung, Plastizität)</td>
+                <td>DIN 18196</td>
+                <td>Planung</td>
+            </tr>
+            <tr>
+                <td>Eignungsprüfung Bodenverfestigung</td>
+                <td>TP BF-StB Teil B 11.1</td>
+                <td>Planung</td>
+            </tr>
+            <tr>
+                <td>Proctor-Versuch</td>
+                <td>DIN 18127</td>
+                <td>Planung</td>
+            </tr>
+            <tr>
+                <td>Probefeld (verschiedene Dosierungen)</td>
+                <td>ZTV E-StB</td>
+                <td>Vor Ausführung</td>
+            </tr>
+            <tr>
+                <td>Plattendruckversuch (Ev2)</td>
+                <td>DIN 18134</td>
+                <td>Ausführung/Abnahme</td>
+            </tr>
+            <tr>
+                <td>Dynamischer Plattendruckversuch (Evd)</td>
+                <td>TP BF-StB Teil B 8.3</td>
+                <td>Ausführung</td>
+            </tr>
+        </table>
+
+        <div class="highlight-box">
+            <h4>📌 Wichtiger Hinweis</h4>
+            <p>Diese Berechnungen dienen der <strong>Vordimensionierung und Kostenschätzung</strong>.
+            Vor Bauausführung sind zwingend erforderlich:</p>
+            <ul>
+                <li>Baugrundgutachten mit Plattendruckversuchen</li>
+                <li>Eignungsprüfung der Bindemittel nach TP BF-StB</li>
+                <li>Probefelder zur Dosierungsoptimierung</li>
+                <li>Qualitätskontrolle während der Ausführung</li>
+            </ul>
+        </div>
+    </div>
+    """
 
     def _generate_footer(self) -> str:
         """Generate HTML footer."""

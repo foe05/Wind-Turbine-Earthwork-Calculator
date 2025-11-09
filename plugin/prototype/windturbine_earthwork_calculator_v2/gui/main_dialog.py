@@ -14,7 +14,7 @@ from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
     QWidget, QLabel, QLineEdit, QPushButton, QFileDialog,
     QDoubleSpinBox, QSpinBox, QGroupBox, QFormLayout,
-    QCheckBox, QMessageBox, QProgressBar, QTextEdit
+    QCheckBox, QMessageBox, QProgressBar, QTextEdit, QComboBox
 )
 from qgis.PyQt.QtCore import Qt, pyqtSignal
 from qgis.PyQt.QtGui import QIcon
@@ -58,11 +58,13 @@ class MainDialog(QDialog):
         self.tab_input = self._create_input_tab()
         self.tab_optimization = self._create_optimization_tab()
         self.tab_profiles = self._create_profiles_tab()
+        self.tab_stabilization = self._create_soil_stabilization_tab()
         self.tab_output = self._create_output_tab()
-        
+
         self.tabs.addTab(self.tab_input, "📂 Eingabe")
         self.tabs.addTab(self.tab_optimization, "⚙️ Optimierung")
         self.tabs.addTab(self.tab_profiles, "📊 Geländeschnitte")
+        self.tabs.addTab(self.tab_stabilization, "🏗️ Bodenstabilisierung")
         self.tabs.addTab(self.tab_output, "💾 Ausgabe")
         
         layout.addWidget(self.tabs)
@@ -228,7 +230,130 @@ class MainDialog(QDialog):
         layout.addStretch()
         widget.setLayout(layout)
         return widget
-    
+
+    def _create_soil_stabilization_tab(self):
+        """Create soil stabilization tab."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        # Bodenkennwerte
+        group_soil = QGroupBox("Bodenkennwerte")
+        form_soil = QFormLayout()
+
+        # Bodenart
+        self.input_soil_type = QComboBox()
+        self.input_soil_type.addItems([
+            'Ton (weich)',
+            'Ton (steif)',
+            'Ton (halbfest)',
+            'Schluff (weich)',
+            'Schluff (mitteldicht)',
+            'Lehm (steif)',
+            'Lehm (halbfest)',
+            'Sand (locker)',
+            'Sand (mitteldicht)',
+            'Sand (dicht)',
+            'Kies (mitteldicht)',
+            'Kies (dicht)',
+            'Unbekannt - Standardwert verwenden'
+        ])
+        self.input_soil_type.setCurrentIndex(3)  # Default: Schluff (weich)
+        self.input_soil_type.setToolTip("Bodenart für Bodenstabilisierungsberechnung")
+
+        form_soil.addRow("Bodenart:", self.input_soil_type)
+
+        # Ev2-Bestand
+        self.input_ev2_bestand = QDoubleSpinBox()
+        self.input_ev2_bestand.setRange(0, 200)
+        self.input_ev2_bestand.setValue(45.0)
+        self.input_ev2_bestand.setDecimals(1)
+        self.input_ev2_bestand.setSuffix(" MN/m²")
+        self.input_ev2_bestand.setToolTip(
+            "Verformungsmodul des anstehenden Bodens (Plattendruckversuch)"
+        )
+
+        form_soil.addRow("Ev2 Bestand:", self.input_ev2_bestand)
+
+        # Wassergehalt (optional)
+        self.input_water_content = QDoubleSpinBox()
+        self.input_water_content.setRange(0, 50)
+        self.input_water_content.setValue(0)
+        self.input_water_content.setDecimals(1)
+        self.input_water_content.setSuffix(" %")
+        self.input_water_content.setSpecialValueText("Unbekannt")
+        self.input_water_content.setToolTip(
+            "Aktueller Wassergehalt (optional, für genauere Kalkdosierung)"
+        )
+
+        form_soil.addRow("Wassergehalt:", self.input_water_content)
+
+        # Optimaler Wassergehalt (optional)
+        self.input_optimum_water = QDoubleSpinBox()
+        self.input_optimum_water.setRange(0, 50)
+        self.input_optimum_water.setValue(0)
+        self.input_optimum_water.setDecimals(1)
+        self.input_optimum_water.setSuffix(" %")
+        self.input_optimum_water.setSpecialValueText("Unbekannt")
+        self.input_optimum_water.setToolTip(
+            "Optimaler Wassergehalt nach Proctor (optional)"
+        )
+
+        form_soil.addRow("Optimum Wassergehalt:", self.input_optimum_water)
+
+        group_soil.setLayout(form_soil)
+        layout.addWidget(group_soil)
+
+        # Berechnungsoptionen
+        group_options = QGroupBox("Berechnungsoptionen")
+        form_options = QFormLayout()
+
+        self.input_enable_stabilization = QCheckBox("Bodenstabilisierung berechnen")
+        self.input_enable_stabilization.setChecked(True)
+        self.input_enable_stabilization.setToolTip(
+            "Aktiviert die Berechnung von Kalk- und Schottermengen"
+        )
+
+        form_options.addRow(self.input_enable_stabilization)
+
+        # Info-Label
+        info_label = QLabel(
+            "<i><b>Hinweis:</b> Alle Werte sind Richtwerte für Vordimensionierung. "
+            "Standortspezifische Eignungsprüfungen nach TP BF-StB Teil B 11.1 "
+            "sind vor Bauausführung zwingend erforderlich!</i>"
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("QLabel { color: #666; margin-top: 10px; }")
+
+        form_options.addRow("", info_label)
+
+        group_options.setLayout(form_options)
+        layout.addWidget(group_options)
+
+        # BGR-Datenabfrage (experimentell) - Platzhalter
+        group_bgr = QGroupBox("BGR-Datenabfrage (experimentell)")
+        form_bgr = QFormLayout()
+
+        bgr_info = QLabel(
+            "<i>BGR-WFS-Abfrage für Bodendaten ist aktuell nicht implementiert. "
+            "Diese Funktion wird in einer zukünftigen Version verfügbar sein.</i>"
+        )
+        bgr_info.setWordWrap(True)
+        bgr_info.setStyleSheet("QLabel { color: #999; }")
+
+        self.btn_bgr_query = QPushButton("Bodendaten von BGR abrufen")
+        self.btn_bgr_query.setEnabled(False)  # Deaktiviert, da nicht implementiert
+        self.btn_bgr_query.setToolTip("Diese Funktion ist noch nicht verfügbar")
+
+        form_bgr.addRow(bgr_info)
+        form_bgr.addRow("", self.btn_bgr_query)
+
+        group_bgr.setLayout(form_bgr)
+        layout.addWidget(group_bgr)
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        return widget
+
     def _create_output_tab(self):
         """Create output tab."""
         widget = QWidget()
@@ -342,6 +467,14 @@ class MainDialog(QDialog):
         if not self._validate_inputs():
             return
         
+        # Helper function to parse soil type from combo box
+        def parse_soil_type(combo_text):
+            """Extract base soil type from combo box text."""
+            # "Ton (weich)" -> "Ton"
+            if combo_text == 'Unbekannt - Standardwert verwenden':
+                return 'Schluff'  # Default
+            return combo_text.split(' (')[0]
+
         # Collect parameters
         params = {
             'dxf_file': self.input_dxf.text().strip(),
@@ -354,7 +487,13 @@ class MainDialog(QDialog):
             'profile_overhang': self.input_profile_overhang.value(),
             'vertical_exaggeration': self.input_vertical_exaggeration.value(),
             'workspace': self.input_workspace.text().strip(),
-            'force_refresh': self.input_force_refresh.isChecked()
+            'force_refresh': self.input_force_refresh.isChecked(),
+            # Bodenstabilisierung
+            'enable_stabilization': self.input_enable_stabilization.isChecked(),
+            'soil_type': parse_soil_type(self.input_soil_type.currentText()),
+            'ev2_bestand': self.input_ev2_bestand.value(),
+            'water_content': self.input_water_content.value(),
+            'optimum_water': self.input_optimum_water.value()
         }
         
         # Emit signal

@@ -173,7 +173,7 @@ class WorkflowWorker(QObject):
         # === STEP 4: Profile Generation ===
         self.progress_updated.emit(65, "📊 Geländeschnitte werden erstellt...")
         self.logger.info(f"Generating profiles in: {profiles_dir}")
-        
+
         try:
             profile_gen = ProfileGenerator(dem_layer, polygon, optimal_height)
             profiles = profile_gen.generate_all_profiles(
@@ -183,14 +183,66 @@ class WorkflowWorker(QObject):
                 vertical_exaggeration=self.params['vertical_exaggeration'],
                 volume_info=results
             )
-            
+
             profile_pngs = [p['png_path'] for p in profiles if 'png_path' in p]
             self.logger.info(f"Generated {len(profile_pngs)} profile images")
-            self.progress_updated.emit(75, f"✓ {len(profiles)} Geländeschnitte erstellt")
+            self.progress_updated.emit(70, f"✓ {len(profiles)} Geländeschnitte erstellt")
         except Exception as e:
             self.logger.error(f"Profile generation failed: {e}", exc_info=True)
             raise
-        
+
+        # === STEP 4.5: BODENSTABILISIERUNG ===
+        if self.params.get('enable_stabilization', True):
+            self.progress_updated.emit(72, "🏗️ Bodenstabilisierung wird berechnet...")
+            self.logger.info("")
+            self.logger.info("=" * 60)
+            self.logger.info("SCHRITT 4.5: Bodenstabilisierung berechnen")
+            self.logger.info("=" * 60)
+
+            try:
+                from .soil_stabilization_calculator import SoilStabilizationCalculator
+
+                stabilization_calc = SoilStabilizationCalculator()
+
+                stabilization_results = stabilization_calc.calculate_full_requirements(
+                    platform_area_m2=polygon.area(),
+                    soil_type=self.params.get('soil_type', 'Schluff'),
+                    current_ev2=self.params.get('ev2_bestand', 45.0),
+                    water_content=self.params.get('water_content', 0),
+                    optimum_water=self.params.get('optimum_water', 0)
+                )
+
+                self.logger.info("")
+                self.logger.info("Bodenstabilisierung berechnet:")
+                if stabilization_results.get('total_lime_tons', 0) > 0:
+                    self.logger.info(f"  Kalkbedarf: {stabilization_results['total_lime_tons']:.1f} Tonnen")
+                    self.progress_updated.emit(
+                        74,
+                        f"  → Kalk: {stabilization_results['total_lime_tons']:.1f} t"
+                    )
+
+                self.logger.info(f"  Schotterbedarf: {stabilization_results['total_gravel_tons']:.0f} Tonnen")
+                self.logger.info(
+                    f"  Schichtdicke: {stabilization_results['gravel_layer']['thickness_m']*100:.0f} cm"
+                )
+
+                self.progress_updated.emit(
+                    75,
+                    f"✓ Bodenstabilisierung: {stabilization_results['total_gravel_tons']:.0f} t Schotter"
+                )
+
+                # Speichere für Report
+                results['stabilization'] = stabilization_results
+
+            except Exception as e:
+                self.logger.error(f"Bodenstabilisierung fehlgeschlagen: {e}", exc_info=True)
+                # Nicht kritisch - Workflow kann fortgesetzt werden
+                results['stabilization'] = None
+                self.progress_updated.emit(75, "⚠ Bodenstabilisierung übersprungen (Fehler)")
+        else:
+            self.logger.info("Bodenstabilisierung deaktiviert (übersprungen)")
+            results['stabilization'] = None
+
         # === STEP 5: Report Generation ===
         self.progress_updated.emit(80, "📝 HTML-Bericht wird erstellt...")
         self.logger.info("Generating HTML report")
