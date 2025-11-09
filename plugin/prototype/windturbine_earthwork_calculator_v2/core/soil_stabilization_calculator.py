@@ -528,28 +528,76 @@ class SoilStabilizationCalculator:
                 f"Bekannte Klassen: {', '.join(DIN_SOIL_CLASSIFICATION.keys())}"
             )
 
-    def query_soil_data_from_bgr(self, coordinates: QgsPointXY) -> Dict:
+    def query_soil_data_from_bgr(
+        self,
+        coordinates: QgsPointXY,
+        crs: 'QgsCoordinateReferenceSystem'
+    ) -> Dict:
         """
-        Fragt Bodendaten von BGR-WFS ab (experimentell).
-
-        HINWEIS: Diese Funktion ist aktuell ein Platzhalter.
-        Die BGR-API-Integration ist optional und kann später erweitert werden.
+        Fragt Bodendaten von BGR-WFS ab.
 
         Args:
-            coordinates: WEA-Standort (EPSG:25832 oder 4326)
+            coordinates: WEA-Standort
+            crs: Koordinatenreferenzsystem
 
         Returns:
             Dict mit:
                 - soil_type: Bodenart oder None
+                - soil_code: BGR Bodenart-Code
                 - source: Datenquelle
                 - available: Bool ob Daten verfügbar
+                - description: Bodenbeschreibung
+                - error: Fehlermeldung (optional)
         """
-        self.logger.warning(
-            "BGR-API-Abfrage ist aktuell nicht implementiert (experimentell)"
-        )
+        try:
+            from .bgr_soil_api import get_soil_data_from_bgr
 
-        return {
-            'soil_type': None,
-            'source': 'BGR WFS (nicht verfügbar)',
-            'available': False
-        }
+            self.logger.info("Starte BGR-Bodendaten-Abfrage...")
+
+            result = get_soil_data_from_bgr(coordinates, crs, buffer_m=100.0)
+
+            if result.get('success'):
+                self.logger.info(
+                    f"BGR-Daten erfolgreich: {result.get('soil_type')} "
+                    f"(Code: {result.get('soil_code')})"
+                )
+
+                return {
+                    'soil_type': result.get('soil_type'),
+                    'soil_code': result.get('soil_code'),
+                    'source': result.get('source', 'BGR WFS'),
+                    'available': True,
+                    'description': result.get('description', ''),
+                    'legend': result.get('legend', '')
+                }
+            else:
+                self.logger.warning(
+                    f"BGR-Abfrage fehlgeschlagen: {result.get('error')}"
+                )
+
+                return {
+                    'soil_type': None,
+                    'soil_code': None,
+                    'source': 'BGR WFS (Fehler)',
+                    'available': False,
+                    'error': result.get('error', 'Unbekannter Fehler')
+                }
+
+        except ImportError as e:
+            self.logger.error(f"BGR-API-Modul konnte nicht geladen werden: {e}")
+            return {
+                'soil_type': None,
+                'soil_code': None,
+                'source': 'BGR WFS (nicht verfügbar)',
+                'available': False,
+                'error': 'BGR-API-Modul fehlt'
+            }
+        except Exception as e:
+            self.logger.error(f"BGR-Abfrage fehlgeschlagen: {e}", exc_info=True)
+            return {
+                'soil_type': None,
+                'soil_code': None,
+                'source': 'BGR WFS (Fehler)',
+                'available': False,
+                'error': str(e)
+            }

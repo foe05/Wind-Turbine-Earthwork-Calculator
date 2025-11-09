@@ -341,23 +341,34 @@ class MainDialog(QDialog):
         group_options.setLayout(form_options)
         layout.addWidget(group_options)
 
-        # BGR-Datenabfrage (experimentell) - Platzhalter
+        # BGR-Datenabfrage (experimentell)
         group_bgr = QGroupBox("BGR-Datenabfrage (experimentell)")
         form_bgr = QFormLayout()
 
         bgr_info = QLabel(
-            "<i>BGR-WFS-Abfrage für Bodendaten ist aktuell nicht implementiert. "
-            "Diese Funktion wird in einer zukünftigen Version verfügbar sein.</i>"
+            "<i>Fragt Bodendaten von der Bundesanstalt für Geowissenschaften "
+            "und Rohstoffe (BGR) ab. Benötigt Internet-Verbindung und "
+            "Koordinaten der Kranstellfläche aus DXF-Datei.</i>"
         )
         bgr_info.setWordWrap(True)
-        bgr_info.setStyleSheet("QLabel { color: #999; }")
+        bgr_info.setStyleSheet("QLabel { color: #666; font-size: 10pt; }")
 
         self.btn_bgr_query = QPushButton("Bodendaten von BGR abrufen")
-        self.btn_bgr_query.setEnabled(False)  # Deaktiviert, da nicht implementiert
-        self.btn_bgr_query.setToolTip("Diese Funktion ist noch nicht verfügbar")
+        self.btn_bgr_query.setEnabled(True)
+        self.btn_bgr_query.setToolTip(
+            "Fragt Bodenart von BGR BÜK200 WFS-Service ab\n"
+            "Hinweis: Benötigt valide Koordinaten aus DXF-Datei"
+        )
+        self.btn_bgr_query.clicked.connect(self._on_bgr_query)
+
+        # Status-Label für BGR-Abfrage
+        self.label_bgr_status = QLabel("")
+        self.label_bgr_status.setWordWrap(True)
+        self.label_bgr_status.setStyleSheet("QLabel { color: #666; font-size: 10pt; }")
 
         form_bgr.addRow(bgr_info)
         form_bgr.addRow("", self.btn_bgr_query)
+        form_bgr.addRow("Status:", self.label_bgr_status)
 
         group_bgr.setLayout(form_bgr)
         layout.addWidget(group_bgr)
@@ -420,6 +431,131 @@ class MainDialog(QDialog):
         """Connect button signals."""
         self.btn_start.clicked.connect(self._on_start)
         self.btn_cancel.clicked.connect(self.reject)
+
+    def _on_bgr_query(self):
+        """
+        Führt BGR-Bodendaten-Abfrage aus.
+
+        Benötigt DXF-Datei mit Koordinaten der Kranstellfläche.
+        """
+        from qgis.core import QgsCoordinateReferenceSystem
+
+        # Prüfe ob DXF-Datei angegeben
+        dxf_path = self.input_dxf.text().strip()
+
+        if not dxf_path:
+            QMessageBox.warning(
+                self,
+                "Keine DXF-Datei",
+                "Bitte wählen Sie zuerst eine DXF-Datei im Tab 'Eingabe' aus.\n"
+                "Die Koordinaten der Kranstellfläche werden aus der DXF-Datei benötigt."
+            )
+            return
+
+        if not os.path.exists(dxf_path):
+            QMessageBox.warning(
+                self,
+                "DXF-Datei nicht gefunden",
+                f"Die DXF-Datei wurde nicht gefunden:\n{dxf_path}"
+            )
+            return
+
+        # Status: Lade...
+        self.label_bgr_status.setText("<i>Lade Bodendaten von BGR...</i>")
+        self.label_bgr_status.setStyleSheet("QLabel { color: #0066cc; }")
+        self.btn_bgr_query.setEnabled(False)
+
+        try:
+            # Importiere DXF und hole Koordinaten
+            from ..core.dxf_importer import DXFImporter
+            from ..core.soil_stabilization_calculator import SoilStabilizationCalculator
+            from ..utils.geometry_utils import get_centroid
+
+            self.logger.info(f"Importiere DXF für BGR-Abfrage: {dxf_path}")
+
+            importer = DXFImporter(dxf_path, tolerance=self.input_dxf_tolerance.value())
+            polygon, metadata = importer.import_as_polygon()
+
+            if not polygon or polygon.isEmpty():
+                raise Exception("Keine Geometrie in DXF-Datei gefunden")
+
+            # Hole Zentroid als Abfragepunkt
+            centroid = get_centroid(polygon)
+
+            # CRS aus DXF oder Default (EPSG:25832 - UTM Zone 32N für Deutschland)
+            crs = importer.get_crs() or QgsCoordinateReferenceSystem("EPSG:25832")
+
+            self.logger.info(
+                f"Abfragepunkt: {centroid.x():.2f}, {centroid.y():.2f} ({crs.authid()})"
+            )
+
+            # BGR-Abfrage
+            calc = SoilStabilizationCalculator()
+            result = calc.query_soil_data_from_bgr(centroid, crs)
+
+            if result.get('available'):
+                # Erfolg!
+                soil_type = result.get('soil_type')
+                soil_code = result.get('soil_code', '')
+                description = result.get('description', '')
+
+                self.label_bgr_status.setText(
+                    f"<i>✓ Gefunden: <b>{soil_type}</b> (BGR-Code: {soil_code})<br>"
+                    f"{description[:100]}...</i>"
+                )
+                self.label_bgr_status.setStyleSheet("QLabel { color: #006600; }")
+
+                # Aktualisiere Bodenart-Dropdown
+                # Finde passenden Eintrag in Combo Box
+                for i in range(self.input_soil_type.count()):
+                    item_text = self.input_soil_type.itemText(i)
+                    if soil_type and soil_type in item_text:
+                        self.input_soil_type.setCurrentIndex(i)
+                        break
+
+                QMessageBox.information(
+                    self,
+                    "BGR-Daten erfolgreich",
+                    f"Bodenart gefunden: {soil_type}\n\n"
+                    f"BGR-Code: {soil_code}\n"
+                    f"Quelle: {result.get('source')}\n\n"
+                    f"Beschreibung:\n{description}"
+                )
+
+            else:
+                # Fehler
+                error = result.get('error', 'Unbekannter Fehler')
+                self.label_bgr_status.setText(
+                    f"<i>✗ Fehler: {error}</i>"
+                )
+                self.label_bgr_status.setStyleSheet("QLabel { color: #cc0000; }")
+
+                QMessageBox.warning(
+                    self,
+                    "BGR-Abfrage fehlgeschlagen",
+                    f"Bodendaten konnten nicht abgerufen werden.\n\n"
+                    f"Fehler: {error}\n\n"
+                    f"Mögliche Ursachen:\n"
+                    f"- Keine Internet-Verbindung\n"
+                    f"- Koordinaten außerhalb des BGR-Datenbereichs\n"
+                    f"- BGR-Service vorübergehend nicht verfügbar"
+                )
+
+        except Exception as e:
+            self.logger.error(f"BGR-Abfrage fehlgeschlagen: {e}", exc_info=True)
+            self.label_bgr_status.setText(
+                f"<i>✗ Fehler: {str(e)}</i>"
+            )
+            self.label_bgr_status.setStyleSheet("QLabel { color: #cc0000; }")
+
+            QMessageBox.critical(
+                self,
+                "Fehler",
+                f"BGR-Abfrage fehlgeschlagen:\n\n{str(e)}"
+            )
+
+        finally:
+            self.btn_bgr_query.setEnabled(True)
 
     def _on_soil_type_changed(self, soil_type_text):
         """
