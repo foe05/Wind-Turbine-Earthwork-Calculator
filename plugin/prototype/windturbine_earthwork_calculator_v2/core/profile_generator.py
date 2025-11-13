@@ -33,7 +33,8 @@ from ..utils.geometry_utils import (
     get_centroid,
     get_polygon_radius,
     create_radial_lines,
-    create_perpendicular_cross_sections
+    create_perpendicular_cross_sections,
+    create_parallel_longitudinal_sections
 )
 from ..utils.logging_utils import get_plugin_logger
 
@@ -148,6 +149,37 @@ class ProfileGenerator:
         )
 
         self.logger.info(f"Generated {len(profiles)} cross-section profiles")
+
+        return profiles
+
+    def generate_longitudinal_profiles(self, spacing: float = 10.0,
+                                       overhang_percent: float = 10.0) -> List[Dict]:
+        """
+        Generate longitudinal profile lines parallel to main polygon orientation.
+
+        Creates longitudinal sections parallel to the main polygon orientation,
+        spaced at regular intervals, extending beyond polygon edges.
+
+        Args:
+            spacing (float): Distance between longitudinal sections in meters (default: 10m)
+            overhang_percent (float): Percentage to extend beyond polygon on each side (default: 10%)
+
+        Returns:
+            List[Dict]: List of profile dictionaries with 'geometry', 'type', etc.
+        """
+        self.logger.info(
+            f"Generating longitudinal profiles "
+            f"(spacing: {spacing:.1f}m, overhang: {overhang_percent:.0f}%)"
+        )
+
+        # Create longitudinal section lines
+        profiles = create_parallel_longitudinal_sections(
+            self.polygon,
+            spacing=spacing,
+            overhang_percent=overhang_percent
+        )
+
+        self.logger.info(f"Generated {len(profiles)} longitudinal profiles")
 
         return profiles
 
@@ -434,5 +466,116 @@ class ProfileGenerator:
                     )
 
         self.logger.info(f"Generated {len(results)}/{len(profiles)} profiles")
+
+        return results
+
+    def generate_all_longitudinal_profiles(self, output_dir: str,
+                                          spacing: float = 10.0,
+                                          overhang_percent: float = 10.0,
+                                          vertical_exaggeration: float = 2.0,
+                                          volume_info: Optional[Dict] = None,
+                                          feedback: Optional[QgsProcessingFeedback] = None) -> List[Dict]:
+        """
+        Generate all longitudinal profile lines, extract data, and create plots.
+
+        Args:
+            output_dir (str): Directory to save PNG files
+            spacing (float): Distance between longitudinal sections in meters (default: 10m)
+            overhang_percent (float): Percentage to extend beyond polygon (default: 10%)
+            vertical_exaggeration (float): Vertical exaggeration for plots
+            volume_info (Dict): Volume information for annotations
+            feedback (QgsProcessingFeedback): Feedback object
+
+        Returns:
+            List[Dict]: List of profile data with paths to PNG files
+        """
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        self.logger.info(f"Generating longitudinal profiles in {output_dir}")
+
+        if feedback:
+            feedback.pushInfo(f"Generating longitudinal profiles (spacing: {spacing}m)...")
+
+        # Generate longitudinal profile lines
+        profiles = self.generate_longitudinal_profiles(
+            spacing=spacing,
+            overhang_percent=overhang_percent
+        )
+
+        if feedback:
+            feedback.pushInfo(f"  Created {len(profiles)} longitudinal section lines")
+
+        # First pass: Extract all profile data to determine global scale
+        all_profile_data = []
+        max_line_length = 0
+        min_elevation = float('inf')
+        max_elevation = float('-inf')
+
+        for profile in profiles:
+            try:
+                profile_data = self.extract_profile_data(profile['geometry'])
+                all_profile_data.append((profile, profile_data))
+
+                # Track maximum line length
+                max_line_length = max(max_line_length, profile['length'])
+
+                # Track elevation range
+                min_elevation = min(min_elevation, np.min(profile_data['existing_z']))
+                max_elevation = max(max_elevation, np.max(profile_data['existing_z']))
+                min_elevation = min(min_elevation, np.min(profile_data['planned_z']))
+                max_elevation = max(max_elevation, np.max(profile_data['planned_z']))
+
+            except Exception as e:
+                self.logger.error(f"Failed to extract data for profile {profile['type']}: {e}")
+
+        # Add padding to elevation range (5%)
+        elevation_range = max_elevation - min_elevation
+        elevation_padding = elevation_range * 0.05
+        global_ylim = (min_elevation - elevation_padding, max_elevation + elevation_padding)
+
+        if feedback:
+            feedback.pushInfo(f"  Global scale - Length: {max_line_length:.1f}m, Elevation: {global_ylim[0]:.1f} - {global_ylim[1]:.1f} m")
+
+        # Second pass: Create plots with unified scale
+        results = []
+
+        for profile, profile_data in all_profile_data:
+            if feedback and feedback.isCanceled():
+                break
+
+            try:
+                # Create plot with unified scale
+                png_filename = f"{profile['type']}.png"
+                png_path = output_path / png_filename
+
+                self.plot_profile(
+                    profile_data,
+                    str(png_path),
+                    profile_type=profile['type'],
+                    vertical_exaggeration=vertical_exaggeration,
+                    volume_info=volume_info,
+                    line_length=profile['length'],
+                    xlim=(0, max_line_length),
+                    ylim=global_ylim
+                )
+
+                # Add to results
+                profile['data'] = profile_data
+                profile['png_path'] = str(png_path)
+                results.append(profile)
+
+                if feedback:
+                    feedback.pushInfo(f"  ✓ {png_filename} (length: {profile['length']:.1f}m)")
+
+            except Exception as e:
+                self.logger.error(f"Failed to generate profile {profile['type']}: {e}")
+                if feedback:
+                    feedback.reportError(
+                        f"Error generating profile {profile['type']}: {e}",
+                        fatalError=False
+                    )
+
+        self.logger.info(f"Generated {len(results)}/{len(profiles)} longitudinal profiles")
 
         return results

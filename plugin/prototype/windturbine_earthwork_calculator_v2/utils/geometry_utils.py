@@ -545,7 +545,7 @@ def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent
 
                     cross_section = {
                         'geometry': line_geom,
-                        'type': f'Schnitt {i+1:02d}',
+                        'type': f'Querschnitt {i+1:02d}',
                         'main_angle': main_angle,
                         'cross_angle': cross_angle,
                         'center_point': true_center,
@@ -556,3 +556,211 @@ def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent
                     cross_sections.append(cross_section)
 
     return cross_sections
+
+
+def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_percent=10.0):
+    """
+    Create longitudinal section lines through a polygon, parallel to main orientation.
+
+    The longitudinal sections are parallel to the main orientation of the polygon,
+    spaced at regular intervals perpendicular to the main axis, and extend beyond
+    the polygon edges.
+
+    Args:
+        geometry (QgsGeometry): Polygon geometry
+        spacing (float): Distance between longitudinal sections in meters (default: 10m)
+        overhang_percent (float): Percentage to extend beyond polygon on each side (default: 10%)
+
+    Returns:
+        list: List of dictionaries with:
+            - 'geometry': QgsGeometry line object
+            - 'type': Profile type identifier
+            - 'main_angle': Main orientation angle
+            - 'longitudinal_angle': Longitudinal section angle (parallel to main)
+            - 'center_point': Center point of the longitudinal section
+            - 'length': Total length of the line
+            - 'width': Length of polygon at this location
+    """
+    import numpy as np
+
+    # Get main orientation of polygon
+    main_angle = get_polygon_orientation(geometry)
+
+    # Longitudinal sections are parallel to main orientation
+    longitudinal_angle = main_angle
+    longitudinal_rad = math.radians(longitudinal_angle)
+
+    # Position sections along perpendicular axis
+    perp_angle = main_angle + 90.0
+    perp_rad = math.radians(perp_angle)
+
+    # Get polygon centroid
+    centroid = get_centroid(geometry)
+
+    # Get polygon bounds
+    bbox = geometry.boundingBox()
+
+    # Calculate extent along perpendicular direction
+    # Project all vertices onto perpendicular axis
+    if geometry.isMultipart():
+        polygons = geometry.asMultiPolygon()
+        vertices = polygons[0][0] if polygons else []
+    else:
+        polygon = geometry.asPolygon()
+        vertices = polygon[0] if polygon else []
+
+    perp_axis_x = math.cos(perp_rad)
+    perp_axis_y = math.sin(perp_rad)
+
+    # Project all vertices onto perpendicular axis
+    projections = []
+    for v in vertices:
+        # Vector from centroid to vertex
+        dx = v.x() - centroid.x()
+        dy = v.y() - centroid.y()
+        # Dot product with perpendicular axis direction
+        projection = dx * perp_axis_x + dy * perp_axis_y
+        projections.append(projection)
+
+    min_proj = min(projections)
+    max_proj = max(projections)
+    extent_along_perp = max_proj - min_proj
+
+    # Calculate number of longitudinal sections
+    num_sections = max(1, int(extent_along_perp / spacing) + 1)
+
+    longitudinal_sections = []
+
+    # Extract polygon boundary
+    if geometry.isMultipart():
+        polygons = geometry.asMultiPolygon()
+        if polygons and polygons[0]:
+            boundary_coords = polygons[0][0]  # Exterior ring
+        else:
+            return []
+    else:
+        poly = geometry.asPolygon()
+        if poly and poly[0]:
+            boundary_coords = poly[0]  # Exterior ring
+        else:
+            return []
+
+    boundary = QgsGeometry.fromPolylineXY(boundary_coords)
+
+    # Create longitudinal sections at regular intervals
+    for i in range(num_sections):
+        # Position along perpendicular axis
+        t = min_proj + i * spacing
+
+        # Calculate center point of this longitudinal section along perp axis
+        center_x = centroid.x() + t * perp_axis_x
+        center_y = centroid.y() + t * perp_axis_y
+        test_center = QgsPointXY(center_x, center_y)
+
+        # Create a very long test line parallel to main axis through this point
+        test_half_length = 2000  # Very long to ensure we cross the polygon
+        test_x1 = center_x - test_half_length * math.cos(longitudinal_rad)
+        test_y1 = center_y - test_half_length * math.sin(longitudinal_rad)
+        test_x2 = center_x + test_half_length * math.cos(longitudinal_rad)
+        test_y2 = center_y + test_half_length * math.sin(longitudinal_rad)
+
+        test_line = QgsGeometry.fromPolylineXY([
+            QgsPointXY(test_x1, test_y1),
+            QgsPointXY(test_x2, test_y2)
+        ])
+
+        # Find intersection points with polygon boundary
+        if boundary.intersects(test_line):
+            intersection = boundary.intersection(test_line)
+
+            # Get intersection points
+            intersection_points = []
+            if intersection.type() == QgsWkbTypes.PointGeometry:
+                if intersection.isMultipart():
+                    intersection_points = intersection.asMultiPoint()
+                else:
+                    intersection_points = [intersection.asPoint()]
+
+            # We need at least 2 intersection points
+            if len(intersection_points) >= 2:
+                # Find the two furthest intersection points (entry and exit of polygon)
+                max_dist = 0
+                point1 = None
+                point2 = None
+
+                for j in range(len(intersection_points)):
+                    for k in range(j + 1, len(intersection_points)):
+                        p1 = intersection_points[j]
+                        p2 = intersection_points[k]
+                        dist = math.sqrt((p2.x() - p1.x())**2 + (p2.y() - p1.y())**2)
+                        if dist > max_dist:
+                            max_dist = dist
+                            point1 = p1
+                            point2 = p2
+
+                if point1 and point2 and max_dist > 0:
+                    # This is the actual length of the polygon at this location
+                    length_at_section = max_dist
+
+                    # Calculate the midpoint between the two intersection points
+                    # This is the true center of the longitudinal section
+                    mid_x = (point1.x() + point2.x()) / 2.0
+                    mid_y = (point1.y() + point2.y()) / 2.0
+                    true_center = QgsPointXY(mid_x, mid_y)
+
+                    # Calculate overhang distance
+                    overhang = length_at_section * (overhang_percent / 100.0)
+                    half_length = (length_at_section / 2.0) + overhang
+                    total_length = length_at_section + 2 * overhang
+
+                    # Create final longitudinal section line from true center
+                    x1 = mid_x - half_length * math.cos(longitudinal_rad)
+                    y1 = mid_y - half_length * math.sin(longitudinal_rad)
+                    x2 = mid_x + half_length * math.cos(longitudinal_rad)
+                    y2 = mid_y + half_length * math.sin(longitudinal_rad)
+
+                    line_geom = QgsGeometry.fromPolylineXY([
+                        QgsPointXY(x1, y1),
+                        QgsPointXY(x2, y2)
+                    ])
+
+                    # Verify that endpoints are outside the polygon
+                    p1_geom = QgsGeometry.fromPointXY(QgsPointXY(x1, y1))
+                    p2_geom = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
+
+                    # If endpoints are still inside, extend them further
+                    safety_factor = 1.5
+                    while geometry.contains(p1_geom) or geometry.contains(p2_geom):
+                        half_length *= safety_factor
+                        total_length = length_at_section + 2 * (half_length - length_at_section / 2.0)
+
+                        x1 = mid_x - half_length * math.cos(longitudinal_rad)
+                        y1 = mid_y - half_length * math.sin(longitudinal_rad)
+                        x2 = mid_x + half_length * math.cos(longitudinal_rad)
+                        y2 = mid_y + half_length * math.sin(longitudinal_rad)
+
+                        line_geom = QgsGeometry.fromPolylineXY([
+                            QgsPointXY(x1, y1),
+                            QgsPointXY(x2, y2)
+                        ])
+
+                        p1_geom = QgsGeometry.fromPointXY(QgsPointXY(x1, y1))
+                        p2_geom = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
+
+                        # Safety break to avoid infinite loop
+                        if half_length > length_at_section * 10:
+                            break
+
+                    longitudinal_section = {
+                        'geometry': line_geom,
+                        'type': f'Längsprofil {i+1:02d}',
+                        'main_angle': main_angle,
+                        'longitudinal_angle': longitudinal_angle,
+                        'center_point': true_center,
+                        'length': total_length,
+                        'width': length_at_section
+                    }
+
+                    longitudinal_sections.append(longitudinal_section)
+
+    return longitudinal_sections

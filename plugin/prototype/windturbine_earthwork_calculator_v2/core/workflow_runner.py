@@ -173,19 +173,44 @@ class WorkflowWorker(QObject):
         # === STEP 4: Profile Generation ===
         self.progress_updated.emit(65, "📊 Geländeschnitte werden erstellt...")
         self.logger.info(f"Generating profiles in: {profiles_dir}")
-        
+
         try:
             profile_gen = ProfileGenerator(dem_layer, polygon, optimal_height)
-            profiles = profile_gen.generate_all_profiles(
-                output_dir=str(profiles_dir),
-                spacing=self.params['profile_spacing'],
-                overhang_percent=self.params['profile_overhang'],
-                vertical_exaggeration=self.params['vertical_exaggeration'],
-                volume_info=results
-            )
-            
+            all_profiles = []
+
+            # Generate cross-section profiles if enabled
+            if self.params.get('generate_cross_profiles', True):
+                self.logger.info("Generating cross-section profiles...")
+                self.progress_updated.emit(67, "📊 Querprofile werden erstellt...")
+
+                cross_profiles = profile_gen.generate_all_profiles(
+                    output_dir=str(profiles_dir),
+                    spacing=self.params.get('cross_profile_spacing', 10.0),
+                    overhang_percent=self.params.get('cross_profile_overhang', 10.0),
+                    vertical_exaggeration=self.params['vertical_exaggeration'],
+                    volume_info=results
+                )
+                all_profiles.extend(cross_profiles)
+                self.logger.info(f"Generated {len(cross_profiles)} cross-section profiles")
+
+            # Generate longitudinal profiles if enabled
+            if self.params.get('generate_long_profiles', True):
+                self.logger.info("Generating longitudinal profiles...")
+                self.progress_updated.emit(72, "📊 Längsprofile werden erstellt...")
+
+                long_profiles = profile_gen.generate_all_longitudinal_profiles(
+                    output_dir=str(profiles_dir),
+                    spacing=self.params.get('long_profile_spacing', 10.0),
+                    overhang_percent=self.params.get('long_profile_overhang', 10.0),
+                    vertical_exaggeration=self.params['vertical_exaggeration'],
+                    volume_info=results
+                )
+                all_profiles.extend(long_profiles)
+                self.logger.info(f"Generated {len(long_profiles)} longitudinal profiles")
+
+            profiles = all_profiles
             profile_pngs = [p['png_path'] for p in profiles if 'png_path' in p]
-            self.logger.info(f"Generated {len(profile_pngs)} profile images")
+            self.logger.info(f"Total: Generated {len(profile_pngs)} profile images")
             self.progress_updated.emit(75, f"✓ {len(profiles)} Geländeschnitte erstellt")
         except Exception as e:
             self.logger.error(f"Profile generation failed: {e}", exc_info=True)
@@ -212,7 +237,10 @@ class WorkflowWorker(QObject):
         # Generate report
         report_config = {
             'slope_angle': self.params['slope_angle'],
-            'profile_spacing': self.params['profile_spacing']
+            'generate_cross_profiles': self.params.get('generate_cross_profiles', True),
+            'cross_profile_spacing': self.params.get('cross_profile_spacing', 10.0),
+            'generate_long_profiles': self.params.get('generate_long_profiles', True),
+            'long_profile_spacing': self.params.get('long_profile_spacing', 10.0)
         }
         
         report_gen = ReportGenerator(
