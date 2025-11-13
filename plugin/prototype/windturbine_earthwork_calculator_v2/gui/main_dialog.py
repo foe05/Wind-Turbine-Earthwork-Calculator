@@ -192,39 +192,81 @@ class MainDialog(QDialog):
         """Create profiles tab."""
         widget = QWidget()
         layout = QVBoxLayout()
-        
-        # Profile Settings
-        group_profiles = QGroupBox("Geländeschnitt-Einstellungen")
-        form_profiles = QFormLayout()
-        
-        self.input_profile_spacing = QDoubleSpinBox()
-        self.input_profile_spacing.setRange(1.0, 50.0)
-        self.input_profile_spacing.setValue(10.0)
-        self.input_profile_spacing.setDecimals(1)
-        self.input_profile_spacing.setSuffix(" m")
-        self.input_profile_spacing.setToolTip("Abstand zwischen Geländeschnitten")
-        
-        self.input_profile_overhang = QDoubleSpinBox()
-        self.input_profile_overhang.setRange(0.0, 50.0)
-        self.input_profile_overhang.setValue(10.0)
-        self.input_profile_overhang.setDecimals(1)
-        self.input_profile_overhang.setSuffix(" %")
-        self.input_profile_overhang.setToolTip("Überhang über Plattform-Rand hinaus")
-        
+
+        # Cross-Section Profiles (Querprofile)
+        group_cross_profiles = QGroupBox("Querprofile")
+        form_cross_profiles = QFormLayout()
+
+        self.input_generate_cross_profiles = QCheckBox("Querprofile generieren")
+        self.input_generate_cross_profiles.setChecked(True)
+        self.input_generate_cross_profiles.setToolTip("Querprofile perpendikular zur Hauptorientierung")
+        form_cross_profiles.addRow(self.input_generate_cross_profiles)
+
+        self.input_cross_profile_spacing = QDoubleSpinBox()
+        self.input_cross_profile_spacing.setRange(1.0, 50.0)
+        self.input_cross_profile_spacing.setValue(10.0)
+        self.input_cross_profile_spacing.setDecimals(1)
+        self.input_cross_profile_spacing.setSuffix(" m")
+        self.input_cross_profile_spacing.setToolTip("Abstand zwischen Querprofilen")
+
+        self.input_cross_profile_overhang = QDoubleSpinBox()
+        self.input_cross_profile_overhang.setRange(0.0, 50.0)
+        self.input_cross_profile_overhang.setValue(10.0)
+        self.input_cross_profile_overhang.setDecimals(1)
+        self.input_cross_profile_overhang.setSuffix(" %")
+        self.input_cross_profile_overhang.setToolTip("Überhang über Plattform-Rand hinaus")
+
+        form_cross_profiles.addRow("Schnitt-Abstand:", self.input_cross_profile_spacing)
+        form_cross_profiles.addRow("Überhang:", self.input_cross_profile_overhang)
+
+        group_cross_profiles.setLayout(form_cross_profiles)
+        layout.addWidget(group_cross_profiles)
+
+        # Longitudinal Profiles (Längsprofile)
+        group_long_profiles = QGroupBox("Längsprofile")
+        form_long_profiles = QFormLayout()
+
+        self.input_generate_long_profiles = QCheckBox("Längsprofile generieren")
+        self.input_generate_long_profiles.setChecked(True)
+        self.input_generate_long_profiles.setToolTip("Längsprofile parallel zur Hauptorientierung")
+        form_long_profiles.addRow(self.input_generate_long_profiles)
+
+        self.input_long_profile_spacing = QDoubleSpinBox()
+        self.input_long_profile_spacing.setRange(1.0, 50.0)
+        self.input_long_profile_spacing.setValue(10.0)
+        self.input_long_profile_spacing.setDecimals(1)
+        self.input_long_profile_spacing.setSuffix(" m")
+        self.input_long_profile_spacing.setToolTip("Abstand zwischen Längsprofilen")
+
+        self.input_long_profile_overhang = QDoubleSpinBox()
+        self.input_long_profile_overhang.setRange(0.0, 50.0)
+        self.input_long_profile_overhang.setValue(10.0)
+        self.input_long_profile_overhang.setDecimals(1)
+        self.input_long_profile_overhang.setSuffix(" %")
+        self.input_long_profile_overhang.setToolTip("Überhang über Plattform-Rand hinaus")
+
+        form_long_profiles.addRow("Schnitt-Abstand:", self.input_long_profile_spacing)
+        form_long_profiles.addRow("Überhang:", self.input_long_profile_overhang)
+
+        group_long_profiles.setLayout(form_long_profiles)
+        layout.addWidget(group_long_profiles)
+
+        # Visualization Settings
+        group_visualization = QGroupBox("Visualisierung")
+        form_visualization = QFormLayout()
+
         self.input_vertical_exaggeration = QDoubleSpinBox()
         self.input_vertical_exaggeration.setRange(1.0, 10.0)
         self.input_vertical_exaggeration.setValue(2.0)
         self.input_vertical_exaggeration.setDecimals(1)
         self.input_vertical_exaggeration.setSuffix(" x")
         self.input_vertical_exaggeration.setToolTip("Vertikale Überhöhung in Grafiken")
-        
-        form_profiles.addRow("Schnitt-Abstand:", self.input_profile_spacing)
-        form_profiles.addRow("Überhang:", self.input_profile_overhang)
-        form_profiles.addRow("Vert. Überhöhung:", self.input_vertical_exaggeration)
-        
-        group_profiles.setLayout(form_profiles)
-        layout.addWidget(group_profiles)
-        
+
+        form_visualization.addRow("Vert. Überhöhung:", self.input_vertical_exaggeration)
+
+        group_visualization.setLayout(form_visualization)
+        layout.addWidget(group_visualization)
+
         layout.addStretch()
         widget.setLayout(layout)
         return widget
@@ -350,8 +392,12 @@ class MainDialog(QDialog):
             'max_height': self.input_max_height.value(),
             'height_step': self.input_height_step.value(),
             'slope_angle': self.input_slope_angle.value(),
-            'profile_spacing': self.input_profile_spacing.value(),
-            'profile_overhang': self.input_profile_overhang.value(),
+            'generate_cross_profiles': self.input_generate_cross_profiles.isChecked(),
+            'cross_profile_spacing': self.input_cross_profile_spacing.value(),
+            'cross_profile_overhang': self.input_cross_profile_overhang.value(),
+            'generate_long_profiles': self.input_generate_long_profiles.isChecked(),
+            'long_profile_spacing': self.input_long_profile_spacing.value(),
+            'long_profile_overhang': self.input_long_profile_overhang.value(),
             'vertical_exaggeration': self.input_vertical_exaggeration.value(),
             'workspace': self.input_workspace.text().strip(),
             'force_refresh': self.input_force_refresh.isChecked()
