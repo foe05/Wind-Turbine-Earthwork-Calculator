@@ -358,7 +358,8 @@ def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent
     Create perpendicular cross-section lines through a polygon.
 
     The cross-sections are perpendicular to the main orientation of the polygon,
-    spaced at regular intervals, and extend beyond the polygon edges.
+    spaced at regular intervals, and ALL have the same length based on the
+    maximum width of the polygon plus overhang.
 
     Args:
         geometry (QgsGeometry): Polygon geometry
@@ -372,7 +373,7 @@ def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent
             - 'main_angle': Main orientation angle
             - 'cross_angle': Cross-section angle (perpendicular to main)
             - 'center_point': Center point of the cross-section
-            - 'length': Total length of the line
+            - 'length': Total length of the line (uniform for all)
             - 'width': Width of polygon at this location
     """
     import numpy as np
@@ -421,8 +422,6 @@ def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent
     # Calculate number of cross-sections
     num_sections = max(1, int(extent_along_main / spacing) + 1)
 
-    cross_sections = []
-
     # Extract polygon boundary
     if geometry.isMultipart():
         polygons = geometry.asMultiPolygon()
@@ -439,7 +438,10 @@ def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent
 
     boundary = QgsGeometry.fromPolylineXY(boundary_coords)
 
-    # Create cross-sections at regular intervals
+    # PHASE 1: Determine maximum width across all cross-sections
+    section_info = []  # Store center points and widths
+    max_width = 0
+
     for i in range(num_sections):
         # Position along main axis
         t = min_proj + i * spacing
@@ -447,7 +449,6 @@ def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent
         # Calculate center point of this cross-section along main axis
         center_x = centroid.x() + t * main_axis_x
         center_y = centroid.y() + t * main_axis_y
-        test_center = QgsPointXY(center_x, center_y)
 
         # Create a very long test line perpendicular to main axis through this point
         test_half_length = 2000  # Very long to ensure we cross the polygon
@@ -494,66 +495,56 @@ def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent
                     # This is the actual width of the polygon at this location
                     width = max_dist
 
+                    # Track maximum width
+                    max_width = max(max_width, width)
+
                     # Calculate the midpoint between the two intersection points
-                    # This is the true center of the cross-section
                     mid_x = (point1.x() + point2.x()) / 2.0
                     mid_y = (point1.y() + point2.y()) / 2.0
                     true_center = QgsPointXY(mid_x, mid_y)
 
-                    # Calculate overhang distance
-                    overhang = width * (overhang_percent / 100.0)
-                    half_length = (width / 2.0) + overhang
-                    total_length = width + 2 * overhang
-
-                    # Create final cross-section line from true center
-                    x1 = mid_x - half_length * math.cos(cross_rad)
-                    y1 = mid_y - half_length * math.sin(cross_rad)
-                    x2 = mid_x + half_length * math.cos(cross_rad)
-                    y2 = mid_y + half_length * math.sin(cross_rad)
-
-                    line_geom = QgsGeometry.fromPolylineXY([
-                        QgsPointXY(x1, y1),
-                        QgsPointXY(x2, y2)
-                    ])
-
-                    # Verify that endpoints are outside the polygon
-                    p1_geom = QgsGeometry.fromPointXY(QgsPointXY(x1, y1))
-                    p2_geom = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
-
-                    # If endpoints are still inside, extend them further
-                    safety_factor = 1.5
-                    while geometry.contains(p1_geom) or geometry.contains(p2_geom):
-                        half_length *= safety_factor
-                        total_length = width + 2 * (half_length - width / 2.0)
-
-                        x1 = mid_x - half_length * math.cos(cross_rad)
-                        y1 = mid_y - half_length * math.sin(cross_rad)
-                        x2 = mid_x + half_length * math.cos(cross_rad)
-                        y2 = mid_y + half_length * math.sin(cross_rad)
-
-                        line_geom = QgsGeometry.fromPolylineXY([
-                            QgsPointXY(x1, y1),
-                            QgsPointXY(x2, y2)
-                        ])
-
-                        p1_geom = QgsGeometry.fromPointXY(QgsPointXY(x1, y1))
-                        p2_geom = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
-
-                        # Safety break to avoid infinite loop
-                        if half_length > width * 10:
-                            break
-
-                    cross_section = {
-                        'geometry': line_geom,
-                        'type': f'Querschnitt {i+1:02d}',
-                        'main_angle': main_angle,
-                        'cross_angle': cross_angle,
-                        'center_point': true_center,
-                        'length': total_length,
+                    # Store info for phase 2
+                    section_info.append({
+                        'index': i,
+                        'center': true_center,
                         'width': width
-                    }
+                    })
 
-                    cross_sections.append(cross_section)
+    # Calculate unified length based on maximum width
+    overhang = max_width * (overhang_percent / 100.0)
+    unified_half_length = (max_width / 2.0) + overhang
+    unified_total_length = max_width + 2 * overhang
+
+    # PHASE 2: Create all cross-sections with unified length
+    cross_sections = []
+
+    for info in section_info:
+        i = info['index']
+        true_center = info['center']
+        width = info['width']
+
+        # Create cross-section line with unified length from center
+        x1 = true_center.x() - unified_half_length * math.cos(cross_rad)
+        y1 = true_center.y() - unified_half_length * math.sin(cross_rad)
+        x2 = true_center.x() + unified_half_length * math.cos(cross_rad)
+        y2 = true_center.y() + unified_half_length * math.sin(cross_rad)
+
+        line_geom = QgsGeometry.fromPolylineXY([
+            QgsPointXY(x1, y1),
+            QgsPointXY(x2, y2)
+        ])
+
+        cross_section = {
+            'geometry': line_geom,
+            'type': f'Querschnitt {i+1:02d}',
+            'main_angle': main_angle,
+            'cross_angle': cross_angle,
+            'center_point': true_center,
+            'length': unified_total_length,
+            'width': width  # Individual width for reference
+        }
+
+        cross_sections.append(cross_section)
 
     return cross_sections
 
@@ -563,8 +554,8 @@ def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_perce
     Create longitudinal section lines through a polygon, parallel to main orientation.
 
     The longitudinal sections are parallel to the main orientation of the polygon,
-    spaced at regular intervals perpendicular to the main axis, and extend beyond
-    the polygon edges.
+    spaced at regular intervals perpendicular to the main axis, and ALL have the
+    same length based on the maximum length of the polygon plus overhang.
 
     Args:
         geometry (QgsGeometry): Polygon geometry
@@ -578,7 +569,7 @@ def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_perce
             - 'main_angle': Main orientation angle
             - 'longitudinal_angle': Longitudinal section angle (parallel to main)
             - 'center_point': Center point of the longitudinal section
-            - 'length': Total length of the line
+            - 'length': Total length of the line (uniform for all)
             - 'width': Length of polygon at this location
     """
     import numpy as np
@@ -629,8 +620,6 @@ def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_perce
     # Calculate number of longitudinal sections
     num_sections = max(1, int(extent_along_perp / spacing) + 1)
 
-    longitudinal_sections = []
-
     # Extract polygon boundary
     if geometry.isMultipart():
         polygons = geometry.asMultiPolygon()
@@ -647,7 +636,10 @@ def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_perce
 
     boundary = QgsGeometry.fromPolylineXY(boundary_coords)
 
-    # Create longitudinal sections at regular intervals
+    # PHASE 1: Determine maximum length across all longitudinal sections
+    section_info = []  # Store center points and lengths
+    max_length = 0
+
     for i in range(num_sections):
         # Position along perpendicular axis
         t = min_proj + i * spacing
@@ -655,7 +647,6 @@ def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_perce
         # Calculate center point of this longitudinal section along perp axis
         center_x = centroid.x() + t * perp_axis_x
         center_y = centroid.y() + t * perp_axis_y
-        test_center = QgsPointXY(center_x, center_y)
 
         # Create a very long test line parallel to main axis through this point
         test_half_length = 2000  # Very long to ensure we cross the polygon
@@ -702,65 +693,55 @@ def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_perce
                     # This is the actual length of the polygon at this location
                     length_at_section = max_dist
 
+                    # Track maximum length
+                    max_length = max(max_length, length_at_section)
+
                     # Calculate the midpoint between the two intersection points
-                    # This is the true center of the longitudinal section
                     mid_x = (point1.x() + point2.x()) / 2.0
                     mid_y = (point1.y() + point2.y()) / 2.0
                     true_center = QgsPointXY(mid_x, mid_y)
 
-                    # Calculate overhang distance
-                    overhang = length_at_section * (overhang_percent / 100.0)
-                    half_length = (length_at_section / 2.0) + overhang
-                    total_length = length_at_section + 2 * overhang
+                    # Store info for phase 2
+                    section_info.append({
+                        'index': i,
+                        'center': true_center,
+                        'length': length_at_section
+                    })
 
-                    # Create final longitudinal section line from true center
-                    x1 = mid_x - half_length * math.cos(longitudinal_rad)
-                    y1 = mid_y - half_length * math.sin(longitudinal_rad)
-                    x2 = mid_x + half_length * math.cos(longitudinal_rad)
-                    y2 = mid_y + half_length * math.sin(longitudinal_rad)
+    # Calculate unified length based on maximum length
+    overhang = max_length * (overhang_percent / 100.0)
+    unified_half_length = (max_length / 2.0) + overhang
+    unified_total_length = max_length + 2 * overhang
 
-                    line_geom = QgsGeometry.fromPolylineXY([
-                        QgsPointXY(x1, y1),
-                        QgsPointXY(x2, y2)
-                    ])
+    # PHASE 2: Create all longitudinal sections with unified length
+    longitudinal_sections = []
 
-                    # Verify that endpoints are outside the polygon
-                    p1_geom = QgsGeometry.fromPointXY(QgsPointXY(x1, y1))
-                    p2_geom = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
+    for info in section_info:
+        i = info['index']
+        true_center = info['center']
+        length_at_section = info['length']
 
-                    # If endpoints are still inside, extend them further
-                    safety_factor = 1.5
-                    while geometry.contains(p1_geom) or geometry.contains(p2_geom):
-                        half_length *= safety_factor
-                        total_length = length_at_section + 2 * (half_length - length_at_section / 2.0)
+        # Create longitudinal section line with unified length from center
+        x1 = true_center.x() - unified_half_length * math.cos(longitudinal_rad)
+        y1 = true_center.y() - unified_half_length * math.sin(longitudinal_rad)
+        x2 = true_center.x() + unified_half_length * math.cos(longitudinal_rad)
+        y2 = true_center.y() + unified_half_length * math.sin(longitudinal_rad)
 
-                        x1 = mid_x - half_length * math.cos(longitudinal_rad)
-                        y1 = mid_y - half_length * math.sin(longitudinal_rad)
-                        x2 = mid_x + half_length * math.cos(longitudinal_rad)
-                        y2 = mid_y + half_length * math.sin(longitudinal_rad)
+        line_geom = QgsGeometry.fromPolylineXY([
+            QgsPointXY(x1, y1),
+            QgsPointXY(x2, y2)
+        ])
 
-                        line_geom = QgsGeometry.fromPolylineXY([
-                            QgsPointXY(x1, y1),
-                            QgsPointXY(x2, y2)
-                        ])
+        longitudinal_section = {
+            'geometry': line_geom,
+            'type': f'Längsprofil {i+1:02d}',
+            'main_angle': main_angle,
+            'longitudinal_angle': longitudinal_angle,
+            'center_point': true_center,
+            'length': unified_total_length,
+            'width': length_at_section  # Individual length for reference
+        }
 
-                        p1_geom = QgsGeometry.fromPointXY(QgsPointXY(x1, y1))
-                        p2_geom = QgsGeometry.fromPointXY(QgsPointXY(x2, y2))
-
-                        # Safety break to avoid infinite loop
-                        if half_length > length_at_section * 10:
-                            break
-
-                    longitudinal_section = {
-                        'geometry': line_geom,
-                        'type': f'Längsprofil {i+1:02d}',
-                        'main_angle': main_angle,
-                        'longitudinal_angle': longitudinal_angle,
-                        'center_point': true_center,
-                        'length': total_length,
-                        'width': length_at_section
-                    }
-
-                    longitudinal_sections.append(longitudinal_section)
+        longitudinal_sections.append(longitudinal_section)
 
     return longitudinal_sections
