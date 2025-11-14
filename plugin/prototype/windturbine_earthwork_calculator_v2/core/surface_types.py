@@ -5,7 +5,7 @@ Defines the data structures for handling multiple surface types:
 - Crane pad (Kranstellfläche)
 - Foundation (Fundamentfläche)
 - Boom surface (Auslegerfläche)
-- Rotor storage (Rotorlagerfläche)
+- Blade storage (Blattlagerfläche)
 
 Author: Wind Energy Site Planning
 Version: 2.0 - Multi-Surface Extension
@@ -35,7 +35,7 @@ class SurfaceType(Enum):
             SurfaceType.CRANE_PAD: "Kranstellfläche",
             SurfaceType.FOUNDATION: "Fundamentfläche",
             SurfaceType.BOOM: "Auslegerfläche",
-            SurfaceType.ROTOR_STORAGE: "Rotorlagerfläche"
+            SurfaceType.ROTOR_STORAGE: "Blattlagerfläche"
         }
         return names[self]
 

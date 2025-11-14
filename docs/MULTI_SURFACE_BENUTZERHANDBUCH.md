@@ -29,7 +29,7 @@ Das **Wind Turbine Earthwork Calculator Plugin V2** ist eine QGIS-Erweiterung zu
 
 ### Hauptfunktionen
 
-- ✅ **4-Flächen-Optimierung:** Kranstellfläche, Fundament, Auslegerfläche, Rotorlagerfläche
+- ✅ **4-Flächen-Optimierung:** Kranstellfläche, Fundament, Auslegerfläche, Blattlagerfläche
 - ✅ **FOK-basierte Höhensteuerung:** Fundamentoberkante als behördlich vorgegebener Anker
 - ✅ **Intelligente Gefälle-Berechnung:** Auslegerfläche mit konstanter Längsneigung (2-8%)
 - ✅ **Auto-Slope Feature:** Automatische Anpassung an Geländeneigung
@@ -73,7 +73,7 @@ Sie benötigen **4 separate DXF-Dateien** mit den Umrissen der jeweiligen Fläch
    - Typische Größe: 30×15m bis 40×20m
    - Muss die Kranstellfläche **berühren** (gemeinsame Kante)
 
-4. **Rotorlagerfläche** (`Rotorflaeche.dxf`)
+4. **Blattlagerfläche** (`Rotorflaeche.dxf`)
    - Rechteckig
    - Typische Größe: 20×10m bis 30×15m
    - Muss die Kranstellfläche **berühren** (gemeinsame Kante)
@@ -136,7 +136,7 @@ Die Kranstellflächenhöhe wird so gewählt, dass die **Gesamterdmasse** über a
 - Neigung wird innerhalb des zulässigen Bereichs (2-8%) gewählt
 - Längere Transportwege für große Komponenten
 
-### 4. Rotorlagerfläche
+### 4. Blattlagerfläche
 
 **Zweck:** Lagerfläche für Rotornabe und weitere Komponenten.
 
@@ -148,10 +148,10 @@ Die Kranstellflächenhöhe wird so gewählt, dass die **Gesamterdmasse** über a
 
 **Höhenberechnung:**
 ```
-Rotorflächenhöhe = Kranstellflächenhöhe + Höhendifferenz
+Blattflächenhöhe = Kranstellflächenhöhe + Höhendifferenz
 ```
 
-Die Höhendifferenz kann positiv (Rotorfläche höher) oder negativ (Rotorfläche tiefer) sein.
+Die Höhendifferenz kann positiv (Blattfläche höher) oder negativ (Blattfläche tiefer) sein.
 
 ### Räumliche Beziehungen
 
@@ -171,7 +171,7 @@ Die Höhendifferenz kann positiv (Rotorfläche höher) oder negativ (Rotorfläch
     └───────────┬───────────┘
                 │ berührt
         ┌───────┴─────────┐
-        │ Rotorlagerfläche│
+        │ Blattlagerfläche│
         │    (planar)     │
         └─────────────────┘
 ```
@@ -246,7 +246,7 @@ Laden Sie alle 4 DXF-Dateien:
 1. **Kranstellfläche:** Umriss der Kranstellfläche
 2. **Fundamentfläche:** Umriss des Fundaments
 3. **Auslegerfläche:** Umriss der Auslegerfläche
-4. **Rotorlagerfläche:** Umriss der Rotorlagerfläche
+4. **Blattlagerfläche:** Umriss der Blattlagerfläche
 
 **Punkt-Toleranz:** (Standard: 0.01m)
 - Toleranz für das Verbinden von Punkten im DXF
@@ -304,12 +304,12 @@ Der absolute Suchbereich wird automatisch angezeigt, z.B.:
 - Das Ergebnis wird auf den zulässigen Bereich (2-8%) begrenzt
 - Empfohlen für optimale Erdmassenbalance!
 
-#### Rotorlagerflächen-Parameter
+#### Blattlagerflächen-Parameter
 
 **Höhendifferenz zu Kranstellfläche:**
 - Relativer Höhenunterschied zur Kranstellfläche
-- Positiv: Rotorfläche liegt höher
-- Negativ: Rotorfläche liegt tiefer
+- Positiv: Blattfläche liegt höher
+- Negativ: Blattfläche liegt tiefer
 - Standard: 0.0m (gleiche Höhe)
 
 ### Schritt 3: Tab "Optimierung" - Feineinstellungen
@@ -392,7 +392,7 @@ Das Plugin führt folgende Schritte aus:
 | `dxf_crane` | Pfad | - | DXF-Datei für Kranstellfläche |
 | `dxf_foundation` | Pfad | - | DXF-Datei für Fundamentfläche |
 | `dxf_boom` | Pfad | - | DXF-Datei für Auslegerfläche |
-| `dxf_rotor` | Pfad | - | DXF-Datei für Rotorlagerfläche |
+| `dxf_rotor` | Pfad | - | DXF-Datei für Blattlagerfläche |
 | `dxf_tolerance` | m | 0.01 | Toleranz für Punktverbindung |
 
 ### Fundament-Parameter
@@ -595,7 +595,7 @@ Mit s_min = 2.0% und s_max = 8.0%
 
 ---
 
-### 4. Rotorlagerfläche
+### 4. Blattlagerfläche
 
 #### Höhenberechnung
 ```
@@ -735,7 +735,7 @@ Für jedes Profil wird ein PNG-Bild generiert mit:
   - Schwarz: Gelände (DEM)
   - Rot: Kranstellfläche
   - Orange: Auslegerfläche (wenn durchquert)
-  - Grün: Rotorlagerfläche (wenn durchquert)
+  - Grün: Blattlagerfläche (wenn durchquert)
   - Grau: Böschungen
 - **Legende und Volumeninfo**
 
@@ -759,7 +759,7 @@ WEA-Standort bei Koordinaten: **ETRS89 / UTM Zone 32N**
 - **Kranstellfläche:** 35m × 45m = 1575 m²
 - **Fundamentfläche:** Ø 22m = 380 m²
 - **Auslegerfläche:** 35m × 18m = 630 m²
-- **Rotorlagerfläche:** 25m × 12m = 300 m²
+- **Blattlagerfläche:** 25m × 12m = 300 m²
 
 ### Parameter-Einstellungen
 
@@ -776,7 +776,7 @@ Gravel Thickness: 0.5 m
 Boom Slope: 5.0 %
 Auto-Slope: ✓ aktiviert
 
-# Rotorlagerfläche
+# Blattlagerfläche
 Height Offset: -0.2 m (etwas tiefer als Kran)
 
 # Optimierung
@@ -800,7 +800,7 @@ Volumenbilanz:
 │ Fundament          │ 1,450        │ 38           │ 1,488        │
 │ Kranstellfläche    │ 2,850        │ 3,120        │ 5,970        │
 │ Auslegerfläche     │ 920          │ 680          │ 1,600        │
-│ Rotorlagerfläche   │ 540          │ 620          │ 1,160        │
+│ Blattlagerfläche   │ 540          │ 620          │ 1,160        │
 ├────────────────────┼──────────────┼──────────────┼──────────────┤
 │ GESAMT             │ 5,760        │ 4,458        │ 10,218       │
 └────────────────────┴──────────────┴──────────────┴──────────────┘
@@ -939,7 +939,7 @@ Distanz von Anschlusskante: d = 10.0 m
 Zielhöhe = 305.35 - (10.0 × 5.0/100) = 305.35 - 0.5 = 304.85 m ü.NN
 ```
 
-#### Rotorlagerfläche
+#### Blattlagerfläche
 ```
 Zielhöhe = 305.35 + (-0.2) = 305.15 m ü.NN
 ```

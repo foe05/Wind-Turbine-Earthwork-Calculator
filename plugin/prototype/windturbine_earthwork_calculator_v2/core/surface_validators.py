@@ -151,14 +151,14 @@ class SurfaceValidator:
 
         # Check if they touch or intersect
         if not crane_geom.touches(rotor_geom) and not crane_geom.intersects(rotor_geom):
-            return False, "Rotorlagerfläche muss die Kranstellfläche berühren"
+            return False, "Blattlagerfläche muss die Kranstellfläche berühren"
 
         # Find shared edge length
         shared_edge_length = self._calculate_shared_edge_length(crane_geom, rotor_geom)
 
         if shared_edge_length < min_edge_length:
             return False, (
-                f"Rotorlagerfläche hat zu kurze Verbindung zur Kranstellfläche. "
+                f"Blattlagerfläche hat zu kurze Verbindung zur Kranstellfläche. "
                 f"Gefunden: {shared_edge_length:.1f}m, benötigt: {min_edge_length:.1f}m"
             )
 
@@ -181,7 +181,7 @@ class SurfaceValidator:
             intersection = boom_geom.intersection(rotor_geom)
             overlap_area = intersection.area()
             return False, (
-                f"Auslegerfläche und Rotorlagerfläche dürfen sich nicht überlappen. "
+                f"Auslegerfläche und Blattlagerfläche dürfen sich nicht überlappen. "
                 f"Überlappung: {overlap_area:.1f}m²"
             )
 
@@ -190,7 +190,7 @@ class SurfaceValidator:
             intersection = boom_geom.intersection(rotor_geom)
             if intersection.type() == QgsWkbTypes.PolygonGeometry:
                 # It's a polygon intersection, not just a line/point - this is overlap
-                return False, "Auslegerfläche und Rotorlagerfläche überlappen sich"
+                return False, "Auslegerfläche und Blattlagerfläche überlappen sich"
 
         self.logger.info("✓ Boom and rotor storage do not overlap")
         return True, ""

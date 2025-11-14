@@ -5,7 +5,7 @@ Calculates cut/fill volumes for all surface types in a wind turbine construction
 - Foundation (Fundamentfläche): Excavation below FOK
 - Crane Pad (Kranstellfläche): Planar surface with gravel layer
 - Boom Surface (Auslegerfläche): Sloped surface with longitudinal gradient
-- Rotor Storage (Rotorlagerfläche): Planar surface with height offset
+- Blade Storage (Blattlagerfläche): Planar surface with height offset
 
 Author: Wind Energy Site Planning
 Version: 2.0 - Multi-Surface Extension

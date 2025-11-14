@@ -102,7 +102,7 @@ class WorkflowWorker(QObject):
             ('crane', 'dxf_crane', SurfaceType.CRANE_PAD, "Kranstellfläche"),
             ('foundation', 'dxf_foundation', SurfaceType.FOUNDATION, "Fundamentfläche"),
             ('boom', 'dxf_boom', SurfaceType.BOOM, "Auslegerfläche"),
-            ('rotor', 'dxf_rotor', SurfaceType.ROTOR_STORAGE, "Rotorlagerfläche"),
+            ('rotor', 'dxf_rotor', SurfaceType.ROTOR_STORAGE, "Blattlagerfläche"),
         ]
 
         progress_per_dxf = 5
@@ -610,7 +610,7 @@ class WorkflowWorker(QObject):
             ('kranstellflaechen', 'Kranstellflächen'),
             ('fundamentflaechen', 'Fundamentflächen'),
             ('auslegerflaechen', 'Auslegerflächen'),
-            ('rotorflaechen', 'Rotorlagerflächen'),
+            ('rotorflaechen', 'Blattlagerflächen'),
             ('schnitte', 'Geländeschnitte'),
         ]
 

@@ -5,7 +5,7 @@ Tab-based UI for user-friendly parameter input with support for 4 surface types:
 - Crane pad (Kranstellfläche)
 - Foundation (Fundamentfläche)
 - Boom surface (Auslegerfläche)
-- Rotor storage (Rotorlagerfläche)
+- Blade storage (Blattlagerfläche)
 
 Author: Wind Energy Site Planning
 Version: 2.0 - Multi-Surface Extension
@@ -141,16 +141,16 @@ class MainDialog(QDialog):
         boom_layout.addWidget(btn_browse_boom)
         form_dxf.addRow("Auslegerfläche:", boom_layout)
 
-        # Rotor storage DXF
+        # Blade storage DXF
         self.input_dxf_rotor = QLineEdit()
-        self.input_dxf_rotor.setPlaceholderText("Pfad zur DXF-Datei mit Rotorlagerflächen-Umriss...")
+        self.input_dxf_rotor.setPlaceholderText("Pfad zur DXF-Datei mit Blattlagerflächen-Umriss...")
         btn_browse_rotor = QPushButton("Durchsuchen...")
-        btn_browse_rotor.clicked.connect(lambda: self._browse_dxf(self.input_dxf_rotor, "Rotorlagerfläche"))
+        btn_browse_rotor.clicked.connect(lambda: self._browse_dxf(self.input_dxf_rotor, "Blattlagerfläche"))
 
         rotor_layout = QHBoxLayout()
         rotor_layout.addWidget(self.input_dxf_rotor)
         rotor_layout.addWidget(btn_browse_rotor)
-        form_dxf.addRow("Rotorlagerfläche:", rotor_layout)
+        form_dxf.addRow("Blattlagerfläche:", rotor_layout)
 
         # DXF tolerance
         self.input_dxf_tolerance = QDoubleSpinBox()
@@ -271,8 +271,8 @@ class MainDialog(QDialog):
         group_boom.setLayout(form_boom)
         layout.addWidget(group_boom)
 
-        # ========== Rotor Storage Parameters Group ==========
-        group_rotor = QGroupBox("Rotorlagerflächen-Parameter")
+        # ========== Blade Storage Parameters Group ==========
+        group_rotor = QGroupBox("Blattlagerflächen-Parameter")
         form_rotor = QFormLayout()
 
         # Height offset from crane pad
@@ -511,7 +511,7 @@ class MainDialog(QDialog):
             ("Kranstellfläche", self.input_dxf_crane),
             ("Fundamentfläche", self.input_dxf_foundation),
             ("Auslegerfläche", self.input_dxf_boom),
-            ("Rotorlagerfläche", self.input_dxf_rotor),
+            ("Blattlagerfläche", self.input_dxf_rotor),
         ]
 
         for name, line_edit in dxf_inputs:
