@@ -745,3 +745,257 @@ def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_perce
         longitudinal_sections.append(longitudinal_section)
 
     return longitudinal_sections
+
+
+# ==============================================================================
+# Multi-Surface Helper Functions
+# ==============================================================================
+
+def find_connection_edge(polygon1: QgsGeometry, polygon2: QgsGeometry,
+                        tolerance: float = 0.1) -> tuple[QgsGeometry, float]:
+    """
+    Find the connection edge between two polygons that share a border.
+
+    This function identifies the shared boundary segment(s) between two adjacent
+    polygons. Useful for finding the connection between crane pad and boom surface.
+
+    Args:
+        polygon1 (QgsGeometry): First polygon
+        polygon2 (QgsGeometry): Second polygon
+        tolerance (float): Distance tolerance for edge matching (meters)
+
+    Returns:
+        tuple: (connection_geometry, total_length)
+            - connection_geometry: QgsGeometry of shared edge (LineString or MultiLineString)
+            - total_length: Total length of shared edges in meters
+    """
+    # Get boundaries of both polygons
+    boundary1 = polygon1.boundary()
+    boundary2 = polygon2.boundary()
+
+    # Find intersection of boundaries
+    connection = boundary1.intersection(boundary2)
+
+    # Calculate total length
+    if connection.isEmpty():
+        length = 0.0
+    elif connection.type() == QgsWkbTypes.LineGeometry:
+        length = connection.length()
+    elif connection.type() == QgsWkbTypes.PointGeometry:
+        # Only touching at points, no real edge
+        length = 0.0
+    else:
+        length = 0.0
+
+    return connection, length
+
+
+def get_connection_edge_center(edge_geometry: QgsGeometry) -> QgsPointXY:
+    """
+    Get the center point of a connection edge.
+
+    Args:
+        edge_geometry (QgsGeometry): Edge geometry (LineString or MultiLineString)
+
+    Returns:
+        QgsPointXY: Center point of the edge
+    """
+    if edge_geometry.isEmpty():
+        raise ValueError("Edge geometry is empty")
+
+    # Use the centroid of the edge
+    centroid = edge_geometry.centroid()
+    return centroid.asPoint()
+
+
+def get_edge_direction(edge_geometry: QgsGeometry) -> float:
+    """
+    Get the direction/orientation of an edge.
+
+    Args:
+        edge_geometry (QgsGeometry): Edge geometry (LineString)
+
+    Returns:
+        float: Direction angle in degrees (0-360)
+    """
+    if edge_geometry.type() != QgsWkbTypes.LineGeometry:
+        raise ValueError("Edge must be a LineString")
+
+    # Get vertices
+    if edge_geometry.isMultipart():
+        lines = edge_geometry.asMultiPolyline()
+        if not lines:
+            raise ValueError("Empty MultiLineString")
+        # Use first line segment of first line
+        vertices = lines[0]
+    else:
+        vertices = edge_geometry.asPolyline()
+
+    if len(vertices) < 2:
+        raise ValueError("Edge must have at least 2 vertices")
+
+    # Calculate angle from first to last point
+    p1 = vertices[0]
+    p2 = vertices[-1]
+
+    dx = p2.x() - p1.x()
+    dy = p2.y() - p1.y()
+
+    angle_rad = math.atan2(dy, dx)
+    angle_deg = math.degrees(angle_rad)
+
+    # Normalize to 0-360
+    if angle_deg < 0:
+        angle_deg += 360
+
+    return angle_deg
+
+
+def calculate_distance_from_edge(point: QgsPointXY, edge_geometry: QgsGeometry,
+                                 direction: float) -> float:
+    """
+    Calculate the signed distance from a point to an edge along a specific direction.
+
+    This is used for calculating boom surface heights with slope. The distance
+    is positive in the direction of the slope.
+
+    Args:
+        point (QgsPointXY): Point to measure from
+        edge_geometry (QgsGeometry): Connection edge
+        direction (float): Direction angle in degrees for measuring distance
+
+    Returns:
+        float: Signed distance in meters (positive = in slope direction)
+    """
+    # Find closest point on edge to our point
+    closest_point = edge_geometry.nearestPoint(QgsGeometry.fromPointXY(point))
+    closest_xy = closest_point.asPoint()
+
+    # Calculate vector from closest edge point to our point
+    dx = point.x() - closest_xy.x()
+    dy = point.y() - closest_xy.y()
+
+    # Project onto direction vector
+    direction_rad = math.radians(direction)
+    direction_x = math.cos(direction_rad)
+    direction_y = math.sin(direction_rad)
+
+    # Dot product gives signed distance
+    signed_distance = dx * direction_x + dy * direction_y
+
+    return signed_distance
+
+
+def perpendicular_direction(angle: float) -> float:
+    """
+    Get the perpendicular direction to a given angle.
+
+    Args:
+        angle (float): Angle in degrees
+
+    Returns:
+        float: Perpendicular angle (angle + 90°, normalized to 0-360)
+    """
+    perp = angle + 90.0
+    if perp >= 360:
+        perp -= 360
+    return perp
+
+
+def calculate_slope_height(base_height: float, distance: float, slope_percent: float,
+                          slope_direction: str = 'down') -> float:
+    """
+    Calculate height at a distance from base with given slope.
+
+    Args:
+        base_height (float): Height at base/connection edge (m ü.NN)
+        distance (float): Distance from base in slope direction (meters)
+        slope_percent (float): Slope in percent (e.g., 5.0 for 5%)
+        slope_direction (str): 'down' (default) or 'up'
+
+    Returns:
+        float: Height at the given distance (m ü.NN)
+    """
+    # Calculate height change
+    height_change = distance * (slope_percent / 100.0)
+
+    if slope_direction == 'down':
+        return base_height - height_change
+    else:  # 'up'
+        return base_height + height_change
+
+
+def identify_surface_at_point(point: QgsPointXY, surface_geometries: dict) -> str:
+    """
+    Identify which surface a point belongs to.
+
+    Args:
+        point (QgsPointXY): Point to check
+        surface_geometries (dict): Dictionary of {surface_name: QgsGeometry}
+
+    Returns:
+        str: Name of surface containing the point, or None
+    """
+    point_geom = QgsGeometry.fromPointXY(point)
+
+    for surface_name, geometry in surface_geometries.items():
+        if geometry.contains(point_geom):
+            return surface_name
+
+    return None
+
+
+def get_polygon_vertices(geometry: QgsGeometry) -> list[QgsPointXY]:
+    """
+    Extract vertices from a polygon geometry.
+
+    Args:
+        geometry (QgsGeometry): Polygon geometry
+
+    Returns:
+        list[QgsPointXY]: List of vertices
+    """
+    if geometry.isMultipart():
+        polygons = geometry.asMultiPolygon()
+        if polygons and polygons[0]:
+            return polygons[0][0]  # Exterior ring of first polygon
+        return []
+    else:
+        polygon = geometry.asPolygon()
+        if polygon and polygon[0]:
+            return polygon[0]  # Exterior ring
+        return []
+
+
+def calculate_terrain_slope(elevations: list[float], distances: list[float]) -> float:
+    """
+    Calculate average terrain slope from elevation profile.
+
+    Args:
+        elevations (list[float]): Elevation values along profile
+        distances (list[float]): Distance values along profile
+
+    Returns:
+        float: Average slope in percent
+    """
+    if len(elevations) < 2 or len(distances) < 2:
+        return 0.0
+
+    # Simple linear regression
+    n = len(elevations)
+    sum_x = sum(distances)
+    sum_y = sum(elevations)
+    sum_xy = sum(d * e for d, e in zip(distances, elevations))
+    sum_x2 = sum(d * d for d in distances)
+
+    # Slope = (n*sum_xy - sum_x*sum_y) / (n*sum_x2 - sum_x^2)
+    denominator = n * sum_x2 - sum_x * sum_x
+    if abs(denominator) < 1e-10:
+        return 0.0
+
+    slope_m_per_m = (n * sum_xy - sum_x * sum_y) / denominator
+
+    # Convert to percent
+    slope_percent = slope_m_per_m * 100.0
+
+    return slope_percent
