@@ -18,6 +18,7 @@ from qgis.core import QgsGeometry, QgsPointXY, QgsWkbTypes
 
 from .surface_types import MultiSurfaceProject, SurfaceType, SurfaceConfig
 from ..utils.logging_utils import get_plugin_logger
+from ..utils.geometry_utils import get_polygon_boundary
 
 
 class SurfaceValidator:
@@ -251,8 +252,11 @@ class SurfaceValidator:
             Total length of shared edges in meters
         """
         # Get boundaries
-        boundary1 = geom1.boundary()
-        boundary2 = geom2.boundary()
+        boundary1 = get_polygon_boundary(geom1)
+        boundary2 = get_polygon_boundary(geom2)
+
+        if boundary1 is None or boundary2 is None:
+            return 0.0
 
         # Find intersection of boundaries
         intersection = boundary1.intersection(boundary2)
@@ -295,8 +299,11 @@ class SurfaceValidator:
         geom2 = self._get_surface_geometry(surface2)
 
         # Get boundaries
-        boundary1 = geom1.boundary()
-        boundary2 = geom2.boundary()
+        boundary1 = get_polygon_boundary(geom1)
+        boundary2 = get_polygon_boundary(geom2)
+
+        if boundary1 is None or boundary2 is None:
+            return QgsGeometry()
 
         # Find intersection
         connection = boundary1.intersection(boundary2)

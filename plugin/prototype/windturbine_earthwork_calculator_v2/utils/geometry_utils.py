@@ -751,6 +751,40 @@ def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_perce
 # Multi-Surface Helper Functions
 # ==============================================================================
 
+def get_polygon_boundary(geom: QgsGeometry) -> QgsGeometry:
+    """
+    Extract the boundary (exterior ring) of a polygon geometry.
+
+    QgsGeometry does not have a boundary() method, so we need to extract
+    the exterior ring and convert it to a LineString geometry.
+
+    Args:
+        geom (QgsGeometry): Polygon geometry
+
+    Returns:
+        QgsGeometry: LineString geometry representing the polygon boundary
+    """
+    if geom.type() != QgsWkbTypes.PolygonGeometry:
+        return None
+
+    # Get the exterior ring
+    if geom.isMultipart():
+        polygons = geom.asMultiPolygon()
+        if not polygons or not polygons[0]:
+            return None
+        # Use first polygon's outer ring
+        exterior_ring = polygons[0][0]
+    else:
+        polygon = geom.asPolygon()
+        if not polygon or not polygon[0]:
+            return None
+        # Get outer ring (first element)
+        exterior_ring = polygon[0]
+
+    # Create line geometry from ring
+    return QgsGeometry.fromPolylineXY(exterior_ring)
+
+
 def find_connection_edge(polygon1: QgsGeometry, polygon2: QgsGeometry,
                         tolerance: float = 0.1) -> tuple[QgsGeometry, float]:
     """
@@ -770,8 +804,11 @@ def find_connection_edge(polygon1: QgsGeometry, polygon2: QgsGeometry,
             - total_length: Total length of shared edges in meters
     """
     # Get boundaries of both polygons
-    boundary1 = polygon1.boundary()
-    boundary2 = polygon2.boundary()
+    boundary1 = get_polygon_boundary(polygon1)
+    boundary2 = get_polygon_boundary(polygon2)
+
+    if boundary1 is None or boundary2 is None:
+        return QgsGeometry(), 0.0
 
     # Find intersection of boundaries
     connection = boundary1.intersection(boundary2)
