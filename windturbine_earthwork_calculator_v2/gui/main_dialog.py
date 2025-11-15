@@ -18,7 +18,7 @@ from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
     QWidget, QLabel, QLineEdit, QPushButton, QFileDialog,
     QDoubleSpinBox, QSpinBox, QGroupBox, QFormLayout,
-    QCheckBox, QMessageBox, QProgressBar, QTextEdit
+    QCheckBox, QMessageBox, QProgressBar, QTextEdit, QScrollArea
 )
 from qgis.PyQt.QtCore import Qt, pyqtSignal
 from qgis.PyQt.QtGui import QIcon
@@ -52,6 +52,9 @@ class MainDialog(QDialog):
         self._connect_signals()
         self._setup_validators()
 
+        # Initialize button visibility for first tab
+        self._on_tab_changed(0)
+
     def _init_ui(self):
         """Initialize user interface."""
         layout = QVBoxLayout()
@@ -84,15 +87,19 @@ class MainDialog(QDialog):
         self.status_text.setVisible(False)
         layout.addWidget(self.status_text)
 
-        # Buttons
+        # Buttons (dynamically shown based on current tab)
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
         self.btn_cancel = QPushButton("Abbrechen")
+        self.btn_next = QPushButton("Weiter →")
+        self.btn_next.setDefault(True)
         self.btn_start = QPushButton("Berechnung starten")
         self.btn_start.setDefault(True)
+        self.btn_start.setVisible(False)  # Only shown on last tab
 
         button_layout.addWidget(self.btn_cancel)
+        button_layout.addWidget(self.btn_next)
         button_layout.addWidget(self.btn_start)
 
         layout.addLayout(button_layout)
@@ -101,6 +108,12 @@ class MainDialog(QDialog):
 
     def _create_input_tab(self):
         """Create input tab with DXF file inputs and surface parameters."""
+        # Create scrollable container
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
         widget = QWidget()
         layout = QVBoxLayout()
 
@@ -295,10 +308,17 @@ class MainDialog(QDialog):
 
         layout.addStretch()
         widget.setLayout(layout)
-        return widget
+        scroll.setWidget(widget)
+        return scroll
 
     def _create_optimization_tab(self):
         """Create optimization tab."""
+        # Create scrollable container
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
         widget = QWidget()
         layout = QVBoxLayout()
 
@@ -334,12 +354,45 @@ class MainDialog(QDialog):
 
         layout.addStretch()
         widget.setLayout(layout)
-        return widget
+        scroll.setWidget(widget)
+        return scroll
 
     def _create_profiles_tab(self):
         """Create profiles tab."""
+        # Create scrollable container
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
         widget = QWidget()
         layout = QVBoxLayout()
+
+        # Bounding Box Configuration
+        group_bbox = QGroupBox("Bauplatz-Bereich (Bounding Box)")
+        form_bbox = QFormLayout()
+
+        info_bbox = QLabel(
+            "<i>Die Schnitte werden über den gesamten Bauplatz erstellt.<br>"
+            "Die Bounding Box umfasst alle Flächen und ist an der<br>"
+            "Hauptachse (längste Kante) der Kranfläche ausgerichtet.</i>"
+        )
+        info_bbox.setWordWrap(True)
+        info_bbox.setStyleSheet("color: gray; font-size: 10px;")
+        form_bbox.addRow("", info_bbox)
+
+        self.input_bbox_buffer = QDoubleSpinBox()
+        self.input_bbox_buffer.setRange(0.0, 50.0)
+        self.input_bbox_buffer.setValue(10.0)
+        self.input_bbox_buffer.setDecimals(1)
+        self.input_bbox_buffer.setSuffix(" %")
+        self.input_bbox_buffer.setToolTip(
+            "Zusätzlicher Puffer um alle Flächen herum als Prozent der Bauplatzgröße"
+        )
+        form_bbox.addRow("Buffer-Zone:", self.input_bbox_buffer)
+
+        group_bbox.setLayout(form_bbox)
+        layout.addWidget(group_bbox)
 
         # Cross-Section Profiles
         group_cross = QGroupBox("Querprofile")
@@ -355,13 +408,6 @@ class MainDialog(QDialog):
         self.input_cross_profile_spacing.setDecimals(1)
         self.input_cross_profile_spacing.setSuffix(" m")
         form_cross.addRow("Schnitt-Abstand:", self.input_cross_profile_spacing)
-
-        self.input_cross_profile_overhang = QDoubleSpinBox()
-        self.input_cross_profile_overhang.setRange(0.0, 50.0)
-        self.input_cross_profile_overhang.setValue(10.0)
-        self.input_cross_profile_overhang.setDecimals(1)
-        self.input_cross_profile_overhang.setSuffix(" %")
-        form_cross.addRow("Überhang:", self.input_cross_profile_overhang)
 
         group_cross.setLayout(form_cross)
         layout.addWidget(group_cross)
@@ -380,13 +426,6 @@ class MainDialog(QDialog):
         self.input_long_profile_spacing.setDecimals(1)
         self.input_long_profile_spacing.setSuffix(" m")
         form_long.addRow("Schnitt-Abstand:", self.input_long_profile_spacing)
-
-        self.input_long_profile_overhang = QDoubleSpinBox()
-        self.input_long_profile_overhang.setRange(0.0, 50.0)
-        self.input_long_profile_overhang.setValue(10.0)
-        self.input_long_profile_overhang.setDecimals(1)
-        self.input_long_profile_overhang.setSuffix(" %")
-        form_long.addRow("Überhang:", self.input_long_profile_overhang)
 
         group_long.setLayout(form_long)
         layout.addWidget(group_long)
@@ -407,10 +446,17 @@ class MainDialog(QDialog):
 
         layout.addStretch()
         widget.setLayout(layout)
-        return widget
+        scroll.setWidget(widget)
+        return scroll
 
     def _create_output_tab(self):
         """Create output tab."""
+        # Create scrollable container
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
         widget = QWidget()
         layout = QVBoxLayout()
 
@@ -456,12 +502,35 @@ class MainDialog(QDialog):
 
         layout.addStretch()
         widget.setLayout(layout)
-        return widget
+        scroll.setWidget(widget)
+        return scroll
+
+    def _on_tab_changed(self, index):
+        """Handle tab change - show/hide appropriate buttons."""
+        # Last tab (index 3) shows "Start" button, others show "Next" button
+        is_last_tab = (index == self.tabs.count() - 1)
+
+        self.btn_next.setVisible(not is_last_tab)
+        self.btn_start.setVisible(is_last_tab)
+
+        # Set appropriate button as default
+        if is_last_tab:
+            self.btn_start.setDefault(True)
+        else:
+            self.btn_next.setDefault(True)
+
+    def _on_next(self):
+        """Move to next tab."""
+        current = self.tabs.currentIndex()
+        if current < self.tabs.count() - 1:
+            self.tabs.setCurrentIndex(current + 1)
 
     def _connect_signals(self):
         """Connect button signals."""
         self.btn_start.clicked.connect(self._on_start)
+        self.btn_next.clicked.connect(self._on_next)
         self.btn_cancel.clicked.connect(self.reject)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
     def _setup_validators(self):
         """Setup value validators and constraints."""
@@ -588,12 +657,11 @@ class MainDialog(QDialog):
             'slope_angle': self.input_slope_angle.value(),
 
             # Profile parameters
+            'bbox_buffer': self.input_bbox_buffer.value(),
             'generate_cross_profiles': self.input_generate_cross_profiles.isChecked(),
             'cross_profile_spacing': self.input_cross_profile_spacing.value(),
-            'cross_profile_overhang': self.input_cross_profile_overhang.value(),
             'generate_long_profiles': self.input_generate_long_profiles.isChecked(),
             'long_profile_spacing': self.input_long_profile_spacing.value(),
-            'long_profile_overhang': self.input_long_profile_overhang.value(),
             'vertical_exaggeration': self.input_vertical_exaggeration.value(),
 
             # Output parameters

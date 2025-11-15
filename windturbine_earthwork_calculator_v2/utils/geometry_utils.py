@@ -353,6 +353,119 @@ def get_polygon_width_at_point(geometry, point, direction_angle):
     return 0.0
 
 
+def create_oriented_bounding_box(geometries, main_angle, buffer_percent=10.0):
+    """
+    Create an oriented bounding box around multiple geometries aligned with a main axis.
+
+    The bounding box is aligned with the main_angle (typically the longest edge of the
+    crane pad) and encompasses all provided geometries plus a buffer zone.
+
+    Args:
+        geometries (list): List of QgsGeometry objects to encompass
+        main_angle (float): Main orientation angle in degrees (0-180)
+        buffer_percent (float): Buffer as percentage of bounding box size (default: 10%)
+
+    Returns:
+        dict: Dictionary containing:
+            - 'bbox_polygon': QgsGeometry polygon of the oriented bounding box
+            - 'center': QgsPointXY center point
+            - 'width': Width perpendicular to main axis (in meters)
+            - 'length': Length along main axis (in meters)
+            - 'main_angle': Main orientation angle
+    """
+    if not geometries:
+        return None
+
+    # Combine all geometries to get overall extent
+    combined = QgsGeometry.unaryUnion(geometries)
+    centroid = get_centroid(combined)
+
+    # Convert angle to radians
+    main_rad = math.radians(main_angle)
+    main_axis_x = math.cos(main_rad)
+    main_axis_y = math.sin(main_rad)
+
+    # Perpendicular axis
+    perp_rad = math.radians(main_angle + 90.0)
+    perp_axis_x = math.cos(perp_rad)
+    perp_axis_y = math.sin(perp_rad)
+
+    # Collect all vertices from all geometries
+    all_vertices = []
+    for geom in geometries:
+        vertices = get_polygon_vertices(geom)
+        all_vertices.extend(vertices)
+
+    if not all_vertices:
+        return None
+
+    # Project all vertices onto main and perpendicular axes
+    main_projections = []
+    perp_projections = []
+
+    for v in all_vertices:
+        dx = v.x() - centroid.x()
+        dy = v.y() - centroid.y()
+
+        # Project onto main axis
+        main_proj = dx * main_axis_x + dy * main_axis_y
+        main_projections.append(main_proj)
+
+        # Project onto perpendicular axis
+        perp_proj = dx * perp_axis_x + dy * perp_axis_y
+        perp_projections.append(perp_proj)
+
+    # Get min/max projections (these define the oriented bounding box)
+    min_main = min(main_projections)
+    max_main = max(main_projections)
+    min_perp = min(perp_projections)
+    max_perp = max(perp_projections)
+
+    # Calculate dimensions
+    length_along_main = max_main - min_main
+    width_along_perp = max_perp - min_perp
+
+    # Apply buffer
+    buffer_length = length_along_main * (buffer_percent / 100.0)
+    buffer_width = width_along_perp * (buffer_percent / 100.0)
+
+    min_main -= buffer_length
+    max_main += buffer_length
+    min_perp -= buffer_width
+    max_perp += buffer_width
+
+    # Recalculate dimensions with buffer
+    length_with_buffer = max_main - min_main
+    width_with_buffer = max_perp - min_perp
+
+    # Create the four corners of the oriented bounding box
+    # Corner order: bottom-left, bottom-right, top-right, top-left (counter-clockwise)
+    corners = []
+    for main_offset, perp_offset in [(min_main, min_perp), (max_main, min_perp),
+                                      (max_main, max_perp), (min_main, max_perp)]:
+        x = centroid.x() + main_offset * main_axis_x + perp_offset * perp_axis_x
+        y = centroid.y() + main_offset * main_axis_y + perp_offset * perp_axis_y
+        corners.append(QgsPointXY(x, y))
+
+    # Close the polygon
+    corners.append(corners[0])
+
+    # Create polygon geometry
+    bbox_polygon = QgsGeometry.fromPolygonXY([corners])
+
+    return {
+        'bbox_polygon': bbox_polygon,
+        'center': centroid,
+        'width': width_with_buffer,
+        'length': length_with_buffer,
+        'main_angle': main_angle,
+        'min_main': min_main,
+        'max_main': max_main,
+        'min_perp': min_perp,
+        'max_perp': max_perp
+    }
+
+
 def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent=10.0):
     """
     Create perpendicular cross-section lines through a polygon.
@@ -547,6 +660,183 @@ def create_perpendicular_cross_sections(geometry, spacing=10.0, overhang_percent
         cross_sections.append(cross_section)
 
     return cross_sections
+
+
+def create_cross_sections_over_bbox(bbox_info, spacing=10.0):
+    """
+    Create perpendicular cross-section lines across an oriented bounding box.
+
+    Cross-sections are perpendicular to the main axis and extend across the
+    entire width of the bounding box.
+
+    Args:
+        bbox_info (dict): Bounding box info from create_oriented_bounding_box()
+        spacing (float): Distance between cross-sections in meters (default: 10m)
+
+    Returns:
+        list: List of dictionaries with:
+            - 'geometry': QgsGeometry line object
+            - 'type': Profile type identifier
+            - 'main_angle': Main orientation angle
+            - 'cross_angle': Cross-section angle (perpendicular to main)
+            - 'center_point': Center point of the cross-section
+            - 'length': Total length of the line
+    """
+    if not bbox_info:
+        return []
+
+    main_angle = bbox_info['main_angle']
+    center = bbox_info['center']
+    min_main = bbox_info['min_main']
+    max_main = bbox_info['max_main']
+    min_perp = bbox_info['min_perp']
+    max_perp = bbox_info['max_perp']
+    width = bbox_info['width']
+
+    # Cross-sections are perpendicular to main orientation
+    cross_angle = main_angle + 90.0
+    cross_rad = math.radians(cross_angle)
+
+    # Axes
+    main_rad = math.radians(main_angle)
+    main_axis_x = math.cos(main_rad)
+    main_axis_y = math.sin(main_rad)
+
+    perp_axis_x = math.cos(cross_rad)
+    perp_axis_y = math.sin(cross_rad)
+
+    # Calculate number of cross-sections along main axis
+    extent_along_main = max_main - min_main
+    num_sections = max(1, int(extent_along_main / spacing) + 1)
+
+    cross_sections = []
+
+    for i in range(num_sections):
+        # Position along main axis
+        t = min_main + i * spacing
+
+        # Don't exceed bbox
+        if t > max_main:
+            break
+
+        # Calculate center point of this cross-section
+        center_x = center.x() + t * main_axis_x
+        center_y = center.y() + t * main_axis_y
+        section_center = QgsPointXY(center_x, center_y)
+
+        # Create cross-section line spanning full width of bbox
+        x1 = center_x + min_perp * perp_axis_x
+        y1 = center_y + min_perp * perp_axis_y
+        x2 = center_x + max_perp * perp_axis_x
+        y2 = center_y + max_perp * perp_axis_y
+
+        line_geom = QgsGeometry.fromPolylineXY([
+            QgsPointXY(x1, y1),
+            QgsPointXY(x2, y2)
+        ])
+
+        cross_section = {
+            'geometry': line_geom,
+            'type': f'Querschnitt {i+1:02d}',
+            'main_angle': main_angle,
+            'cross_angle': cross_angle,
+            'center_point': section_center,
+            'length': width
+        }
+
+        cross_sections.append(cross_section)
+
+    return cross_sections
+
+
+def create_longitudinal_sections_over_bbox(bbox_info, spacing=10.0):
+    """
+    Create longitudinal section lines across an oriented bounding box.
+
+    Longitudinal sections are parallel to the main axis and extend across the
+    entire length of the bounding box.
+
+    Args:
+        bbox_info (dict): Bounding box info from create_oriented_bounding_box()
+        spacing (float): Distance between longitudinal sections in meters (default: 10m)
+
+    Returns:
+        list: List of dictionaries with:
+            - 'geometry': QgsGeometry line object
+            - 'type': Profile type identifier
+            - 'main_angle': Main orientation angle
+            - 'longitudinal_angle': Longitudinal section angle (parallel to main)
+            - 'center_point': Center point of the longitudinal section
+            - 'length': Total length of the line
+    """
+    if not bbox_info:
+        return []
+
+    main_angle = bbox_info['main_angle']
+    center = bbox_info['center']
+    min_main = bbox_info['min_main']
+    max_main = bbox_info['max_main']
+    min_perp = bbox_info['min_perp']
+    max_perp = bbox_info['max_perp']
+    length = bbox_info['length']
+
+    # Longitudinal sections are parallel to main orientation
+    longitudinal_angle = main_angle
+    longitudinal_rad = math.radians(longitudinal_angle)
+
+    # Perpendicular axis for spacing
+    perp_angle = main_angle + 90.0
+    perp_rad = math.radians(perp_angle)
+
+    # Axes
+    main_axis_x = math.cos(longitudinal_rad)
+    main_axis_y = math.sin(longitudinal_rad)
+
+    perp_axis_x = math.cos(perp_rad)
+    perp_axis_y = math.sin(perp_rad)
+
+    # Calculate number of longitudinal sections along perpendicular axis
+    extent_along_perp = max_perp - min_perp
+    num_sections = max(1, int(extent_along_perp / spacing) + 1)
+
+    longitudinal_sections = []
+
+    for i in range(num_sections):
+        # Position along perpendicular axis
+        t = min_perp + i * spacing
+
+        # Don't exceed bbox
+        if t > max_perp:
+            break
+
+        # Calculate center point of this longitudinal section
+        center_x = center.x() + t * perp_axis_x
+        center_y = center.y() + t * perp_axis_y
+        section_center = QgsPointXY(center_x, center_y)
+
+        # Create longitudinal section line spanning full length of bbox
+        x1 = center_x + min_main * main_axis_x
+        y1 = center_y + min_main * main_axis_y
+        x2 = center_x + max_main * main_axis_x
+        y2 = center_y + max_main * main_axis_y
+
+        line_geom = QgsGeometry.fromPolylineXY([
+            QgsPointXY(x1, y1),
+            QgsPointXY(x2, y2)
+        ])
+
+        longitudinal_section = {
+            'geometry': line_geom,
+            'type': f'Längsprofil {i+1:02d}',
+            'main_angle': main_angle,
+            'longitudinal_angle': longitudinal_angle,
+            'center_point': section_center,
+            'length': length
+        }
+
+        longitudinal_sections.append(longitudinal_section)
+
+    return longitudinal_sections
 
 
 def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_percent=10.0):
@@ -751,6 +1041,44 @@ def create_parallel_longitudinal_sections(geometry, spacing=10.0, overhang_perce
 # Multi-Surface Helper Functions
 # ==============================================================================
 
+def get_polygon_boundary(geom: QgsGeometry) -> QgsGeometry:
+    """
+    Extract the boundary (exterior ring) of a polygon geometry.
+
+    QgsGeometry does not have a boundary() method, so we need to extract
+    the exterior ring and convert it to a LineString geometry.
+
+    Args:
+        geom (QgsGeometry): Polygon geometry
+
+    Returns:
+        QgsGeometry: LineString geometry representing the polygon boundary,
+                     or None if geometry is invalid
+    """
+    if geom is None or geom.isEmpty():
+        return None
+
+    if geom.type() != QgsWkbTypes.PolygonGeometry:
+        return None
+
+    # Get the exterior ring
+    if geom.isMultipart():
+        polygons = geom.asMultiPolygon()
+        if not polygons or not polygons[0]:
+            return None
+        # Use first polygon's outer ring
+        exterior_ring = polygons[0][0]
+    else:
+        polygon = geom.asPolygon()
+        if not polygon or not polygon[0]:
+            return None
+        # Get outer ring (first element)
+        exterior_ring = polygon[0]
+
+    # Create line geometry from ring
+    return QgsGeometry.fromPolylineXY(exterior_ring)
+
+
 def find_connection_edge(polygon1: QgsGeometry, polygon2: QgsGeometry,
                         tolerance: float = 0.1) -> tuple[QgsGeometry, float]:
     """
@@ -770,8 +1098,11 @@ def find_connection_edge(polygon1: QgsGeometry, polygon2: QgsGeometry,
             - total_length: Total length of shared edges in meters
     """
     # Get boundaries of both polygons
-    boundary1 = polygon1.boundary()
-    boundary2 = polygon2.boundary()
+    boundary1 = get_polygon_boundary(polygon1)
+    boundary2 = get_polygon_boundary(polygon2)
+
+    if boundary1 is None or boundary2 is None:
+        return QgsGeometry(), 0.0
 
     # Find intersection of boundaries
     connection = boundary1.intersection(boundary2)

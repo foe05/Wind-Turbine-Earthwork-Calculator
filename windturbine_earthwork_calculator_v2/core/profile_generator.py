@@ -32,9 +32,13 @@ from qgis.core import (
 from ..utils.geometry_utils import (
     get_centroid,
     get_polygon_radius,
+    get_polygon_orientation,
     create_radial_lines,
     create_perpendicular_cross_sections,
-    create_parallel_longitudinal_sections
+    create_parallel_longitudinal_sections,
+    create_oriented_bounding_box,
+    create_cross_sections_over_bbox,
+    create_longitudinal_sections_over_bbox
 )
 from ..utils.logging_utils import get_plugin_logger
 
@@ -180,6 +184,102 @@ class ProfileGenerator:
         )
 
         self.logger.info(f"Generated {len(profiles)} longitudinal profiles")
+
+        return profiles
+
+    def generate_cross_sections_bbox(self, all_geometries: list, buffer_percent: float = 10.0,
+                                      spacing: float = 10.0) -> List[Dict]:
+        """
+        Generate cross-section profiles over bounding box encompassing all surfaces.
+
+        Creates a bounding box aligned with the main orientation (longest edge) of the
+        crane pad, encompassing all provided geometries with a buffer, then generates
+        cross-sections across the entire bounding box.
+
+        Args:
+            all_geometries (list): List of QgsGeometry objects (all surface polygons)
+            buffer_percent (float): Buffer as percentage of bbox size (default: 10%)
+            spacing (float): Distance between cross-sections in meters (default: 10m)
+
+        Returns:
+            List[Dict]: List of profile dictionaries with 'geometry', 'type', etc.
+        """
+        self.logger.info(
+            f"Generating cross-sections over bounding box "
+            f"(buffer: {buffer_percent:.0f}%, spacing: {spacing:.1f}m)"
+        )
+
+        # Get main angle from crane pad (self.polygon)
+        main_angle = get_polygon_orientation(self.polygon)
+        self.logger.info(f"Main orientation angle: {main_angle:.1f}°")
+
+        # Create oriented bounding box
+        bbox_info = create_oriented_bounding_box(
+            all_geometries,
+            main_angle,
+            buffer_percent=buffer_percent
+        )
+
+        if not bbox_info:
+            self.logger.warning("Failed to create bounding box")
+            return []
+
+        self.logger.info(
+            f"Bounding box: {bbox_info['length']:.1f}m × {bbox_info['width']:.1f}m"
+        )
+
+        # Create cross-sections
+        profiles = create_cross_sections_over_bbox(bbox_info, spacing=spacing)
+
+        self.logger.info(f"Generated {len(profiles)} cross-section profiles over bbox")
+
+        return profiles
+
+    def generate_longitudinal_sections_bbox(self, all_geometries: list, buffer_percent: float = 10.0,
+                                            spacing: float = 10.0) -> List[Dict]:
+        """
+        Generate longitudinal profiles over bounding box encompassing all surfaces.
+
+        Creates a bounding box aligned with the main orientation (longest edge) of the
+        crane pad, encompassing all provided geometries with a buffer, then generates
+        longitudinal sections across the entire bounding box.
+
+        Args:
+            all_geometries (list): List of QgsGeometry objects (all surface polygons)
+            buffer_percent (float): Buffer as percentage of bbox size (default: 10%)
+            spacing (float): Distance between longitudinal sections in meters (default: 10m)
+
+        Returns:
+            List[Dict]: List of profile dictionaries with 'geometry', 'type', etc.
+        """
+        self.logger.info(
+            f"Generating longitudinal sections over bounding box "
+            f"(buffer: {buffer_percent:.0f}%, spacing: {spacing:.1f}m)"
+        )
+
+        # Get main angle from crane pad (self.polygon)
+        main_angle = get_polygon_orientation(self.polygon)
+        self.logger.info(f"Main orientation angle: {main_angle:.1f}°")
+
+        # Create oriented bounding box
+        bbox_info = create_oriented_bounding_box(
+            all_geometries,
+            main_angle,
+            buffer_percent=buffer_percent
+        )
+
+        if not bbox_info:
+            self.logger.warning("Failed to create bounding box")
+            return []
+
+        self.logger.info(
+            f"Bounding box: {bbox_info['length']:.1f}m × {bbox_info['width']:.1f}m"
+        )
+
+        # Create longitudinal sections
+        profiles = create_longitudinal_sections_over_bbox(bbox_info, spacing=spacing)
+
+        self.logger.info(f"Generated {len(profiles)} longitudinal profiles over bbox")
 
         return profiles
 
@@ -357,6 +457,111 @@ class ProfileGenerator:
         except Exception as e:
             self.logger.error(f"Failed to create profile plot: {e}")
             raise
+
+    def visualize_multiple_profiles(self, profiles: List[Dict], output_dir: str,
+                                    vertical_exaggeration: float = 2.0,
+                                    volume_info: Optional[Dict] = None,
+                                    feedback: Optional[QgsProcessingFeedback] = None) -> List[Dict]:
+        """
+        Visualize multiple profile lines with unified scale.
+
+        This method takes pre-generated profile line geometries and creates
+        matplotlib plots with a unified scale across all profiles.
+
+        Args:
+            profiles (List[Dict]): List of profile dictionaries with 'geometry' key
+            output_dir (str): Directory to save PNG files
+            vertical_exaggeration (float): Vertical exaggeration for plots
+            volume_info (Dict): Volume information for annotations
+            feedback (QgsProcessingFeedback): Feedback object
+
+        Returns:
+            List[Dict]: List of profile data with paths to PNG files
+        """
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        self.logger.info(f"Visualizing {len(profiles)} profiles in {output_dir}")
+
+        if feedback:
+            feedback.pushInfo(f"Visualizing {len(profiles)} profiles...")
+
+        # First pass: Extract all profile data to determine global scale
+        all_profile_data = []
+        max_line_length = 0
+        min_elevation = float('inf')
+        max_elevation = float('-inf')
+
+        for profile in profiles:
+            try:
+                profile_data = self.extract_profile_data(profile['geometry'])
+                all_profile_data.append((profile, profile_data))
+
+                # Track maximum line length
+                line_length = profile.get('length', profile['geometry'].length())
+                max_line_length = max(max_line_length, line_length)
+
+                # Track elevation range
+                min_elevation = min(min_elevation, np.min(profile_data['existing_z']))
+                max_elevation = max(max_elevation, np.max(profile_data['existing_z']))
+                min_elevation = min(min_elevation, np.min(profile_data['planned_z']))
+                max_elevation = max(max_elevation, np.max(profile_data['planned_z']))
+
+            except Exception as e:
+                self.logger.error(f"Failed to extract data for profile {profile['type']}: {e}")
+
+        # Add padding to elevation range (5%)
+        elevation_range = max_elevation - min_elevation
+        elevation_padding = elevation_range * 0.05
+        global_ylim = (min_elevation - elevation_padding, max_elevation + elevation_padding)
+
+        if feedback:
+            feedback.pushInfo(f"  Global scale - Length: {max_line_length:.1f}m, Elevation: {global_ylim[0]:.1f} - {global_ylim[1]:.1f} m")
+
+        # Second pass: Create plots with unified scale
+        results = []
+
+        for profile, profile_data in all_profile_data:
+            if feedback and feedback.isCanceled():
+                break
+
+            try:
+                # Create plot with unified scale
+                png_filename = f"{profile['type']}.png"
+                png_path = output_path / png_filename
+
+                line_length = profile.get('length', profile['geometry'].length())
+
+                self.plot_profile(
+                    profile_data,
+                    str(png_path),
+                    profile_type=profile['type'],
+                    vertical_exaggeration=vertical_exaggeration,
+                    volume_info=volume_info,
+                    line_length=line_length,
+                    xlim=(0, max_line_length),
+                    ylim=global_ylim
+                )
+
+                # Add to results
+                profile['data'] = profile_data
+                profile['png_path'] = str(png_path)
+                results.append(profile)
+
+                if feedback:
+                    feedback.pushInfo(f"  ✓ {png_filename} (length: {line_length:.1f}m)")
+
+            except Exception as e:
+                self.logger.error(f"Failed to generate profile {profile['type']}: {e}")
+                if feedback:
+                    feedback.reportError(
+                        f"Error generating profile {profile['type']}: {e}",
+                        fatalError=False
+                    )
+
+        self.logger.info(f"Generated {len(results)}/{len(profiles)} profile visualizations")
+
+        return results
 
     def generate_all_profiles(self, output_dir: str,
                              spacing: float = 10.0,

@@ -302,40 +302,62 @@ class WorkflowWorker(QObject):
         self.logger.info(f"Generating profiles in: {profiles_dir}")
 
         try:
-            # For now, we use the existing ProfileGenerator with crane pad
-            # In a full implementation, this would need to be extended for multi-surface
+            # Create ProfileGenerator with crane pad as reference
             profile_gen = ProfileGenerator(
                 dem_layer,
                 project.crane_pad.geometry,
                 optimal_crane_height
             )
 
+            # Collect all surface geometries for bounding box
+            all_geometries = [
+                project.crane_pad.geometry,
+                project.foundation.geometry,
+                project.boom.geometry,
+                project.rotor_storage.geometry
+            ]
+
+            # Get buffer parameter
+            bbox_buffer = self.params.get('bbox_buffer', 10.0)
+
             all_profiles = []
 
-            # Generate cross-section profiles
+            # Generate cross-section profiles over bounding box
             if self.params.get('generate_cross_profiles', True):
-                self.logger.info("Generating cross-section profiles...")
+                self.logger.info("Generating cross-section profiles over bounding box...")
                 self.progress_updated.emit(74, "📊 Querprofile werden erstellt...")
 
-                cross_profiles = profile_gen.generate_all_profiles(
+                cross_profiles_raw = profile_gen.generate_cross_sections_bbox(
+                    all_geometries=all_geometries,
+                    buffer_percent=bbox_buffer,
+                    spacing=self.params.get('cross_profile_spacing', 10.0)
+                )
+
+                # Generate visualizations for each profile
+                cross_profiles = profile_gen.visualize_multiple_profiles(
+                    cross_profiles_raw,
                     output_dir=str(profiles_dir),
-                    spacing=self.params.get('cross_profile_spacing', 10.0),
-                    overhang_percent=self.params.get('cross_profile_overhang', 10.0),
                     vertical_exaggeration=self.params['vertical_exaggeration'],
                     volume_info=results.to_dict()
                 )
                 all_profiles.extend(cross_profiles)
                 self.logger.info(f"Generated {len(cross_profiles)} cross-section profiles")
 
-            # Generate longitudinal profiles
+            # Generate longitudinal profiles over bounding box
             if self.params.get('generate_long_profiles', True):
-                self.logger.info("Generating longitudinal profiles...")
+                self.logger.info("Generating longitudinal profiles over bounding box...")
                 self.progress_updated.emit(78, "📊 Längsprofile werden erstellt...")
 
-                long_profiles = profile_gen.generate_all_longitudinal_profiles(
+                long_profiles_raw = profile_gen.generate_longitudinal_sections_bbox(
+                    all_geometries=all_geometries,
+                    buffer_percent=bbox_buffer,
+                    spacing=self.params.get('long_profile_spacing', 10.0)
+                )
+
+                # Generate visualizations for each profile
+                long_profiles = profile_gen.visualize_multiple_profiles(
+                    long_profiles_raw,
                     output_dir=str(profiles_dir),
-                    spacing=self.params.get('long_profile_spacing', 10.0),
-                    overhang_percent=self.params.get('long_profile_overhang', 10.0),
                     vertical_exaggeration=self.params['vertical_exaggeration'],
                     volume_info=results.to_dict()
                 )

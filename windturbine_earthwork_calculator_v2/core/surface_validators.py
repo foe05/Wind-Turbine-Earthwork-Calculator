@@ -18,6 +18,7 @@ from qgis.core import QgsGeometry, QgsPointXY, QgsWkbTypes
 
 from .surface_types import MultiSurfaceProject, SurfaceType, SurfaceConfig
 from ..utils.logging_utils import get_plugin_logger
+from ..utils.geometry_utils import get_polygon_boundary
 
 
 class SurfaceValidator:
@@ -77,10 +78,10 @@ class SurfaceValidator:
 
     def validate_foundation_in_crane_pad(self, tolerance: float = 0.5) -> Tuple[bool, str]:
         """
-        Validate that foundation is within crane pad.
+        Validate that foundation touches or is within crane pad.
 
         Args:
-            tolerance: Tolerance in meters for containment check
+            tolerance: Tolerance in meters for touch/containment check
 
         Returns:
             Tuple of (is_valid, error_message)
@@ -88,60 +89,62 @@ class SurfaceValidator:
         crane_geom = self.project.crane_pad.geometry
         foundation_geom = self.project.foundation.geometry
 
-        # Check if foundation is within crane pad (with small buffer for tolerance)
-        crane_buffered = crane_geom.buffer(tolerance, 8)
+        # Check if foundation touches or intersects crane pad
+        if not crane_geom.touches(foundation_geom) and not crane_geom.intersects(foundation_geom):
+            return False, "Fundamentfläche muss die Kranstellfläche berühren oder darin liegen"
 
-        if not crane_buffered.contains(foundation_geom):
-            # Check if at least mostly contained
-            intersection = crane_geom.intersection(foundation_geom)
-            overlap_ratio = intersection.area() / foundation_geom.area()
-
-            if overlap_ratio < 0.95:  # At least 95% overlap required
-                return False, (
-                    f"Fundamentfläche muss innerhalb der Kranstellfläche liegen. "
-                    f"Nur {overlap_ratio*100:.1f}% Überlappung gefunden."
-                )
-
-        self.logger.info("✓ Foundation is properly contained within crane pad")
+        self.logger.info("✓ Foundation touches or is within crane pad")
         return True, ""
 
-    def validate_boom_touches_crane_pad(self, min_edge_length: float = 3.0) -> Tuple[bool, str]:
+    def validate_boom_touches_crane_pad(self, max_distance: float = 5.0) -> Tuple[bool, str]:
         """
-        Validate that boom surface touches crane pad with sufficient edge length.
+        Validate that boom surface is near crane pad and identify connection edge.
+
+        The boom surface does not need to directly touch the crane pad due to
+        DXF digitization inaccuracies. Instead, we find the edge of the boom
+        that is closest to the foundation (which is on/in the crane pad).
 
         Args:
-            min_edge_length: Minimum required shared edge length in meters
+            max_distance: Maximum allowed distance between boom and crane pad (meters)
 
         Returns:
             Tuple of (is_valid, error_message)
         """
         crane_geom = self.project.crane_pad.geometry
         boom_geom = self.project.boom.geometry
+        foundation_geom = self.project.foundation.geometry
 
-        # Check if they touch or intersect
-        if not crane_geom.touches(boom_geom) and not crane_geom.intersects(boom_geom):
-            return False, "Auslegerfläche muss die Kranstellfläche berühren"
+        # Find the edge of boom closest to foundation
+        connection_edge, edge_length = self._find_boom_connection_edge(
+            boom_geom, foundation_geom, crane_geom
+        )
 
-        # Find shared edge length
-        shared_edge_length = self._calculate_shared_edge_length(crane_geom, boom_geom)
+        if connection_edge is None or edge_length == 0:
+            return False, "Konnte keine Verbindungskante der Auslegerfläche zur Kranstellfläche finden"
 
-        if shared_edge_length < min_edge_length:
+        # Check distance between boom and crane pad
+        distance = crane_geom.distance(boom_geom)
+
+        if distance > max_distance:
             return False, (
-                f"Auslegerfläche hat zu kurze Verbindung zur Kranstellfläche. "
-                f"Gefunden: {shared_edge_length:.1f}m, benötigt: {min_edge_length:.1f}m"
+                f"Auslegerfläche ist zu weit von der Kranstellfläche entfernt. "
+                f"Abstand: {distance:.2f}m, Maximum: {max_distance:.1f}m"
             )
 
         self.logger.info(
-            f"✓ Boom surface touches crane pad with {shared_edge_length:.1f}m shared edge"
+            f"✓ Boom connection edge identified: {edge_length:.2f}m length, "
+            f"{distance:.2f}m distance to crane pad"
         )
         return True, ""
 
-    def validate_rotor_touches_crane_pad(self, min_edge_length: float = 2.0) -> Tuple[bool, str]:
+    def validate_rotor_touches_crane_pad(self, max_distance: float = 3.0) -> Tuple[bool, str]:
         """
-        Validate that rotor storage touches crane pad with sufficient edge length.
+        Validate that rotor storage is near crane pad.
+
+        A small gap between rotor storage and crane pad is allowed.
 
         Args:
-            min_edge_length: Minimum required shared edge length in meters
+            max_distance: Maximum allowed distance between rotor storage and crane pad (meters)
 
         Returns:
             Tuple of (is_valid, error_message)
@@ -149,21 +152,17 @@ class SurfaceValidator:
         crane_geom = self.project.crane_pad.geometry
         rotor_geom = self.project.rotor_storage.geometry
 
-        # Check if they touch or intersect
-        if not crane_geom.touches(rotor_geom) and not crane_geom.intersects(rotor_geom):
-            return False, "Blattlagerfläche muss die Kranstellfläche berühren"
+        # Calculate distance between rotor storage and crane pad
+        distance = crane_geom.distance(rotor_geom)
 
-        # Find shared edge length
-        shared_edge_length = self._calculate_shared_edge_length(crane_geom, rotor_geom)
-
-        if shared_edge_length < min_edge_length:
+        if distance > max_distance:
             return False, (
-                f"Blattlagerfläche hat zu kurze Verbindung zur Kranstellfläche. "
-                f"Gefunden: {shared_edge_length:.1f}m, benötigt: {min_edge_length:.1f}m"
+                f"Blattlagerfläche ist zu weit von der Kranstellfläche entfernt. "
+                f"Abstand: {distance:.2f}m, Maximum: {max_distance:.1f}m"
             )
 
         self.logger.info(
-            f"✓ Rotor storage touches crane pad with {shared_edge_length:.1f}m shared edge"
+            f"✓ Rotor storage is near crane pad (distance: {distance:.2f}m)"
         )
         return True, ""
 
@@ -206,10 +205,10 @@ class SurfaceValidator:
 
         # Define reasonable size ranges (m²)
         size_limits = {
-            SurfaceType.CRANE_PAD: (100, 2000),      # 10×10m to ~45×45m
-            SurfaceType.FOUNDATION: (50, 500),       # Ø8m to Ø25m
-            SurfaceType.BOOM: (50, 1000),            # Various sizes
-            SurfaceType.ROTOR_STORAGE: (50, 500),    # Various sizes
+            SurfaceType.CRANE_PAD: (100, 20000),     # 10×10m to ~140×140m
+            SurfaceType.FOUNDATION: (50, 5000),      # Ø8m to Ø80m
+            SurfaceType.BOOM: (50, 10000),           # Various sizes up to 100×100m
+            SurfaceType.ROTOR_STORAGE: (50, 5000),   # Various sizes up to ~70×70m
         }
 
         for surface_name in ['crane_pad', 'foundation', 'boom', 'rotor_storage']:
@@ -237,6 +236,81 @@ class SurfaceValidator:
 
         return True, ""
 
+    def _find_boom_connection_edge(self, boom_geom: QgsGeometry,
+                                    foundation_geom: QgsGeometry,
+                                    crane_geom: QgsGeometry) -> Tuple[QgsGeometry, float]:
+        """
+        Find the edge of the boom surface that is closest to the foundation.
+
+        This edge will be used as the connection edge for height calculations,
+        even if the boom doesn't directly touch the crane pad.
+
+        Args:
+            boom_geom: Boom surface geometry
+            foundation_geom: Foundation geometry
+            crane_geom: Crane pad geometry
+
+        Returns:
+            Tuple of (edge_geometry, edge_length)
+                - edge_geometry: QgsGeometry of the connection edge (LineString)
+                - edge_length: Length of the edge in meters
+        """
+        # Get boom boundary
+        boom_boundary = get_polygon_boundary(boom_geom)
+        if boom_boundary is None:
+            return None, 0.0
+
+        # Extract all edges of the boom polygon
+        if boom_geom.isMultipart():
+            polygons = boom_geom.asMultiPolygon()
+            if not polygons or not polygons[0]:
+                return None, 0.0
+            vertices = polygons[0][0]  # Exterior ring
+        else:
+            polygon = boom_geom.asPolygon()
+            if not polygon or not polygon[0]:
+                return None, 0.0
+            vertices = polygon[0]  # Exterior ring
+
+        # Get foundation centroid for distance calculation
+        foundation_centroid = foundation_geom.centroid().asPoint()
+
+        # Find the edge closest to foundation
+        min_distance = float('inf')
+        closest_edge = None
+        closest_edge_length = 0
+
+        for i in range(len(vertices) - 1):
+            p1 = vertices[i]
+            p2 = vertices[i + 1]
+
+            # Create edge geometry
+            edge = QgsGeometry.fromPolylineXY([p1, p2])
+            edge_length = edge.length()
+
+            # Calculate distance from edge midpoint to foundation centroid
+            edge_midpoint = edge.centroid().asPoint()
+            distance = math.sqrt(
+                (edge_midpoint.x() - foundation_centroid.x())**2 +
+                (edge_midpoint.y() - foundation_centroid.y())**2
+            )
+
+            # Update if this edge is closer
+            if distance < min_distance:
+                min_distance = distance
+                closest_edge = edge
+                closest_edge_length = edge_length
+
+        if closest_edge is None:
+            return None, 0.0
+
+        self.logger.debug(
+            f"  Found boom connection edge: {closest_edge_length:.2f}m length, "
+            f"{min_distance:.2f}m from foundation centroid"
+        )
+
+        return closest_edge, closest_edge_length
+
     def _calculate_shared_edge_length(self, geom1: QgsGeometry, geom2: QgsGeometry,
                                      tolerance: float = 0.1) -> float:
         """
@@ -251,8 +325,11 @@ class SurfaceValidator:
             Total length of shared edges in meters
         """
         # Get boundaries
-        boundary1 = geom1.boundary()
-        boundary2 = geom2.boundary()
+        boundary1 = get_polygon_boundary(geom1)
+        boundary2 = get_polygon_boundary(geom2)
+
+        if boundary1 is None or boundary2 is None:
+            return 0.0
 
         # Find intersection of boundaries
         intersection = boundary1.intersection(boundary2)
@@ -295,8 +372,11 @@ class SurfaceValidator:
         geom2 = self._get_surface_geometry(surface2)
 
         # Get boundaries
-        boundary1 = geom1.boundary()
-        boundary2 = geom2.boundary()
+        boundary1 = get_polygon_boundary(geom1)
+        boundary2 = get_polygon_boundary(geom2)
+
+        if boundary1 is None or boundary2 is None:
+            return QgsGeometry()
 
         # Find intersection
         connection = boundary1.intersection(boundary2)
