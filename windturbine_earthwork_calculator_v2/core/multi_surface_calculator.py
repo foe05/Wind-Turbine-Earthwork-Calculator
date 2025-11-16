@@ -136,6 +136,12 @@ def _calculate_single_height_scenario(height: float, dem_path: str, project_dict
         if not dem_layer.isValid():
             raise RuntimeError(f"Could not load DEM: {dem_path}")
 
+        # Verify geometries are valid
+        if crane_config.geometry.isEmpty() or not crane_config.geometry.isGeosValid():
+            raise RuntimeError(f"Invalid crane geometry after WKT reconstruction")
+        if foundation_config.geometry.isEmpty() or not foundation_config.geometry.isGeosValid():
+            raise RuntimeError(f"Invalid foundation geometry after WKT reconstruction")
+
         # Create calculator and run single scenario
         calculator = MultiSurfaceCalculator(dem_layer, project)
 
