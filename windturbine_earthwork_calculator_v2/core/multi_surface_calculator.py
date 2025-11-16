@@ -70,77 +70,86 @@ def _calculate_single_height_scenario(height: float, dem_path: str, project_dict
     Returns:
         Tuple of (height, result_dict)
     """
-    # Import inside function to avoid pickling issues
-    from qgis.core import QgsRasterLayer, QgsGeometry
-    from .surface_types import MultiSurfaceProject, SurfaceConfig, SurfaceType, HeightMode
+    import traceback
 
-    # Reconstruct project from dict
-    crane_config = SurfaceConfig(
-        surface_type=SurfaceType.CRANE_PAD,
-        geometry=QgsGeometry.fromWkt(project_dict['crane_wkt']),
-        height_mode=HeightMode.OPTIMIZED,
-        metadata=project_dict.get('crane_metadata', {})
-    )
+    try:
+        # Import inside function to avoid pickling issues
+        from qgis.core import QgsRasterLayer, QgsGeometry
+        from .surface_types import MultiSurfaceProject, SurfaceConfig, SurfaceType, HeightMode
 
-    foundation_config = SurfaceConfig(
-        surface_type=SurfaceType.FOUNDATION,
-        geometry=QgsGeometry.fromWkt(project_dict['foundation_wkt']),
-        height_mode=HeightMode.FIXED,
-        height_value=project_dict['fok'],
-        metadata=project_dict.get('foundation_metadata', {})
-    )
+        # Reconstruct project from dict
+        crane_config = SurfaceConfig(
+            surface_type=SurfaceType.CRANE_PAD,
+            geometry=QgsGeometry.fromWkt(project_dict['crane_wkt']),
+            height_mode=HeightMode.OPTIMIZED,
+            metadata=project_dict.get('crane_metadata', {})
+        )
 
-    boom_config = SurfaceConfig(
-        surface_type=SurfaceType.BOOM,
-        geometry=QgsGeometry.fromWkt(project_dict['boom_wkt']),
-        height_mode=HeightMode.SLOPED,
-        slope_longitudinal=project_dict['boom_slope'],
-        auto_slope=project_dict['boom_auto_slope'],
-        slope_min=project_dict.get('boom_slope_min', 2.0),
-        slope_max=project_dict.get('boom_slope_max', 8.0),
-        metadata=project_dict.get('boom_metadata', {})
-    )
+        foundation_config = SurfaceConfig(
+            surface_type=SurfaceType.FOUNDATION,
+            geometry=QgsGeometry.fromWkt(project_dict['foundation_wkt']),
+            height_mode=HeightMode.FIXED,
+            height_value=project_dict['fok'],
+            metadata=project_dict.get('foundation_metadata', {})
+        )
 
-    rotor_config = SurfaceConfig(
-        surface_type=SurfaceType.ROTOR_STORAGE,
-        geometry=QgsGeometry.fromWkt(project_dict['rotor_wkt']),
-        height_mode=HeightMode.RELATIVE,
-        height_reference='crane',
-        metadata=project_dict.get('rotor_metadata', {})
-    )
+        boom_config = SurfaceConfig(
+            surface_type=SurfaceType.BOOM,
+            geometry=QgsGeometry.fromWkt(project_dict['boom_wkt']),
+            height_mode=HeightMode.SLOPED,
+            slope_longitudinal=project_dict['boom_slope'],
+            auto_slope=project_dict['boom_auto_slope'],
+            slope_min=project_dict.get('boom_slope_min', 2.0),
+            slope_max=project_dict.get('boom_slope_max', 8.0),
+            metadata=project_dict.get('boom_metadata', {})
+        )
 
-    project = MultiSurfaceProject(
-        crane_pad=crane_config,
-        foundation=foundation_config,
-        boom=boom_config,
-        rotor_storage=rotor_config,
-        fok=project_dict['fok'],
-        foundation_depth=project_dict['foundation_depth'],
-        gravel_thickness=project_dict['gravel_thickness'],
-        rotor_height_offset=project_dict['rotor_height_offset'],
-        slope_angle=project_dict['slope_angle'],
-        search_range_below_fok=0,
-        search_range_above_fok=0,
-        search_step=0.1
-    )
+        rotor_config = SurfaceConfig(
+            surface_type=SurfaceType.ROTOR_STORAGE,
+            geometry=QgsGeometry.fromWkt(project_dict['rotor_wkt']),
+            height_mode=HeightMode.RELATIVE,
+            height_reference='crane',
+            metadata=project_dict.get('rotor_metadata', {})
+        )
 
-    # Load DEM
-    dem_layer = QgsRasterLayer(dem_path, "DEM")
-    if not dem_layer.isValid():
-        raise RuntimeError(f"Could not load DEM: {dem_path}")
+        project = MultiSurfaceProject(
+            crane_pad=crane_config,
+            foundation=foundation_config,
+            boom=boom_config,
+            rotor_storage=rotor_config,
+            fok=project_dict['fok'],
+            foundation_depth=project_dict['foundation_depth'],
+            gravel_thickness=project_dict['gravel_thickness'],
+            rotor_height_offset=project_dict['rotor_height_offset'],
+            slope_angle=project_dict['slope_angle'],
+            search_range_below_fok=0,
+            search_range_above_fok=0,
+            search_step=0.1
+        )
 
-    # Create calculator and run single scenario
-    calculator = MultiSurfaceCalculator(dem_layer, project)
+        # Load DEM
+        dem_layer = QgsRasterLayer(dem_path, "DEM")
+        if not dem_layer.isValid():
+            raise RuntimeError(f"Could not load DEM: {dem_path}")
 
-    # Override use_vectorized setting
-    calculator._use_vectorized = use_vectorized
+        # Create calculator and run single scenario
+        calculator = MultiSurfaceCalculator(dem_layer, project)
 
-    result = calculator.calculate_scenario(height, feedback=None)
+        # Override use_vectorized setting
+        calculator._use_vectorized = use_vectorized
 
-    # Convert result to dict for serialization
-    result_dict = result.to_dict()
+        result = calculator.calculate_scenario(height, feedback=None)
 
-    return (height, result_dict)
+        # Convert result to dict for serialization
+        result_dict = result.to_dict()
+
+        return (height, result_dict)
+
+    except Exception as e:
+        # Log detailed error information
+        error_msg = f"Worker error at height {height:.2f}m: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg, flush=True)  # Print to stderr for debugging
+        raise RuntimeError(error_msg) from e
 
 
 class MultiSurfaceCalculator:
@@ -937,7 +946,21 @@ class MultiSurfaceCalculator:
         # Determine if we should use parallel processing
         if use_parallel and num_scenarios >= 10:
             self.logger.info(f"Using parallel optimization for {num_scenarios} scenarios")
-            return self._find_optimum_parallel(heights, feedback, max_workers)
+            try:
+                return self._find_optimum_parallel(heights, feedback, max_workers)
+            except ValueError as e:
+                # If all parallel scenarios failed, fall back to sequential
+                if "No valid scenarios found" in str(e):
+                    self.logger.warning(
+                        "Parallel optimization failed completely, falling back to sequential processing"
+                    )
+                    if feedback:
+                        feedback.pushInfo(
+                            "⚠ Parallel processing failed, retrying with sequential processing..."
+                        )
+                    return self._find_optimum_sequential(heights, feedback)
+                else:
+                    raise
         else:
             self.logger.info(f"Using sequential optimization for {num_scenarios} scenarios")
             return self._find_optimum_sequential(heights, feedback)
@@ -1056,6 +1079,10 @@ class MultiSurfaceCalculator:
         best_result = None
 
         completed = 0
+        successful = 0
+        failed = 0
+        failed_heights = []
+        error_messages = []
 
         # Use ProcessPoolExecutor for CPU-bound calculations
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -1090,6 +1117,7 @@ class MultiSurfaceCalculator:
                     result = MultiSurfaceCalculationResult.from_dict(result_dict)
 
                     total_volume = result.total_volume_moved
+                    successful += 1
 
                     if total_volume < best_volume:
                         best_volume = total_volume
@@ -1110,15 +1138,49 @@ class MultiSurfaceCalculator:
                         )
 
                 except Exception as e:
+                    failed += 1
+                    failed_heights.append(height)
+                    error_msg = str(e)
+                    error_messages.append(f"{height:.2f}m: {error_msg}")
+
                     self.logger.error(f"Error calculating scenario h={height:.2f}m: {e}")
                     if feedback:
                         feedback.reportError(
-                            f"Error at height {height:.2f}m: {e}",
+                            f"Error at height {height:.2f}m: {error_msg}",
                             fatalError=False
                         )
 
+        # Log summary statistics
+        self.logger.info(
+            f"Parallel optimization completed: {successful} successful, {failed} failed "
+            f"out of {num_scenarios} scenarios"
+        )
+
+        if failed > 0:
+            self.logger.warning(f"Failed heights: {failed_heights}")
+            self.logger.warning(f"Error details:\n" + "\n".join(error_messages[:5]))  # Log first 5 errors
+
         if best_result is None:
-            raise ValueError("No valid scenarios found during optimization")
+            error_summary = (
+                f"No valid scenarios found during optimization. "
+                f"All {num_scenarios} scenarios failed.\n"
+                f"Sample errors:\n" + "\n".join(error_messages[:3])
+            )
+            self.logger.error(error_summary)
+
+            # Try fallback to sequential processing with first height
+            if len(heights) > 0:
+                self.logger.info("Attempting fallback to sequential processing for debugging...")
+                try:
+                    test_result = self.calculate_scenario(float(heights[0]), feedback)
+                    self.logger.info(f"Sequential calculation succeeded for h={heights[0]:.2f}m")
+                    self.logger.info("Issue appears to be with parallel processing, not calculations")
+                except Exception as seq_error:
+                    self.logger.error(f"Sequential calculation also failed: {seq_error}")
+                    import traceback
+                    self.logger.error(traceback.format_exc())
+
+            raise ValueError(error_summary)
 
         self.logger.info(
             f"Parallel optimization complete: optimal crane height = {best_height:.2f}m, "
