@@ -13,6 +13,9 @@ import math
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 import numpy as np
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import partial
+import multiprocessing as mp
 
 try:
     import matplotlib
@@ -41,6 +44,109 @@ from ..utils.geometry_utils import (
     create_longitudinal_sections_over_bbox
 )
 from ..utils.logging_utils import get_plugin_logger
+
+
+# ============================================================================
+# PARALLEL PROCESSING WORKER FUNCTIONS
+# ============================================================================
+
+def _plot_single_profile(profile_data: Dict, output_path: str, profile_type: str,
+                        vertical_exaggeration: float, volume_info: Optional[Dict],
+                        line_length: Optional[float], xlim: Optional[Tuple[float, float]],
+                        ylim: Optional[Tuple[float, float]]) -> str:
+    """
+    Worker function to plot a single profile.
+
+    Must be module-level for pickle serialization.
+
+    Args:
+        profile_data: Profile data with distances, elevations, etc.
+        output_path: Path to save PNG
+        profile_type: Profile type label
+        vertical_exaggeration: Vertical exaggeration factor
+        volume_info: Optional volume info
+        line_length: Optional line length
+        xlim: Optional x-axis limits
+        ylim: Optional y-axis limits
+
+    Returns:
+        Path to created PNG file
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    try:
+        fig_width = 12
+        fig_height = 8
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=300)
+
+        distances = profile_data['distances']
+        existing = profile_data['existing_z']
+        planned = profile_data['planned_z']
+        cut_fill = profile_data['cut_fill']
+
+        # Plot lines
+        ax.plot(distances, existing, 'k-', linewidth=2, label='Bestehendes Gelände')
+        ax.plot(distances, planned, 'b-', linewidth=2, label='Geplante Plattform')
+
+        # Fill areas
+        cut_mask = cut_fill > 0
+        if np.any(cut_mask):
+            ax.fill_between(
+                distances, existing, planned,
+                where=cut_mask,
+                color='red', alpha=0.3, label='Abtrag'
+            )
+
+        fill_mask = cut_fill < 0
+        if np.any(fill_mask):
+            ax.fill_between(
+                distances, existing, planned,
+                where=fill_mask,
+                color='green', alpha=0.3, label='Auftrag'
+            )
+
+        # Labels
+        max_distance = distances[-1] if len(distances) > 0 else 0
+        ax.set_xlabel(f'Entfernung [m] (0 - {max_distance:.1f} m)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Höhe [m ü.NN]', fontsize=12, fontweight='bold')
+
+        # Title
+        if line_length:
+            title = f'Geländeschnitt: {profile_type} (Länge: {line_length:.1f} m)'
+        else:
+            title = f'Geländeschnitt: {profile_type}'
+
+        if vertical_exaggeration != 1.0:
+            title += f' (Überhöhung {vertical_exaggeration}x)'
+
+        ax.set_title(title, fontsize=14, fontweight='bold')
+
+        # Grid and legend
+        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08),
+                 ncol=4, fontsize=10, frameon=True, fancybox=True)
+
+        # Set limits
+        if xlim:
+            ax.set_xlim(xlim)
+        else:
+            ax.set_xlim(0, max_distance)
+
+        if ylim:
+            ax.set_ylim(ylim)
+
+        # Save
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+        return output_path
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to create profile plot: {e}")
 
 
 class ProfileGenerator:
@@ -461,7 +567,9 @@ class ProfileGenerator:
     def visualize_multiple_profiles(self, profiles: List[Dict], output_dir: str,
                                     vertical_exaggeration: float = 2.0,
                                     volume_info: Optional[Dict] = None,
-                                    feedback: Optional[QgsProcessingFeedback] = None) -> List[Dict]:
+                                    feedback: Optional[QgsProcessingFeedback] = None,
+                                    use_parallel: bool = True,
+                                    max_workers: int = None) -> List[Dict]:
         """
         Visualize multiple profile lines with unified scale.
 
@@ -474,6 +582,8 @@ class ProfileGenerator:
             vertical_exaggeration (float): Vertical exaggeration for plots
             volume_info (Dict): Volume information for annotations
             feedback (QgsProcessingFeedback): Feedback object
+            use_parallel (bool): Use parallel processing (default: True)
+            max_workers (int): Maximum number of parallel workers
 
         Returns:
             List[Dict]: List of profile data with paths to PNG files
@@ -518,7 +628,23 @@ class ProfileGenerator:
         if feedback:
             feedback.pushInfo(f"  Global scale - Length: {max_line_length:.1f}m, Elevation: {global_ylim[0]:.1f} - {global_ylim[1]:.1f} m")
 
-        # Second pass: Create plots with unified scale
+        # Decide parallel vs sequential
+        if use_parallel and len(all_profile_data) >= 4:
+            self.logger.info(f"Using parallel rendering for {len(all_profile_data)} profiles")
+            return self._visualize_parallel(
+                all_profile_data, output_path, max_line_length, global_ylim,
+                vertical_exaggeration, volume_info, feedback, max_workers
+            )
+        else:
+            self.logger.info(f"Using sequential rendering for {len(all_profile_data)} profiles")
+            return self._visualize_sequential(
+                all_profile_data, output_path, max_line_length, global_ylim,
+                vertical_exaggeration, volume_info, feedback
+            )
+
+    def _visualize_sequential(self, all_profile_data, output_path, max_line_length,
+                             global_ylim, vertical_exaggeration, volume_info, feedback) -> List[Dict]:
+        """Sequential profile visualization (original implementation)."""
         results = []
 
         for profile, profile_data in all_profile_data:
@@ -526,7 +652,6 @@ class ProfileGenerator:
                 break
 
             try:
-                # Create plot with unified scale
                 png_filename = f"{profile['type']}.png"
                 png_path = output_path / png_filename
 
@@ -543,7 +668,6 @@ class ProfileGenerator:
                     ylim=global_ylim
                 )
 
-                # Add to results
                 profile['data'] = profile_data
                 profile['png_path'] = str(png_path)
                 results.append(profile)
@@ -559,8 +683,71 @@ class ProfileGenerator:
                         fatalError=False
                     )
 
-        self.logger.info(f"Generated {len(results)}/{len(profiles)} profile visualizations")
+        self.logger.info(f"Generated {len(results)}/{len(all_profile_data)} profile visualizations")
+        return results
 
+    def _visualize_parallel(self, all_profile_data, output_path, max_line_length,
+                           global_ylim, vertical_exaggeration, volume_info, feedback,
+                           max_workers=None) -> List[Dict]:
+        """Parallel profile visualization using ProcessPoolExecutor."""
+        if max_workers is None:
+            max_workers = max(1, mp.cpu_count() - 1)
+
+        self.logger.info(f"Rendering {len(all_profile_data)} profiles in parallel ({max_workers} workers)")
+
+        results = []
+        completed = 0
+
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            futures = {}
+            for profile, profile_data in all_profile_data:
+                png_filename = f"{profile['type']}.png"
+                png_path = output_path / png_filename
+                line_length = profile.get('length', profile['geometry'].length())
+
+                future = executor.submit(
+                    _plot_single_profile,
+                    profile_data,
+                    str(png_path),
+                    profile['type'],
+                    vertical_exaggeration,
+                    volume_info,
+                    line_length,
+                    (0, max_line_length),
+                    global_ylim
+                )
+                futures[future] = (profile, profile_data, str(png_path), png_filename)
+
+            # Process results as they complete
+            for future in as_completed(futures):
+                profile, profile_data, png_path, png_filename = futures[future]
+                completed += 1
+
+                if feedback and feedback.isCanceled():
+                    self.logger.info("Profile rendering cancelled by user")
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+
+                try:
+                    _ = future.result()
+
+                    profile['data'] = profile_data
+                    profile['png_path'] = png_path
+                    results.append(profile)
+
+                    if feedback:
+                        feedback.pushInfo(f"  ✓ [{completed}/{len(all_profile_data)}] {png_filename}")
+
+                except Exception as e:
+                    self.logger.error(f"Failed to generate profile {profile['type']}: {e}")
+                    if feedback:
+                        feedback.reportError(
+                            f"Error generating profile {profile['type']}: {e}",
+                            fatalError=False
+                        )
+
+        self.logger.info(f"Generated {len(results)}/{len(all_profile_data)} profile visualizations (parallel)")
         return results
 
     def generate_all_profiles(self, output_dir: str,

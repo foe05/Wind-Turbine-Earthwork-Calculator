@@ -15,6 +15,7 @@ import base64
 from pathlib import Path
 from typing import List, Tuple, Optional
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     import requests
@@ -269,31 +270,63 @@ class DEMDownloader:
             return None
 
     def download_tiles(self, tile_names: List[str],
-                      feedback: Optional[QgsProcessingFeedback] = None) -> List[str]:
+                      feedback: Optional[QgsProcessingFeedback] = None,
+                      max_workers: int = 4) -> List[str]:
         """
-        Download multiple DEM tiles.
+        Download multiple DEM tiles in parallel.
 
         Args:
             tile_names (List[str]): List of tile names
             feedback (QgsProcessingFeedback): Feedback object
+            max_workers (int): Maximum number of parallel downloads (default: 4)
 
         Returns:
             List[str]: Paths to downloaded TIFF files
         """
+        self.logger.info(f"Starting parallel download of {len(tile_names)} tiles with {max_workers} workers")
+
         tile_paths = []
+        failed_tiles = []
 
-        for i, tile_name in enumerate(tile_names):
-            if feedback and feedback.isCanceled():
-                break
+        # Use ThreadPoolExecutor for I/O-bound downloads
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all download tasks
+            future_to_tile = {
+                executor.submit(self.download_tile, tile_name, feedback=feedback): tile_name
+                for tile_name in tile_names
+            }
 
-            if feedback:
-                feedback.pushInfo(f"Tile {i+1}/{len(tile_names)}: {tile_name}")
+            # Process completed downloads
+            completed = 0
+            for future in as_completed(future_to_tile):
+                tile_name = future_to_tile[future]
+                completed += 1
 
-            tile_path = self.download_tile(tile_name, feedback=feedback)
-            if tile_path:
-                tile_paths.append(tile_path)
+                if feedback and feedback.isCanceled():
+                    self.logger.info("Download cancelled by user")
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
 
-        self.logger.info(f"Downloaded {len(tile_paths)}/{len(tile_names)} tiles")
+                try:
+                    tile_path = future.result()
+                    if tile_path:
+                        tile_paths.append(tile_path)
+                        if feedback:
+                            feedback.pushInfo(f"  ✓ [{completed}/{len(tile_names)}] {tile_name}")
+                    else:
+                        failed_tiles.append(tile_name)
+                        if feedback:
+                            feedback.pushInfo(f"  ✗ [{completed}/{len(tile_names)}] {tile_name} (failed)")
+                except Exception as e:
+                    self.logger.error(f"Error downloading {tile_name}: {e}")
+                    failed_tiles.append(tile_name)
+                    if feedback:
+                        feedback.reportError(f"Download error for {tile_name}: {e}", fatalError=False)
+
+        self.logger.info(f"Downloaded {len(tile_paths)}/{len(tile_names)} tiles successfully")
+        if failed_tiles:
+            self.logger.warning(f"Failed tiles: {failed_tiles}")
+
         return tile_paths
 
     def create_mosaic(self, tile_paths: List[str], output_path: str,

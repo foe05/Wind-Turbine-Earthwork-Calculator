@@ -298,7 +298,7 @@ class MultiSurfaceCalculationResult:
         return sum(r.slope_area for r in self.surface_results.values())
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for reporting."""
+        """Convert to dictionary for reporting and serialization."""
         return {
             'crane_height': round(self.crane_height, 2),
             'fok': round(self.fok, 2),
@@ -314,9 +314,62 @@ class MultiSurfaceCalculationResult:
                     'cut': round(result.cut_volume, 1),
                     'fill': round(result.fill_volume, 1),
                     'area': round(result.platform_area, 1),
+                    'slope_area': round(result.slope_area, 1),
+                    'total_area': round(result.total_area, 1),
+                    'terrain_min': round(result.terrain_min, 2),
+                    'terrain_max': round(result.terrain_max, 2),
                     'terrain_mean': round(result.terrain_mean, 2),
                     **result.additional_data
                 }
                 for surface_type, result in self.surface_results.items()
             }
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'MultiSurfaceCalculationResult':
+        """
+        Reconstruct MultiSurfaceCalculationResult from dictionary.
+
+        This is used for deserializing results from parallel workers.
+
+        Args:
+            data: Dictionary created by to_dict()
+
+        Returns:
+            MultiSurfaceCalculationResult instance
+        """
+        # Reconstruct surface results
+        surface_results = {}
+        for surface_type_str, surface_data in data['surfaces'].items():
+            surface_type = SurfaceType(surface_type_str)
+
+            # Extract additional_data (everything except known fields)
+            known_fields = {
+                'target_height', 'cut', 'fill', 'area', 'slope_area',
+                'total_area', 'terrain_min', 'terrain_max', 'terrain_mean'
+            }
+            additional_data = {
+                k: v for k, v in surface_data.items()
+                if k not in known_fields
+            }
+
+            result = SurfaceCalculationResult(
+                surface_type=surface_type,
+                target_height=surface_data['target_height'],
+                cut_volume=surface_data['cut'],
+                fill_volume=surface_data['fill'],
+                platform_area=surface_data['area'],
+                slope_area=surface_data.get('slope_area', 0.0),
+                total_area=surface_data.get('total_area', 0.0),
+                terrain_min=surface_data.get('terrain_min', 0.0),
+                terrain_max=surface_data.get('terrain_max', 0.0),
+                terrain_mean=surface_data.get('terrain_mean', 0.0),
+                additional_data=additional_data
+            )
+            surface_results[surface_type] = result
+
+        return cls(
+            crane_height=data['crane_height'],
+            fok=data['fok'],
+            surface_results=surface_results
+        )
