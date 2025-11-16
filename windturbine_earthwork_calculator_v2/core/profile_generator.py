@@ -755,7 +755,9 @@ class ProfileGenerator:
                              overhang_percent: float = 10.0,
                              vertical_exaggeration: float = 2.0,
                              volume_info: Optional[Dict] = None,
-                             feedback: Optional[QgsProcessingFeedback] = None) -> List[Dict]:
+                             feedback: Optional[QgsProcessingFeedback] = None,
+                             use_parallel: bool = True,
+                             max_workers: int = None) -> List[Dict]:
         """
         Generate all cross-section profile lines, extract data, and create plots.
 
@@ -766,6 +768,8 @@ class ProfileGenerator:
             vertical_exaggeration (float): Vertical exaggeration for plots
             volume_info (Dict): Volume information for annotations
             feedback (QgsProcessingFeedback): Feedback object
+            use_parallel (bool): Use parallel processing (default: True)
+            max_workers (int): Maximum number of parallel workers
 
         Returns:
             List[Dict]: List of profile data with paths to PNG files
@@ -787,75 +791,16 @@ class ProfileGenerator:
         if feedback:
             feedback.pushInfo(f"  Created {len(profiles)} cross-section lines")
 
-        # First pass: Extract all profile data to determine global scale
-        all_profile_data = []
-        max_line_length = 0
-        min_elevation = float('inf')
-        max_elevation = float('-inf')
-
-        for profile in profiles:
-            try:
-                profile_data = self.extract_profile_data(profile['geometry'])
-                all_profile_data.append((profile, profile_data))
-                
-                # Track maximum line length
-                max_line_length = max(max_line_length, profile['length'])
-                
-                # Track elevation range
-                min_elevation = min(min_elevation, np.min(profile_data['existing_z']))
-                max_elevation = max(max_elevation, np.max(profile_data['existing_z']))
-                min_elevation = min(min_elevation, np.min(profile_data['planned_z']))
-                max_elevation = max(max_elevation, np.max(profile_data['planned_z']))
-                
-            except Exception as e:
-                self.logger.error(f"Failed to extract data for profile {profile['type']}: {e}")
-
-        # Add padding to elevation range (5%)
-        elevation_range = max_elevation - min_elevation
-        elevation_padding = elevation_range * 0.05
-        global_ylim = (min_elevation - elevation_padding, max_elevation + elevation_padding)
-        
-        if feedback:
-            feedback.pushInfo(f"  Global scale - Length: {max_line_length:.1f}m, Elevation: {global_ylim[0]:.1f} - {global_ylim[1]:.1f} m")
-
-        # Second pass: Create plots with unified scale
-        results = []
-
-        for profile, profile_data in all_profile_data:
-            if feedback and feedback.isCanceled():
-                break
-
-            try:
-                # Create plot with unified scale
-                png_filename = f"{profile['type']}.png"
-                png_path = output_path / png_filename
-
-                self.plot_profile(
-                    profile_data,
-                    str(png_path),
-                    profile_type=profile['type'],
-                    vertical_exaggeration=vertical_exaggeration,
-                    volume_info=volume_info,
-                    line_length=profile['length'],
-                    xlim=(0, max_line_length),
-                    ylim=global_ylim
-                )
-
-                # Add to results
-                profile['data'] = profile_data
-                profile['png_path'] = str(png_path)
-                results.append(profile)
-
-                if feedback:
-                    feedback.pushInfo(f"  ✓ {png_filename} (length: {profile['length']:.1f}m)")
-
-            except Exception as e:
-                self.logger.error(f"Failed to generate profile {profile['type']}: {e}")
-                if feedback:
-                    feedback.reportError(
-                        f"Error generating profile {profile['type']}: {e}",
-                        fatalError=False
-                    )
+        # Use the parallel visualize_multiple_profiles method
+        results = self.visualize_multiple_profiles(
+            profiles=profiles,
+            output_dir=output_dir,
+            vertical_exaggeration=vertical_exaggeration,
+            volume_info=volume_info,
+            feedback=feedback,
+            use_parallel=use_parallel,
+            max_workers=max_workers
+        )
 
         self.logger.info(f"Generated {len(results)}/{len(profiles)} profiles")
 
@@ -866,7 +811,9 @@ class ProfileGenerator:
                                           overhang_percent: float = 10.0,
                                           vertical_exaggeration: float = 2.0,
                                           volume_info: Optional[Dict] = None,
-                                          feedback: Optional[QgsProcessingFeedback] = None) -> List[Dict]:
+                                          feedback: Optional[QgsProcessingFeedback] = None,
+                                          use_parallel: bool = True,
+                                          max_workers: int = None) -> List[Dict]:
         """
         Generate all longitudinal profile lines, extract data, and create plots.
 
@@ -877,6 +824,8 @@ class ProfileGenerator:
             vertical_exaggeration (float): Vertical exaggeration for plots
             volume_info (Dict): Volume information for annotations
             feedback (QgsProcessingFeedback): Feedback object
+            use_parallel (bool): Use parallel processing (default: True)
+            max_workers (int): Maximum number of parallel workers
 
         Returns:
             List[Dict]: List of profile data with paths to PNG files
@@ -898,75 +847,16 @@ class ProfileGenerator:
         if feedback:
             feedback.pushInfo(f"  Created {len(profiles)} longitudinal section lines")
 
-        # First pass: Extract all profile data to determine global scale
-        all_profile_data = []
-        max_line_length = 0
-        min_elevation = float('inf')
-        max_elevation = float('-inf')
-
-        for profile in profiles:
-            try:
-                profile_data = self.extract_profile_data(profile['geometry'])
-                all_profile_data.append((profile, profile_data))
-
-                # Track maximum line length
-                max_line_length = max(max_line_length, profile['length'])
-
-                # Track elevation range
-                min_elevation = min(min_elevation, np.min(profile_data['existing_z']))
-                max_elevation = max(max_elevation, np.max(profile_data['existing_z']))
-                min_elevation = min(min_elevation, np.min(profile_data['planned_z']))
-                max_elevation = max(max_elevation, np.max(profile_data['planned_z']))
-
-            except Exception as e:
-                self.logger.error(f"Failed to extract data for profile {profile['type']}: {e}")
-
-        # Add padding to elevation range (5%)
-        elevation_range = max_elevation - min_elevation
-        elevation_padding = elevation_range * 0.05
-        global_ylim = (min_elevation - elevation_padding, max_elevation + elevation_padding)
-
-        if feedback:
-            feedback.pushInfo(f"  Global scale - Length: {max_line_length:.1f}m, Elevation: {global_ylim[0]:.1f} - {global_ylim[1]:.1f} m")
-
-        # Second pass: Create plots with unified scale
-        results = []
-
-        for profile, profile_data in all_profile_data:
-            if feedback and feedback.isCanceled():
-                break
-
-            try:
-                # Create plot with unified scale
-                png_filename = f"{profile['type']}.png"
-                png_path = output_path / png_filename
-
-                self.plot_profile(
-                    profile_data,
-                    str(png_path),
-                    profile_type=profile['type'],
-                    vertical_exaggeration=vertical_exaggeration,
-                    volume_info=volume_info,
-                    line_length=profile['length'],
-                    xlim=(0, max_line_length),
-                    ylim=global_ylim
-                )
-
-                # Add to results
-                profile['data'] = profile_data
-                profile['png_path'] = str(png_path)
-                results.append(profile)
-
-                if feedback:
-                    feedback.pushInfo(f"  ✓ {png_filename} (length: {profile['length']:.1f}m)")
-
-            except Exception as e:
-                self.logger.error(f"Failed to generate profile {profile['type']}: {e}")
-                if feedback:
-                    feedback.reportError(
-                        f"Error generating profile {profile['type']}: {e}",
-                        fatalError=False
-                    )
+        # Use the parallel visualize_multiple_profiles method
+        results = self.visualize_multiple_profiles(
+            profiles=profiles,
+            output_dir=output_dir,
+            vertical_exaggeration=vertical_exaggeration,
+            volume_info=volume_info,
+            feedback=feedback,
+            use_parallel=use_parallel,
+            max_workers=max_workers
+        )
 
         self.logger.info(f"Generated {len(results)}/{len(profiles)} longitudinal profiles")
 
