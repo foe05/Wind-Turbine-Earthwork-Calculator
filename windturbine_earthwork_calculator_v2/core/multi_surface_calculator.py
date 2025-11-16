@@ -145,8 +145,8 @@ def _calculate_single_height_scenario(height: float, dem_path: str, project_dict
         # Create calculator and run single scenario
         calculator = MultiSurfaceCalculator(dem_layer, project)
 
-        # Override use_vectorized setting
-        calculator._use_vectorized = use_vectorized
+        # Override use_vectorized setting - DISABLE in worker processes due to GDAL thread-safety issues
+        calculator._use_vectorized = False  # Always use legacy method in workers
 
         result = calculator.calculate_scenario(height, feedback=None)
 
