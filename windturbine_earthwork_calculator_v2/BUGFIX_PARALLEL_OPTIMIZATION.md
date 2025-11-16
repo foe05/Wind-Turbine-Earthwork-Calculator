@@ -213,6 +213,15 @@ Bei erfolgreicher paralleler Ausführung:
 
 ## Versionshistorie
 
+- **2025-11-16 (Update 2)**: Fehlenden dxf_path Parameter behoben
+  - `SurfaceConfig` erwartet jetzt `dxf_path` als required Parameter
+  - Worker-Funktion übergab diesen Parameter nicht
+  - `project_dict` erweitert um `dxf_path`
+  - Alle `SurfaceConfig`-Instanzen in Worker erhalten nun `dxf_path`
+
+- **2025-11-16 (Update 1)**: Stderr-Output korrigiert
+  - `print()` mit `file=sys.stderr` für korrekte Fehlerausgabe
+
 - **2025-01-16**: Initial bugfix implementiert
   - Verbesserte Worker-Fehlerbehandlung
   - Fehlerstatistiken hinzugefügt

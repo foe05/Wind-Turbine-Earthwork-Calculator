@@ -81,6 +81,7 @@ def _calculate_single_height_scenario(height: float, dem_path: str, project_dict
         crane_config = SurfaceConfig(
             surface_type=SurfaceType.CRANE_PAD,
             geometry=QgsGeometry.fromWkt(project_dict['crane_wkt']),
+            dxf_path=project_dict.get('dxf_path', ''),  # Required parameter
             height_mode=HeightMode.OPTIMIZED,
             metadata=project_dict.get('crane_metadata', {})
         )
@@ -88,6 +89,7 @@ def _calculate_single_height_scenario(height: float, dem_path: str, project_dict
         foundation_config = SurfaceConfig(
             surface_type=SurfaceType.FOUNDATION,
             geometry=QgsGeometry.fromWkt(project_dict['foundation_wkt']),
+            dxf_path=project_dict.get('dxf_path', ''),  # Required parameter
             height_mode=HeightMode.FIXED,
             height_value=project_dict['fok'],
             metadata=project_dict.get('foundation_metadata', {})
@@ -96,6 +98,7 @@ def _calculate_single_height_scenario(height: float, dem_path: str, project_dict
         boom_config = SurfaceConfig(
             surface_type=SurfaceType.BOOM,
             geometry=QgsGeometry.fromWkt(project_dict['boom_wkt']),
+            dxf_path=project_dict.get('dxf_path', ''),  # Required parameter
             height_mode=HeightMode.SLOPED,
             slope_longitudinal=project_dict['boom_slope'],
             auto_slope=project_dict['boom_auto_slope'],
@@ -107,6 +110,7 @@ def _calculate_single_height_scenario(height: float, dem_path: str, project_dict
         rotor_config = SurfaceConfig(
             surface_type=SurfaceType.ROTOR_STORAGE,
             geometry=QgsGeometry.fromWkt(project_dict['rotor_wkt']),
+            dxf_path=project_dict.get('dxf_path', ''),  # Required parameter
             height_mode=HeightMode.RELATIVE,
             height_reference='crane',
             metadata=project_dict.get('rotor_metadata', {})
@@ -147,8 +151,9 @@ def _calculate_single_height_scenario(height: float, dem_path: str, project_dict
 
     except Exception as e:
         # Log detailed error information
+        import sys
         error_msg = f"Worker error at height {height:.2f}m: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg, flush=True)  # Print to stderr for debugging
+        print(error_msg, file=sys.stderr, flush=True)  # Print to stderr for debugging
         raise RuntimeError(error_msg) from e
 
 
@@ -1057,6 +1062,7 @@ class MultiSurfaceCalculator:
             'foundation_wkt': self.project.foundation.geometry.asWkt(),
             'boom_wkt': self.project.boom.geometry.asWkt(),
             'rotor_wkt': self.project.rotor_storage.geometry.asWkt(),
+            'dxf_path': getattr(self.project.crane_pad, 'dxf_path', ''),  # DXF source path
             'fok': self.project.fok,
             'foundation_depth': self.project.foundation_depth,
             'gravel_thickness': self.project.gravel_thickness,
