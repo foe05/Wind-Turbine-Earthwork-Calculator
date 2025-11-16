@@ -560,7 +560,17 @@ class MultiSurfaceCalculator:
         elevations = self.sample_dem_in_polygon(self.project.crane_pad.geometry)
 
         if len(elevations) == 0:
-            raise ValueError("No DEM data in crane pad area")
+            # Add debugging information
+            geom_bbox = self.project.crane_pad.geometry.boundingBox()
+            dem_extent = self.dem_layer.extent()
+            error_msg = (
+                f"No DEM data in crane pad area. "
+                f"Geometry bbox: {geom_bbox.toString()}, "
+                f"DEM extent: {dem_extent.toString()}, "
+                f"DEM valid: {self.dem_layer.isValid()}, "
+                f"DEM source: {self.dem_layer.source()}"
+            )
+            raise ValueError(error_msg)
 
         terrain_min = float(np.min(elevations))
         terrain_max = float(np.max(elevations))
