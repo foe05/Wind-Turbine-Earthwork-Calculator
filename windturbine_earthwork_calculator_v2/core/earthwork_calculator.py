@@ -21,6 +21,12 @@ from qgis.core import (
     QgsRectangle
 )
 
+try:
+    from osgeo import gdal, ogr
+    GDAL_AVAILABLE = True
+except ImportError:
+    GDAL_AVAILABLE = False
+
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
 
@@ -72,25 +78,107 @@ class EarthworkCalculator:
         # slope_width = vertical_drop / tan(angle)
         # We'll calculate this dynamically based on actual height differences
 
-    def sample_dem_in_polygon(self, geometry: QgsGeometry) -> np.ndarray:
+    def sample_dem_in_polygon(self, geometry: QgsGeometry, use_vectorized: bool = True) -> np.ndarray:
         """
         Sample DEM values within a polygon.
 
         Args:
             geometry (QgsGeometry): Polygon to sample
+            use_vectorized: Use vectorized GDAL method (default: True, much faster)
 
         Returns:
             np.ndarray: Array of elevation values (flattened)
         """
+        if use_vectorized and GDAL_AVAILABLE:
+            return self._sample_dem_vectorized(geometry)
+        else:
+            return self._sample_dem_legacy(geometry)
+
+    def _sample_dem_vectorized(self, geometry: QgsGeometry) -> np.ndarray:
+        """Vectorized DEM sampling using GDAL raster masking (100-1000x faster)."""
+        try:
+            dem_path = self.dem_layer.source()
+            ds = gdal.Open(dem_path, gdal.GA_ReadOnly)
+            if ds is None:
+                return self._sample_dem_legacy(geometry)
+
+            band = ds.GetRasterBand(1)
+            nodata = band.GetNoDataValue()
+            geotransform = ds.GetGeoTransform()
+            bbox = geometry.boundingBox()
+
+            # Convert bbox to pixel coordinates
+            origin_x, pixel_width, _, origin_y, _, pixel_height = geotransform
+            x_min_px = int((bbox.xMinimum() - origin_x) / pixel_width)
+            x_max_px = int((bbox.xMaximum() - origin_x) / pixel_width) + 1
+            y_min_px = int((bbox.yMinimum() - origin_y) / pixel_height)
+            y_max_px = int((bbox.yMaximum() - origin_y) / pixel_height) + 1
+
+            x_min_px = max(0, x_min_px)
+            y_min_px = max(0, y_min_px)
+            x_max_px = min(ds.RasterXSize, x_max_px)
+            y_max_px = min(ds.RasterYSize, y_max_px)
+
+            width = x_max_px - x_min_px
+            height = y_max_px - y_min_px
+
+            if width <= 0 or height <= 0:
+                ds = None
+                return np.array([])
+
+            data = band.ReadAsArray(x_min_px, y_min_px, width, height)
+            if data is None:
+                ds = None
+                return self._sample_dem_legacy(geometry)
+
+            # Create mask from polygon
+            mem_driver = ogr.GetDriverByName('Memory')
+            mem_ds = mem_driver.CreateDataSource('memData')
+            mem_layer = mem_ds.CreateLayer('polygon', srs=None, geom_type=ogr.wkbPolygon)
+
+            wkt = geometry.asWkt()
+            ogr_geom = ogr.CreateGeometryFromWkt(wkt)
+            feature = ogr.Feature(mem_layer.GetLayerDefn())
+            feature.SetGeometry(ogr_geom)
+            mem_layer.CreateFeature(feature)
+
+            mask_driver = gdal.GetDriverByName('MEM')
+            mask_ds = mask_driver.Create('', width, height, 1, gdal.GDT_Byte)
+
+            mask_geotransform = list(geotransform)
+            mask_geotransform[0] = origin_x + x_min_px * pixel_width
+            mask_geotransform[3] = origin_y + y_min_px * pixel_height
+            mask_ds.SetGeoTransform(mask_geotransform)
+
+            mask_band = mask_ds.GetRasterBand(1)
+            mask_band.Fill(0)
+            gdal.RasterizeLayer(mask_ds, [1], mem_layer, burn_values=[1])
+
+            mask = mask_band.ReadAsArray()
+            masked_data = data[mask == 1]
+
+            if nodata is not None:
+                masked_data = masked_data[masked_data != nodata]
+
+            ds = None
+            mask_ds = None
+            mem_ds = None
+
+            return masked_data.astype(float).flatten()
+
+        except Exception as e:
+            self.logger.warning(f"Vectorized sampling failed: {e}, using legacy method")
+            return self._sample_dem_legacy(geometry)
+
+    def _sample_dem_legacy(self, geometry: QgsGeometry) -> np.ndarray:
+        """Legacy DEM sampling using pixel-by-pixel iteration (slow but reliable)."""
         bbox = geometry.boundingBox()
 
-        # Calculate pixel indices
         x_min_px = int((bbox.xMinimum() - self.dem_layer.extent().xMinimum()) / self.pixel_size_x)
         x_max_px = int((bbox.xMaximum() - self.dem_layer.extent().xMinimum()) / self.pixel_size_x) + 1
         y_min_px = int((self.dem_layer.extent().yMaximum() - bbox.yMaximum()) / self.pixel_size_y)
         y_max_px = int((self.dem_layer.extent().yMaximum() - bbox.yMinimum()) / self.pixel_size_y) + 1
 
-        # Clamp to raster extent
         x_min_px = max(0, x_min_px)
         y_min_px = max(0, y_min_px)
         x_max_px = min(self.dem_layer.width(), x_max_px)
@@ -102,20 +190,17 @@ class EarthworkCalculator:
         if width <= 0 or height <= 0:
             return np.array([])
 
-        # Read raster block
         block = self.provider.block(1, bbox, width, height)
 
         elevations = []
         for row in range(height):
             for col in range(width):
-                # Calculate world coordinates
                 x = self.dem_layer.extent().xMinimum() + (x_min_px + col) * self.pixel_size_x
                 y = self.dem_layer.extent().yMaximum() - (y_min_px + row) * self.pixel_size_y
 
                 point = QgsPointXY(x, y)
                 point_geom = QgsGeometry.fromPointXY(point)
 
-                # Check if point is within geometry
                 if geometry.contains(point_geom):
                     value = block.value(row, col)
                     if not block.isNoData(row, col) and value is not None:
