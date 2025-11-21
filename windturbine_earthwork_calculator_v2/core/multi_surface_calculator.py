@@ -1336,6 +1336,10 @@ class MultiSurfaceCalculator:
             crane_h_coarse + 1.0 + height_step_fine,
             height_step_fine
         )
+        # Clamp to user-defined range
+        heights_fine = heights_fine[
+            (heights_fine >= height_min) & (heights_fine <= height_max)
+        ]
 
         if self.project.boom is not None and self.project.boom_slope_optimize:
             slope_step_fine = self.project.boom_slope_step_fine
