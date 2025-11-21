@@ -5,7 +5,7 @@ This script checks and installs required Python packages that are not
 included in the standard QGIS installation.
 
 Author: Wind Energy Site Planning
-Version: 2.0
+Version: 2.0.0
 """
 
 import sys

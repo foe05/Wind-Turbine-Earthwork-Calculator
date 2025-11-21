@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # App
     APP_NAME: str = "Geo-Engineering Auth Service"
-    VERSION: str = "1.0.0"
+    VERSION: str = "2.0.0"
     DEBUG: bool = True  # Default to True for development
 
     # Database

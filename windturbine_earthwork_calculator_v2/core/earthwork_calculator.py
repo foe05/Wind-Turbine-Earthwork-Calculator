@@ -6,7 +6,7 @@ Calculates cut/fill volumes and optimizes platform height.
 Adapted from WindTurbine_Earthwork_Calculator.py with optimizations.
 
 Author: Wind Energy Site Planning
-Version: 2.0
+Version: 2.0.0
 """
 
 import math

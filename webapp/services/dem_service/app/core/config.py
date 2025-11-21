@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # App
     APP_NAME: str = "Geo-Engineering DEM Service"
-    VERSION: str = "1.0.0"
+    VERSION: str = "2.0.0"
     DEBUG: bool = False
 
     # Database

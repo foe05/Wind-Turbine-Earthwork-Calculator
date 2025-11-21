@@ -4,7 +4,7 @@ Main Processing Algorithm for Wind Turbine Earthwork Calculator V2
 Optimizes platform height for wind turbine crane pads.
 
 Author: Wind Energy Site Planning
-Version: 2.0
+Version: 2.0.0
 """
 
 import os

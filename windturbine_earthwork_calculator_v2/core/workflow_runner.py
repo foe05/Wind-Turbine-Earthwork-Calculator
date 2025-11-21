@@ -4,7 +4,7 @@ Workflow Runner for Wind Turbine Earthwork Calculator V2 - Multi-Surface Edition
 Orchestrates the complete workflow from multi-DXF import to report generation.
 
 Author: Wind Energy Site Planning
-Version: 2.0 - Multi-Surface Extension
+Version: 2.0.0 - Multi-Surface Extension
 """
 
 import os

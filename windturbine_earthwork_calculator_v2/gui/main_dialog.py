@@ -8,7 +8,7 @@ Tab-based UI for user-friendly parameter input with support for 4 surface types:
 - Blade storage (Blattlagerfläche)
 
 Author: Wind Energy Site Planning
-Version: 2.0 - Multi-Surface Extension
+Version: 2.0.0 - Multi-Surface Extension
 """
 
 import os

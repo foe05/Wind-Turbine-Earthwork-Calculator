@@ -7,9 +7,75 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ---
 
+## [2.0.0] - 2025-11-21
+
+### 🚀 Hauptrelease - Modulares QGIS Plugin & Microservices Webapp
+
+#### Hinzugefügt
+
+- **Vollständiges QGIS Processing Plugin** 🔌
+  - Komplette Neustrukturierung als modulares Plugin-Paket
+  - Installation über QGIS Plugin-Manager möglich
+  - Automatische Dependency-Installation (`install_dependencies.py`)
+  - Multi-Tab GUI-Dialog für benutzerfreundliche Eingabe
+  - Separater Processing Provider und Algorithmus
+
+- **Modulare Code-Architektur** 📦
+  - `core/` - Business Logic (QGIS-unabhängig)
+    - `dxf_importer.py` - DXF-Parsing mit ezdxf
+    - `dem_downloader.py` - API-Integration & Caching
+    - `earthwork_calculator.py` - Volumenberechnung
+    - `multi_surface_calculator.py` - Multi-Flächen-Support
+    - `profile_generator.py` - Geländeschnitte
+    - `report_generator.py` - HTML-Reports
+    - `workflow_runner.py` - Orchestrierung
+  - `gui/` - PyQt5 Dialoge
+  - `processing_provider/` - QGIS Integration
+  - `utils/` - Hilfsfunktionen & Logging
+
+- **Multi-Surface-Berechnung** 🏗️
+  - Kranstellfläche (Hauptfläche)
+  - Fundamentfläche (mit Aushubtiefe)
+  - Auslegerfläche (mit Gefälle)
+  - Rotorblattlagerfläche (mit Höhenversatz)
+  - Individuelle Parameter pro Flächentyp
+  - Automatische Flächenvalidierung
+
+- **Web-Anwendung (Microservices)** 🌐
+  - 6 FastAPI-Services + React Frontend
+  - Docker Compose Orchestrierung
+  - API Gateway mit Rate-Limiting
+  - JWT-Authentifizierung
+  - Alle Services auf Version 2.0.0
+
+- **Verbesserte Reports** 📊
+  - Übersichtskarte mit allen Flächen (1:3000)
+  - Einzelflächen-Details mit Abtrag/Auftrag
+  - Globale Höhenparameter (FOK, Kranstellflächen-Höhe)
+  - Externes Schottermaterial-Tracking
+
+#### Geändert
+- Projektstruktur: Single-File → Modulares Plugin
+- Version: 6.0 → **2.0.0** (Neustart der Versionierung für Plugin)
+- Plugin-Verzeichnis: `windturbine_earthwork_calculator_v2/`
+- HTML-Report-Footer: V2 → V2.0.0
+- Alle Python-Module mit Version 2.0.0 Header
+
+#### Dependencies
+- `ezdxf>=1.1.0` - DXF-Parsing
+- `requests>=2.28.0` - API-Kommunikation
+- `shapely>=2.0.0` - Geometrie-Operationen
+
+#### Dokumentation
+- Komplett überarbeitete AGENTS.md
+- Plugin-spezifische README.md
+- Aktualisierte Projekt-Struktur
+
+---
+
 ## [6.0.0] - 2025-11-04
 
-### 🚀 Hauptrelease - Hoehendaten.de API Integration & GeoPackage Output
+### 🚀 Hauptrelease - Hoehendaten.de API Integration & GeoPackage Output (Legacy)
 
 #### Hinzugefügt
 - **Hoehendaten.de API Integration** 🌐

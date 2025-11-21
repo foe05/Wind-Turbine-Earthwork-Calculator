@@ -6,7 +6,7 @@ Downloads elevation data from hoehendaten.de API and creates mosaics.
 API Documentation: https://hoehendaten.de/api-rawtifrequest.html
 
 Author: Wind Energy Site Planning
-Version: 2.0
+Version: 2.0.0
 """
 
 import os
