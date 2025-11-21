@@ -822,62 +822,63 @@ class ReportGenerator:
         luftbild_layer_project = find_layer(['luftbild', 'orthophoto', 'aerial'])
         
         # Layer order: FIRST in list = rendered on TOP, LAST = rendered on BOTTOM
-        # Desired order from bottom to top: DEM -> Polygons -> Lines
+        # Desired order from bottom to top: Background -> DEM -> Polygons -> Lines
+        # So we add: Lines first (top), then Polygons, then DEM/Background last (bottom)
 
-        # === BOTTOM: Background/DEM layers (add first, rendered at bottom) ===
-        # Try to find OSM/XYZ tile layer as base background
-        osm_layer_project = find_layer(['osm', 'openstreetmap', 'xyz', 'basemap', 'hintergrund'])
-        if osm_layer_project:
-            layers.append(osm_layer_project)
-            self.background_sources.append(f"Basiskarte: {osm_layer_project.name()}")
-            self.logger.info(f"Found OSM/basemap layer: {osm_layer_project.name()}")
+        # === TOP: Line layers (add first, rendered on top) ===
+        # Profile lines (topmost)
+        if self.profile_lines_layer:
+            layers.append(self.profile_lines_layer)
+            self.logger.info("Using memory layer for profile lines")
 
-        if luftbild_layer_project:
-            layers.append(luftbild_layer_project)
-            self.background_sources.append(f"Luftbild: {luftbild_layer_project.name()}")
-            self.logger.info(f"Found Luftbild layer: {luftbild_layer_project.name()}")
-
-        if kataster_layer_project:
-            layers.append(kataster_layer_project)
-            self.background_sources.append(f"Kataster/Flurstücke: {kataster_layer_project.name()}")
-            self.logger.info(f"Found Kataster layer: {kataster_layer_project.name()}")
-
-        if dgm_layer_project:
-            layers.append(dgm_layer_project)
-            self.background_sources.append(f"DGM/Höhenmodell: {dgm_layer_project.name()}")
-            self.logger.info(f"Found DGM layer: {dgm_layer_project.name()}")
+        # DXF import layer
+        if self.dxf_layer:
+            layers.append(self.dxf_layer)
+            self.logger.info(f"Using DXF layer: {self.dxf_layer.name()}")
 
         # === MIDDLE: Polygon layers ===
-        # Rotor storage layer
-        if self.rotor_layer:
-            layers.append(self.rotor_layer)
-            self.logger.info("Using memory layer for rotor storage")
-
-        # Boom surface layer
-        if self.boom_layer:
-            layers.append(self.boom_layer)
-            self.logger.info("Using memory layer for boom surface")
+        # Foundation layer (on top of crane pad)
+        if self.foundation_layer:
+            layers.append(self.foundation_layer)
+            self.logger.info("Using memory layer for foundation")
 
         # Crane pad / platform layer
         if self.platform_layer:
             layers.append(self.platform_layer)
             self.logger.info("Using memory layer for platform")
 
-        # Foundation layer (on top of crane pad)
-        if self.foundation_layer:
-            layers.append(self.foundation_layer)
-            self.logger.info("Using memory layer for foundation")
+        # Boom surface layer
+        if self.boom_layer:
+            layers.append(self.boom_layer)
+            self.logger.info("Using memory layer for boom surface")
 
-        # === TOP: Line layers (add last, rendered on top) ===
-        # DXF import layer
-        if self.dxf_layer:
-            layers.append(self.dxf_layer)
-            self.logger.info(f"Using DXF layer: {self.dxf_layer.name()}")
+        # Rotor storage layer
+        if self.rotor_layer:
+            layers.append(self.rotor_layer)
+            self.logger.info("Using memory layer for rotor storage")
 
-        # Profile lines (topmost)
-        if self.profile_lines_layer:
-            layers.append(self.profile_lines_layer)
-            self.logger.info("Using memory layer for profile lines")
+        # === BOTTOM: Background/DEM layers (add last, rendered at bottom) ===
+        if dgm_layer_project:
+            layers.append(dgm_layer_project)
+            self.background_sources.append(f"DGM/Höhenmodell: {dgm_layer_project.name()}")
+            self.logger.info(f"Found DGM layer: {dgm_layer_project.name()}")
+
+        if kataster_layer_project:
+            layers.append(kataster_layer_project)
+            self.background_sources.append(f"Kataster/Flurstücke: {kataster_layer_project.name()}")
+            self.logger.info(f"Found Kataster layer: {kataster_layer_project.name()}")
+
+        if luftbild_layer_project:
+            layers.append(luftbild_layer_project)
+            self.background_sources.append(f"Luftbild: {luftbild_layer_project.name()}")
+            self.logger.info(f"Found Luftbild layer: {luftbild_layer_project.name()}")
+
+        # Try to find OSM/XYZ tile layer as base background (very bottom)
+        osm_layer_project = find_layer(['osm', 'openstreetmap', 'xyz', 'basemap', 'hintergrund'])
+        if osm_layer_project:
+            layers.append(osm_layer_project)
+            self.background_sources.append(f"Basiskarte: {osm_layer_project.name()}")
+            self.logger.info(f"Found OSM/basemap layer: {osm_layer_project.name()}")
         
         map_settings.setLayers(layers)
         map_settings.setBackgroundColor(QColor(255, 255, 255))
