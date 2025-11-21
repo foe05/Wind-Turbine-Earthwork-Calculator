@@ -645,9 +645,33 @@ class ReportGenerator:
     </div>
 """
 
+        # Sort profile PNGs: first cross-sections (Querprofil), then longitudinal (Längsprofil)
+        # Each group sorted by number (01, 02, 03, ...)
+        import re
+
+        def sort_key(png_path):
+            """Generate sort key for profile PNG paths."""
+            filename = Path(png_path).stem
+
+            # Determine profile type (cross-section first, then longitudinal)
+            if 'Querprofil' in filename or 'Querschnitt' in filename:
+                type_order = 0
+            elif 'Längsprofil' in filename or 'Längsschnitt' in filename:
+                type_order = 1
+            else:
+                type_order = 2  # Unknown types at the end
+
+            # Extract number from filename (e.g., "Querprofil_01" -> 1)
+            match = re.search(r'(\d+)', filename)
+            number = int(match.group(1)) if match else 999
+
+            return (type_order, number)
+
+        sorted_pngs = sorted(profile_pngs, key=sort_key)
+
         # Embed profile images
         profile_html = []
-        for i, png_path in enumerate(profile_pngs):
+        for i, png_path in enumerate(sorted_pngs):
             try:
                 # Read and encode image
                 with open(png_path, 'rb') as f:
