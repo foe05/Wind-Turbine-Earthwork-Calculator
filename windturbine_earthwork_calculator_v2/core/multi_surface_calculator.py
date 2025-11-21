@@ -12,7 +12,9 @@ Version: 2.0 - Multi-Surface Extension
 """
 
 import math
-from typing import Optional, Tuple, Dict
+import time
+import copy
+from typing import Optional, Tuple, Dict, List
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
@@ -38,6 +40,15 @@ from .surface_types import (
     SurfaceType,
     SurfaceCalculationResult,
     MultiSurfaceCalculationResult
+)
+from .uncertainty import (
+    UncertaintyConfig,
+    UncertaintyResult,
+    UncertaintyAnalysisResult,
+    SensitivityResult,
+    generate_parameter_samples,
+    calculate_sobol_indices,
+    TerrainType
 )
 from ..utils.geometry_utils import (
     find_connection_edge,
@@ -1749,3 +1760,330 @@ class MultiSurfaceCalculator:
             )
 
         return best_height, best_result
+
+    # =========================================================================
+    # UNCERTAINTY PROPAGATION METHODS
+    # =========================================================================
+
+    def find_optimum_with_uncertainty(
+        self,
+        uncertainty_config: UncertaintyConfig,
+        feedback: Optional[QgsProcessingFeedback] = None
+    ) -> UncertaintyAnalysisResult:
+        """
+        Find optimal parameters with uncertainty propagation using Monte Carlo.
+
+        Performs Monte Carlo simulation to propagate input uncertainties through
+        the optimization process and quantify output uncertainties.
+
+        Args:
+            uncertainty_config: Configuration for uncertainty analysis
+            feedback: Optional feedback object for progress reporting
+
+        Returns:
+            UncertaintyAnalysisResult with distributions and sensitivity analysis
+        """
+        start_time = time.time()
+        n_samples = uncertainty_config.num_samples
+
+        self.logger.info("=" * 60)
+        self.logger.info("UNCERTAINTY PROPAGATION ANALYSIS")
+        self.logger.info(f"Monte Carlo with {n_samples} samples")
+        self.logger.info("=" * 60)
+
+        if feedback:
+            feedback.pushInfo("\n" + "=" * 60)
+            feedback.pushInfo("UNCERTAINTY PROPAGATION ANALYSIS")
+            feedback.pushInfo(f"Running {n_samples} Monte Carlo samples...")
+            feedback.pushInfo("=" * 60)
+
+        # 1. Run nominal calculation first
+        nominal_height, nominal_result = self.find_optimum(feedback=None, use_parallel=False)
+
+        # 2. Generate parameter samples
+        base_values = {
+            'fok': self.project.fok,
+            'slope_angle': self.project.slope_angle,
+            'foundation_depth': self.project.foundation_depth,
+            'gravel_thickness': self.project.gravel_thickness,
+        }
+
+        samples = generate_parameter_samples(uncertainty_config, base_values)
+
+        # 3. Run Monte Carlo simulation
+        mc_results = self._run_monte_carlo_samples(
+            samples, uncertainty_config, feedback
+        )
+
+        # 4. Analyze results
+        analysis_result = self._analyze_monte_carlo_results(
+            mc_results, samples, uncertainty_config, nominal_result
+        )
+
+        # 5. Calculate Sobol sensitivity indices
+        self._calculate_sensitivity(analysis_result, samples, mc_results)
+
+        # Record computation time
+        analysis_result.computation_time_seconds = time.time() - start_time
+
+        self.logger.info("=" * 60)
+        self.logger.info("UNCERTAINTY ANALYSIS COMPLETE")
+        self.logger.info(f"Time: {analysis_result.computation_time_seconds:.1f}s")
+        self.logger.info("=" * 60)
+
+        if feedback:
+            feedback.pushInfo("\n" + "=" * 60)
+            feedback.pushInfo("✓ UNCERTAINTY ANALYSIS COMPLETE")
+            feedback.pushInfo("=" * 60)
+            feedback.pushInfo(
+                f"Crane height: {analysis_result.crane_height.mean:.2f} ± "
+                f"{analysis_result.crane_height.std:.2f} m"
+            )
+            feedback.pushInfo(
+                f"Total cut: {analysis_result.total_cut.mean:.0f} ± "
+                f"{analysis_result.total_cut.std:.0f} m³"
+            )
+            feedback.pushInfo(
+                f"Computation time: {analysis_result.computation_time_seconds:.1f}s"
+            )
+
+        return analysis_result
+
+    def _run_monte_carlo_samples(
+        self,
+        samples: Dict[str, np.ndarray],
+        config: UncertaintyConfig,
+        feedback: Optional[QgsProcessingFeedback]
+    ) -> List[Dict]:
+        """
+        Run Monte Carlo samples with perturbed parameters.
+
+        Args:
+            samples: Dictionary of parameter samples
+            config: Uncertainty configuration
+            feedback: Optional feedback object
+
+        Returns:
+            List of result dictionaries from each sample
+        """
+        n_samples = config.num_samples
+        results = []
+
+        if feedback:
+            feedback.pushInfo(f"Running {n_samples} Monte Carlo samples...")
+
+        # Create sample configurations
+        sample_configs = []
+        for i in range(n_samples):
+            sample_config = {
+                'fok': float(samples['fok'][i]),
+                'slope_angle': float(samples['slope_angle'][i]),
+                'foundation_depth': float(samples['foundation_depth'][i]),
+                'gravel_thickness': float(samples['gravel_thickness'][i]),
+                'dem_noise': float(samples['dem_noise'][i]),
+                'boom_slope_noise': float(samples.get('boom_slope_noise', np.zeros(n_samples))[i]),
+                'rotor_offset_noise': float(samples.get('rotor_offset_noise', np.zeros(n_samples))[i]),
+            }
+            sample_configs.append(sample_config)
+
+        # Run samples sequentially
+        for i, sample_config in enumerate(sample_configs):
+            if feedback and feedback.isCanceled():
+                break
+
+            try:
+                result = self._calculate_single_mc_sample(sample_config)
+                results.append(result)
+
+                # Progress update
+                if feedback and (i + 1) % max(1, n_samples // 20) == 0:
+                    progress = int((i + 1) / n_samples * 100)
+                    feedback.setProgress(progress)
+                    feedback.pushInfo(
+                        f"  [{i+1}/{n_samples}] Completed sample"
+                    )
+
+            except Exception as e:
+                self.logger.error(f"Error in MC sample {i}: {e}")
+
+        return results
+
+    def _calculate_single_mc_sample(self, sample_config: Dict) -> Dict:
+        """
+        Calculate a single Monte Carlo sample with perturbed parameters.
+
+        Args:
+            sample_config: Dictionary with perturbed parameter values
+
+        Returns:
+            Dictionary with results from this sample
+        """
+        # Create modified project with perturbed parameters
+        modified_project = copy.deepcopy(self.project)
+
+        # Apply parameter perturbations
+        modified_project.fok = sample_config['fok']
+        modified_project.slope_angle = sample_config['slope_angle']
+        modified_project.foundation_depth = sample_config['foundation_depth']
+        modified_project.gravel_thickness = sample_config['gravel_thickness']
+
+        # Create new calculator with modified project
+        mc_calculator = MultiSurfaceCalculator(self.dem_layer, modified_project)
+
+        # Store DEM noise for this sample
+        mc_calculator._dem_noise = sample_config['dem_noise']
+
+        # Run optimization
+        optimal_height, result = mc_calculator.find_optimum(
+            feedback=None,
+            use_parallel=False
+        )
+
+        # Apply boom slope and rotor offset noise to result
+        boom_slope = result.boom_slope_percent + sample_config['boom_slope_noise']
+        rotor_offset = result.rotor_height_offset_optimized + sample_config['rotor_offset_noise']
+
+        return {
+            'optimal_height': optimal_height,
+            'total_cut': result.total_cut,
+            'total_fill': result.total_fill,
+            'net_volume': result.net_volume,
+            'total_volume_moved': result.total_volume_moved,
+            'boom_slope': boom_slope,
+            'rotor_offset': rotor_offset,
+            'fok': sample_config['fok'],
+            'slope_angle': sample_config['slope_angle'],
+            'foundation_depth': sample_config['foundation_depth'],
+            'gravel_thickness': sample_config['gravel_thickness'],
+        }
+
+    def _analyze_monte_carlo_results(
+        self,
+        mc_results: List[Dict],
+        samples: Dict[str, np.ndarray],
+        config: UncertaintyConfig,
+        nominal_result: MultiSurfaceCalculationResult
+    ) -> UncertaintyAnalysisResult:
+        """
+        Analyze Monte Carlo results and create uncertainty statistics.
+
+        Args:
+            mc_results: List of result dictionaries from MC samples
+            samples: Input parameter samples
+            config: Uncertainty configuration
+            nominal_result: Result from nominal calculation
+
+        Returns:
+            UncertaintyAnalysisResult with statistics
+        """
+        # Extract output arrays
+        heights = np.array([r['optimal_height'] for r in mc_results])
+        cuts = np.array([r['total_cut'] for r in mc_results])
+        fills = np.array([r['total_fill'] for r in mc_results])
+        nets = np.array([r['net_volume'] for r in mc_results])
+        totals = np.array([r['total_volume_moved'] for r in mc_results])
+        boom_slopes = np.array([r['boom_slope'] for r in mc_results])
+        rotor_offsets = np.array([r['rotor_offset'] for r in mc_results])
+
+        # Create uncertainty results
+        crane_height_unc = UncertaintyResult.from_samples(heights, "crane_height")
+        total_cut_unc = UncertaintyResult.from_samples(cuts, "total_cut")
+        total_fill_unc = UncertaintyResult.from_samples(fills, "total_fill")
+        net_volume_unc = UncertaintyResult.from_samples(nets, "net_volume")
+        total_volume_unc = UncertaintyResult.from_samples(totals, "total_volume_moved")
+
+        # Optional outputs
+        boom_slope_unc = None
+        rotor_offset_unc = None
+
+        if self.project.boom is not None:
+            boom_slope_unc = UncertaintyResult.from_samples(boom_slopes, "boom_slope")
+
+        if self.project.rotor_storage is not None:
+            rotor_offset_unc = UncertaintyResult.from_samples(rotor_offsets, "rotor_offset")
+
+        return UncertaintyAnalysisResult(
+            config=config,
+            nominal_result=nominal_result,
+            crane_height=crane_height_unc,
+            total_cut=total_cut_unc,
+            total_fill=total_fill_unc,
+            net_volume=net_volume_unc,
+            total_volume_moved=total_volume_unc,
+            boom_slope=boom_slope_unc,
+            rotor_offset=rotor_offset_unc,
+            num_samples=len(mc_results),
+        )
+
+    def _calculate_sensitivity(
+        self,
+        analysis_result: UncertaintyAnalysisResult,
+        samples: Dict[str, np.ndarray],
+        mc_results: List[Dict]
+    ):
+        """
+        Calculate sensitivity indices for each input parameter.
+
+        Updates the analysis_result with sensitivity information.
+
+        Args:
+            analysis_result: Result object to update
+            samples: Input parameter samples
+            mc_results: MC results for correlation analysis
+        """
+        # Output values for sensitivity analysis
+        output_values = np.array([r['total_volume_moved'] for r in mc_results])
+
+        # Parameters to analyze
+        param_names = ['fok', 'slope_angle', 'foundation_depth',
+                       'gravel_thickness', 'dem_noise']
+
+        # Calculate Sobol-like indices
+        sobol_indices = calculate_sobol_indices(samples, output_values, param_names)
+
+        # Create sensitivity results
+        for param_name in param_names:
+            if param_name not in samples:
+                continue
+
+            param_values = samples[param_name]
+            sens_result = SensitivityResult.from_samples(
+                param_name, param_values, output_values
+            )
+
+            # Add Sobol indices
+            if param_name in sobol_indices:
+                first_order, total = sobol_indices[param_name]
+                sens_result.sensitivity_index = first_order
+                sens_result.total_sensitivity_index = total
+
+            analysis_result.sensitivity[param_name] = sens_result
+
+        # Log sensitivity ranking
+        ranking = analysis_result.get_sensitivity_ranking()
+        self.logger.info("Sensitivity ranking (total volume):")
+        for param, sensitivity in ranking:
+            self.logger.info(f"  {param}: {sensitivity*100:.1f}%")
+
+    def sample_dem_in_polygon_with_noise(
+        self,
+        geometry: QgsGeometry,
+        noise_std: float = 0.0
+    ) -> np.ndarray:
+        """
+        Sample DEM values with optional noise for uncertainty analysis.
+
+        Args:
+            geometry: Polygon to sample
+            noise_std: Standard deviation of elevation noise (meters)
+
+        Returns:
+            Array of elevation values (possibly with noise added)
+        """
+        elevations = self.sample_dem_in_polygon(geometry)
+
+        if noise_std > 0 and len(elevations) > 0:
+            noise = np.random.normal(0, noise_std, len(elevations))
+            elevations = elevations + noise
+
+        return elevations
