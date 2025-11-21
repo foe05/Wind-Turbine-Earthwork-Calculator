@@ -2326,6 +2326,21 @@ class MultiSurfaceCalculator:
                 f"Running {n_samples} MC samples in parallel with {max_workers} workers"
             )
 
+            # Helper function to filter metadata for pickle-safe values
+            def safe_metadata(metadata):
+                """Filter metadata to only include pickle-safe primitive types."""
+                if not metadata:
+                    return {}
+                safe = {}
+                for key, value in metadata.items():
+                    if isinstance(value, (int, float, str, bool, type(None))):
+                        safe[key] = value
+                    elif isinstance(value, (list, tuple)):
+                        # Only include if all items are primitive
+                        if all(isinstance(v, (int, float, str, bool, type(None))) for v in value):
+                            safe[key] = value
+                return safe
+
             # Prepare serializable project dict
             project_dict = {
                 'crane_wkt': self.project.crane_pad.geometry.asWkt(),
@@ -2342,10 +2357,10 @@ class MultiSurfaceCalculator:
                 'boom_auto_slope': self.project.boom.auto_slope if self.project.boom else False,
                 'boom_slope_min': getattr(self.project.boom, 'slope_min', 2.0) if self.project.boom else 2.0,
                 'boom_slope_max': getattr(self.project.boom, 'slope_max', 8.0) if self.project.boom else 8.0,
-                'crane_metadata': self.project.crane_pad.metadata,
-                'foundation_metadata': self.project.foundation.metadata,
-                'boom_metadata': self.project.boom.metadata if self.project.boom else {},
-                'rotor_metadata': self.project.rotor_storage.metadata if self.project.rotor_storage else {},
+                'crane_metadata': safe_metadata(self.project.crane_pad.metadata),
+                'foundation_metadata': safe_metadata(self.project.foundation.metadata),
+                'boom_metadata': safe_metadata(self.project.boom.metadata) if self.project.boom else {},
+                'rotor_metadata': safe_metadata(self.project.rotor_storage.metadata) if self.project.rotor_storage else {},
                 'search_range_below_fok': self.project.search_range_below_fok,
                 'search_range_above_fok': self.project.search_range_above_fok,
                 'search_step': self.project.search_step,
