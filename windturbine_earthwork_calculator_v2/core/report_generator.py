@@ -23,8 +23,8 @@ from qgis.core import (
     QgsCoordinateReferenceSystem,
     QgsProject
 )
-from qgis.PyQt.QtGui import QImage, QPainter, QColor
-from qgis.PyQt.QtCore import QSize
+from qgis.PyQt.QtGui import QImage, QPainter, QColor, QPen
+from qgis.PyQt.QtCore import QSize, QRect, Qt
 
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
@@ -728,7 +728,6 @@ class ReportGenerator:
             return f"""
     <div class="section">
         <h2>🗺️ Lageplan</h2>
-        <p>Übersichtskarte im Maßstab 1:3000 mit allen Flächen und Geländeschnitten.</p>
         <div style="text-align: center;">
             <img src="data:image/png;base64,{img_data}" alt="Lageplan" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;">
         </div>{source_html}
@@ -750,16 +749,25 @@ class ReportGenerator:
             List of source layer names used as background
         """
         self.background_sources = []  # Store sources for later use
-        # Calculate extent based on polygon with buffer
-        polygon_extent = self.polygon.boundingBox()
-        
-        # Add 20% buffer
-        buffer_size = max(polygon_extent.width(), polygon_extent.height()) * 0.2
+
+        # Calculate extent based on profile lines (if available) or polygon
+        # Profile lines define the maximum extent of the construction site
+        if self.profile_lines_layer and self.profile_lines_layer.featureCount() > 0:
+            # Use profile lines extent as base
+            base_extent = self.profile_lines_layer.extent()
+            self.logger.info(f"Using profile lines extent: {base_extent.toString()}")
+        else:
+            # Fallback to polygon extent
+            base_extent = self.polygon.boundingBox()
+            self.logger.info(f"Using polygon extent: {base_extent.toString()}")
+
+        # Add 10% buffer around the base extent
+        buffer_size = max(base_extent.width(), base_extent.height()) * 0.1
         extent = QgsRectangle(
-            polygon_extent.xMinimum() - buffer_size,
-            polygon_extent.yMinimum() - buffer_size,
-            polygon_extent.xMaximum() + buffer_size,
-            polygon_extent.yMaximum() + buffer_size
+            base_extent.xMinimum() - buffer_size,
+            base_extent.yMinimum() - buffer_size,
+            base_extent.xMaximum() + buffer_size,
+            base_extent.yMaximum() + buffer_size
         )
 
         # Map settings
@@ -813,10 +821,11 @@ class ReportGenerator:
         kataster_layer_project = find_layer(['kataster', 'flurstück'])
         luftbild_layer_project = find_layer(['luftbild', 'orthophoto', 'aerial'])
         
-        # Add layers in reverse order (background first in rendering)
-        # QGS renders the LAST item in the list as the BOTTOM layer
+        # Layer order: FIRST in list = rendered on TOP, LAST = rendered on BOTTOM
+        # Desired order from bottom to top: Background -> DEM -> Polygons -> Lines
+        # So we add: Lines first (top), then Polygons, then DEM/Background last (bottom)
 
-        # Top layers: Use memory layers (just calculated) with priority
+        # === TOP: Line layers (add first, rendered on top) ===
         # Profile lines (topmost)
         if self.profile_lines_layer:
             layers.append(self.profile_lines_layer)
@@ -827,6 +836,7 @@ class ReportGenerator:
             layers.append(self.dxf_layer)
             self.logger.info(f"Using DXF layer: {self.dxf_layer.name()}")
 
+        # === MIDDLE: Polygon layers ===
         # Foundation layer (on top of crane pad)
         if self.foundation_layer:
             layers.append(self.foundation_layer)
@@ -847,7 +857,7 @@ class ReportGenerator:
             layers.append(self.rotor_layer)
             self.logger.info("Using memory layer for rotor storage")
 
-        # Background layers: Use project layers
+        # === BOTTOM: Background/DEM layers (add last, rendered at bottom) ===
         if dgm_layer_project:
             layers.append(dgm_layer_project)
             self.background_sources.append(f"DGM/Höhenmodell: {dgm_layer_project.name()}")
@@ -863,7 +873,7 @@ class ReportGenerator:
             self.background_sources.append(f"Luftbild: {luftbild_layer_project.name()}")
             self.logger.info(f"Found Luftbild layer: {luftbild_layer_project.name()}")
 
-        # Try to find OSM/XYZ tile layer as background
+        # Try to find OSM/XYZ tile layer as base background (very bottom)
         osm_layer_project = find_layer(['osm', 'openstreetmap', 'xyz', 'basemap', 'hintergrund'])
         if osm_layer_project:
             layers.append(osm_layer_project)
@@ -876,20 +886,107 @@ class ReportGenerator:
         # Render map
         image = QImage(QSize(width_pixels, height_pixels), QImage.Format_ARGB32_Premultiplied)
         image.fill(QColor(255, 255, 255).rgb())
-        
+
         painter = QPainter(image)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        
+
         job = QgsMapRendererCustomPainterJob(map_settings, painter)
         job.start()
         job.waitForFinished()
-        
+
+        # Calculate actual meters per pixel based on extent and image size
+        actual_m_per_pixel = extent.width() / width_pixels
+
+        # Draw scale bar at bottom left
+        self._draw_scale_bar(painter, width_pixels, height_pixels, actual_m_per_pixel)
+
         painter.end()
-        
+
         # Save image
         image.save(output_path)
         self.logger.info(f"Overview map saved: {output_path} ({width_pixels}×{height_pixels})")
+
+    def _draw_scale_bar(self, painter: QPainter, img_width: int, img_height: int, m_per_pixel: float):
+        """
+        Draw a scale bar at the bottom left of the map.
+
+        Args:
+            painter: QPainter to draw on
+            img_width: Image width in pixels
+            img_height: Image height in pixels
+            m_per_pixel: Meters per pixel (determines scale)
+        """
+        # Determine nice scale bar length
+        # Target: scale bar should be about 15-25% of image width
+        target_width_px = img_width * 0.2
+        target_meters = target_width_px * m_per_pixel
+
+        # Find nice round number for scale bar
+        nice_values = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000, 10000]
+        scale_meters = nice_values[0]
+        for val in nice_values:
+            if val <= target_meters:
+                scale_meters = val
+            else:
+                break
+
+        # Calculate scale bar width in pixels
+        bar_width_px = int(scale_meters / m_per_pixel)
+        bar_height_px = max(8, int(img_height * 0.008))
+
+        # Position: bottom left with margin
+        margin = int(min(img_width, img_height) * 0.03)
+        x = margin
+        y = img_height - margin - bar_height_px - 20  # Leave space for text
+
+        # Draw white background rectangle for better visibility
+        bg_padding = 8
+        bg_rect = QRect(
+            x - bg_padding,
+            y - bg_padding,
+            bar_width_px + 2 * bg_padding,
+            bar_height_px + 30 + 2 * bg_padding
+        )
+        painter.fillRect(bg_rect, QColor(255, 255, 255, 220))
+        painter.setPen(QPen(QColor(100, 100, 100), 1))
+        painter.drawRect(bg_rect)
+
+        # Draw scale bar (alternating black/white segments)
+        num_segments = 4
+        segment_width = bar_width_px // num_segments
+
+        for i in range(num_segments):
+            segment_x = x + i * segment_width
+            if i % 2 == 0:
+                painter.fillRect(segment_x, y, segment_width, bar_height_px, QColor(0, 0, 0))
+            else:
+                painter.fillRect(segment_x, y, segment_width, bar_height_px, QColor(255, 255, 255))
+                painter.setPen(QPen(QColor(0, 0, 0), 1))
+                painter.drawRect(segment_x, y, segment_width, bar_height_px)
+
+        # Draw border around entire bar
+        painter.setPen(QPen(QColor(0, 0, 0), 1))
+        painter.drawRect(x, y, bar_width_px, bar_height_px)
+
+        # Draw scale text
+        if scale_meters >= 1000:
+            scale_text = f"{scale_meters // 1000} km"
+        else:
+            scale_text = f"{scale_meters} m"
+
+        # Set font for scale text
+        font = painter.font()
+        font.setPointSize(max(8, int(img_height * 0.012)))
+        font.setBold(True)
+        painter.setFont(font)
+
+        # Draw text centered below bar
+        text_rect = QRect(x, y + bar_height_px + 4, bar_width_px, 20)
+        painter.setPen(QColor(0, 0, 0))
+        painter.drawText(text_rect, Qt.AlignCenter, scale_text)
+
+        self.logger.info(f"Scale bar drawn: {scale_text} ({bar_width_px}px)")
 
     def _generate_footer(self) -> str:
         """Generate HTML footer."""

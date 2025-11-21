@@ -903,42 +903,24 @@ class WorkflowWorker(QObject):
         else:
             group = root
 
-        # GeoPackage layer names and display names
-        gpkg_layer_names = [
-            ('kranstellflaechen', 'Kranstellflächen'),
-            ('fundamentflaechen', 'Fundamentflächen'),
-            ('auslegerflaechen', 'Auslegerflächen'),
-            ('rotorflaechen', 'Blattlagerflächen'),
-            ('schnitte', 'Geländeschnitte'),
-        ]
+        # Layer order in QGIS: first added = top in layer panel (rendered on top)
+        # Desired order from bottom to top: DEM -> Polygons -> Lines
+        # So we add: Lines first, then Polygons, then DEM last
 
-        # Add GeoPackage layers
-        for layer_name, display_name in gpkg_layer_names:
-            layer = QgsVectorLayer(
-                f"{gpkg_path}|layername={layer_name}",
-                display_name,
-                "ogr"
-            )
-            if layer.isValid():
-                project.addMapLayer(layer, False)  # Don't add to legend yet
-                if group_name:
-                    group.addLayer(layer)
-                else:
-                    root.addLayer(layer)
-                self.logger.info(f"Added layer: {display_name}")
-
-        # Add DEM mosaic layer
-        if dem_path:
-            dem_layer = QgsRasterLayer(dem_path, "DGM Mosaik")
-            if dem_layer.isValid():
-                project.addMapLayer(dem_layer, False)
-                if group_name:
-                    group.addLayer(dem_layer)
-                else:
-                    root.addLayer(dem_layer)
-                self.logger.info(f"Added DEM layer: {dem_path}")
+        # === TOP: Add line layers first (will be at top) ===
+        # Add profile lines (topmost layer)
+        profile_layer = QgsVectorLayer(
+            f"{gpkg_path}|layername=schnitte",
+            "Geländeschnitte",
+            "ogr"
+        )
+        if profile_layer.isValid():
+            project.addMapLayer(profile_layer, False)
+            if group_name:
+                group.addLayer(profile_layer)
             else:
-                self.logger.warning(f"Could not load DEM layer: {dem_path}")
+                root.addLayer(profile_layer)
+            self.logger.info("Added layer: Geländeschnitte")
 
         # Add DXF layers
         if dxf_paths:
@@ -967,6 +949,42 @@ class WorkflowWorker(QObject):
                         self.logger.info(f"Added DXF layer: {display_name}")
                     else:
                         self.logger.warning(f"Could not load DXF layer: {dxf_path}")
+
+        # === MIDDLE: Add polygon layers ===
+        # GeoPackage polygon layer names (order: top to bottom within polygons)
+        gpkg_polygon_layers = [
+            ('fundamentflaechen', 'Fundamentflächen'),
+            ('kranstellflaechen', 'Kranstellflächen'),
+            ('auslegerflaechen', 'Auslegerflächen'),
+            ('rotorflaechen', 'Blattlagerflächen'),
+        ]
+
+        for layer_name, display_name in gpkg_polygon_layers:
+            layer = QgsVectorLayer(
+                f"{gpkg_path}|layername={layer_name}",
+                display_name,
+                "ogr"
+            )
+            if layer.isValid():
+                project.addMapLayer(layer, False)  # Don't add to legend yet
+                if group_name:
+                    group.addLayer(layer)
+                else:
+                    root.addLayer(layer)
+                self.logger.info(f"Added layer: {display_name}")
+
+        # === BOTTOM: Add DEM mosaic layer last (will be at bottom) ===
+        if dem_path:
+            dem_layer = QgsRasterLayer(dem_path, "DGM Mosaik")
+            if dem_layer.isValid():
+                project.addMapLayer(dem_layer, False)
+                if group_name:
+                    group.addLayer(dem_layer)
+                else:
+                    root.addLayer(dem_layer)
+                self.logger.info(f"Added DEM layer: {dem_path}")
+            else:
+                self.logger.warning(f"Could not load DEM layer: {dem_path}")
 
         self.logger.info("All layers added to QGIS project")
 
