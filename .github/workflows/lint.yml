@@ -27,15 +27,15 @@ jobs:
     - name: Lint with flake8
       run: |
         # Stop build if there are Python syntax errors or undefined names
-        flake8 prototype/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 windturbine_earthwork_calculator_v2/ --count --select=E9,F63,F7,F82 --show-source --statistics
         # Exit-zero treats all errors as warnings
-        flake8 prototype/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        flake8 windturbine_earthwork_calculator_v2/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     
     - name: Check Code Formatting with Black
       run: |
-        black --check --diff prototype/
+        black --check --diff windturbine_earthwork_calculator_v2/
     
     - name: Lint with Pylint
       run: |
-        pylint prototype/*.py --exit-zero --max-line-length=127
+        pylint windturbine_earthwork_calculator_v2/*.py --exit-zero --max-line-length=127
       continue-on-error: true
