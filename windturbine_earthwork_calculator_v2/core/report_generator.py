@@ -728,7 +728,6 @@ class ReportGenerator:
             return f"""
     <div class="section">
         <h2>🗺️ Lageplan</h2>
-        <p>Übersichtskarte im Maßstab 1:3000 mit allen Flächen und Geländeschnitten.</p>
         <div style="text-align: center;">
             <img src="data:image/png;base64,{img_data}" alt="Lageplan" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;">
         </div>{source_html}
