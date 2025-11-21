@@ -157,8 +157,10 @@ def _calculate_single_height_scenario(height: float, dem_path: str, project_dict
         # Create calculator and run single scenario
         calculator = MultiSurfaceCalculator(dem_layer, project)
 
-        # Override use_vectorized setting - DISABLE in worker processes due to GDAL thread-safety issues
-        calculator._use_vectorized = False  # Always use legacy method in workers
+        # Enable vectorized GDAL in worker processes
+        # ProcessPoolExecutor uses separate processes (not threads), so each process
+        # has its own GDAL instance - this is safe for parallel execution
+        calculator._use_vectorized = use_vectorized
 
         result = calculator.calculate_scenario(height, feedback=None)
 
@@ -172,6 +174,115 @@ def _calculate_single_height_scenario(height: float, dem_path: str, project_dict
         import sys
         error_msg = f"Worker error at height {height:.2f}m: {str(e)}\n{traceback.format_exc()}"
         print(error_msg, file=sys.stderr, flush=True)  # Print to stderr for debugging
+        raise RuntimeError(error_msg) from e
+
+
+def _calculate_multi_param_scenario(scenario: tuple, dem_path: str, project_dict: dict,
+                                     use_vectorized: bool = True) -> Tuple[tuple, dict]:
+    """
+    Worker function to calculate a multi-parameter scenario.
+
+    This function runs in a separate process and must be pickle-able.
+
+    Args:
+        scenario: Tuple of (crane_height, boom_slope, rotor_offset)
+        dem_path: Path to DEM file
+        project_dict: Serialized project configuration
+        use_vectorized: Use vectorized sampling
+
+    Returns:
+        Tuple of (scenario, result_dict)
+    """
+    import traceback
+
+    crane_height, boom_slope, rotor_offset = scenario
+
+    try:
+        # Import inside function to avoid pickling issues
+        from qgis.core import QgsRasterLayer, QgsGeometry
+        from .surface_types import MultiSurfaceProject, SurfaceConfig, SurfaceType, HeightMode
+
+        # Reconstruct project from dict
+        crane_config = SurfaceConfig(
+            surface_type=SurfaceType.CRANE_PAD,
+            geometry=QgsGeometry.fromWkt(project_dict['crane_wkt']),
+            dxf_path=project_dict.get('dxf_path', ''),
+            height_mode=HeightMode.OPTIMIZED,
+            metadata=project_dict.get('crane_metadata', {})
+        )
+
+        foundation_config = SurfaceConfig(
+            surface_type=SurfaceType.FOUNDATION,
+            geometry=QgsGeometry.fromWkt(project_dict['foundation_wkt']),
+            dxf_path=project_dict.get('dxf_path', ''),
+            height_mode=HeightMode.FIXED,
+            height_value=project_dict['fok'],
+            metadata=project_dict.get('foundation_metadata', {})
+        )
+
+        boom_config = SurfaceConfig(
+            surface_type=SurfaceType.BOOM,
+            geometry=QgsGeometry.fromWkt(project_dict['boom_wkt']),
+            dxf_path=project_dict.get('dxf_path', ''),
+            height_mode=HeightMode.SLOPED,
+            slope_longitudinal=boom_slope,  # Use scenario slope
+            auto_slope=False,  # Disable auto-slope for optimization
+            slope_min=project_dict.get('boom_slope_min', 2.0),
+            slope_max=project_dict.get('boom_slope_max', 8.0),
+            metadata=project_dict.get('boom_metadata', {})
+        )
+
+        rotor_config = SurfaceConfig(
+            surface_type=SurfaceType.ROTOR_STORAGE,
+            geometry=QgsGeometry.fromWkt(project_dict['rotor_wkt']),
+            dxf_path=project_dict.get('dxf_path', ''),
+            height_mode=HeightMode.RELATIVE,
+            height_reference='crane',
+            metadata=project_dict.get('rotor_metadata', {})
+        )
+
+        project = MultiSurfaceProject(
+            crane_pad=crane_config,
+            foundation=foundation_config,
+            boom=boom_config,
+            rotor_storage=rotor_config,
+            fok=project_dict['fok'],
+            foundation_depth=project_dict['foundation_depth'],
+            gravel_thickness=project_dict['gravel_thickness'],
+            rotor_height_offset=rotor_offset,  # Use scenario offset
+            slope_angle=project_dict['slope_angle'],
+            search_range_below_fok=0,
+            search_range_above_fok=0,
+            search_step=0.1
+        )
+
+        # Load DEM
+        dem_layer = QgsRasterLayer(dem_path, "DEM")
+        if not dem_layer.isValid():
+            raise RuntimeError(f"Could not load DEM: {dem_path}")
+
+        # Create calculator and run scenario
+        calculator = MultiSurfaceCalculator(dem_layer, project)
+        calculator._use_vectorized = use_vectorized
+
+        result = calculator.calculate_scenario(
+            crane_height,
+            feedback=None,
+            boom_slope_percent=boom_slope,
+            rotor_height_offset=rotor_offset
+        )
+
+        # Convert result to dict for serialization
+        result_dict = result.to_dict()
+
+        return (scenario, result_dict)
+
+    except Exception as e:
+        import sys
+        error_msg = (f"Worker error at scenario h={crane_height:.2f}m, "
+                     f"slope={boom_slope:.1f}%, offset={rotor_offset:.2f}m: "
+                     f"{str(e)}\n{traceback.format_exc()}")
+        print(error_msg, file=sys.stderr, flush=True)
         raise RuntimeError(error_msg) from e
 
 
@@ -331,6 +442,36 @@ class MultiSurfaceCalculator:
             )
 
         return slope_range
+
+    def _create_project_dict(self) -> dict:
+        """
+        Create serializable dictionary from project configuration.
+
+        This is used to pass project data to worker processes.
+
+        Returns:
+            Dictionary with all project parameters
+        """
+        return {
+            'crane_wkt': self.project.crane_pad.geometry.asWkt(),
+            'foundation_wkt': self.project.foundation.geometry.asWkt(),
+            'boom_wkt': self.project.boom.geometry.asWkt() if self.project.boom else None,
+            'rotor_wkt': self.project.rotor_storage.geometry.asWkt() if self.project.rotor_storage else None,
+            'dxf_path': getattr(self.project.crane_pad, 'dxf_path', ''),
+            'fok': self.project.fok,
+            'foundation_depth': self.project.foundation_depth,
+            'gravel_thickness': self.project.gravel_thickness,
+            'rotor_height_offset': self.project.rotor_height_offset,
+            'slope_angle': self.project.slope_angle,
+            'boom_slope': self.project.boom.slope_longitudinal if self.project.boom else 0.0,
+            'boom_auto_slope': self.project.boom.auto_slope if self.project.boom else False,
+            'boom_slope_min': getattr(self.project.boom, 'slope_min', 2.0) if self.project.boom else 2.0,
+            'boom_slope_max': getattr(self.project.boom, 'slope_max', 8.0) if self.project.boom else 8.0,
+            'crane_metadata': self.project.crane_pad.metadata,
+            'foundation_metadata': self.project.foundation.metadata,
+            'boom_metadata': self.project.boom.metadata if self.project.boom else {},
+            'rotor_metadata': self.project.rotor_storage.metadata if self.project.rotor_storage else {},
+        }
 
     def sample_dem_in_polygon(self, geometry: QgsGeometry, use_vectorized: bool = None) -> np.ndarray:
         """
@@ -1266,20 +1407,55 @@ class MultiSurfaceCalculator:
         best_coarse_params = None
         best_coarse_result = None
 
-        scenario_count = 0
-        for crane_h in heights_coarse:
-            for boom_slope in boom_slopes_coarse:
-                for rotor_offset in rotor_offsets_coarse:
+        # Build scenario list for parallel execution
+        coarse_scenarios = [
+            (float(crane_h), float(boom_slope), float(rotor_offset))
+            for crane_h in heights_coarse
+            for boom_slope in boom_slopes_coarse
+            for rotor_offset in rotor_offsets_coarse
+        ]
+
+        # Decide parallel vs sequential based on scenario count and use_parallel flag
+        if use_parallel and num_coarse >= 20:
+            # Parallel execution
+            self.logger.info(f"Running coarse search in parallel ({max_workers} workers)")
+
+            # Prepare project dict for serialization
+            project_dict = self._create_project_dict()
+            dem_path = self.dem_layer.source()
+
+            if max_workers is None:
+                max_workers = max(1, mp.cpu_count() - 1)
+
+            completed = 0
+            failed = 0
+
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                worker_func = partial(
+                    _calculate_multi_param_scenario,
+                    dem_path=dem_path,
+                    project_dict=project_dict,
+                    use_vectorized=self._use_vectorized
+                )
+
+                futures = {
+                    executor.submit(worker_func, scenario): scenario
+                    for scenario in coarse_scenarios
+                }
+
+                for future in as_completed(futures):
+                    scenario = futures[future]
+                    completed += 1
+
                     if feedback and feedback.isCanceled():
+                        executor.shutdown(wait=False, cancel_futures=True)
                         break
 
                     try:
-                        result = self.calculate_scenario(
-                            crane_height=crane_h,
-                            feedback=None,  # Suppress individual feedback
-                            boom_slope_percent=boom_slope,
-                            rotor_height_offset=rotor_offset
-                        )
+                        _, result_dict = future.result()
+
+                        from .surface_types import MultiSurfaceCalculationResult
+                        result = MultiSurfaceCalculationResult.from_dict(result_dict)
 
                         # Choose optimization metric
                         if self.project.optimize_for_net_earthwork:
@@ -1289,37 +1465,73 @@ class MultiSurfaceCalculator:
 
                         if metric_volume < best_coarse_volume:
                             best_coarse_volume = metric_volume
-                            best_coarse_params = (crane_h, boom_slope, rotor_offset)
+                            best_coarse_params = scenario
                             best_coarse_result = result
 
-                        scenario_count += 1
-
-                        # Progress update every 50 scenarios
-                        if feedback and scenario_count % 50 == 0:
-                            progress = int((scenario_count / num_coarse) * 50)  # 0-50% for coarse
+                        # Progress update
+                        if feedback and completed % 50 == 0:
+                            progress = int((completed / num_coarse) * 50)
                             feedback.setProgress(progress)
-                            feedback.pushInfo(
-                                f"  Coarse: {scenario_count}/{num_coarse} - "
-                                f"Best so far: h={best_coarse_params[0]:.1f}m, "
-                                f"slope={best_coarse_params[1]:+.1f}%, "
-                                f"rotor={best_coarse_params[2]:+.2f}m, "
-                                f"{'net' if self.project.optimize_for_net_earthwork else 'total'}={best_coarse_volume:.0f}m³"
-                            )
+                            if best_coarse_params:
+                                feedback.pushInfo(
+                                    f"  Coarse: {completed}/{num_coarse} - "
+                                    f"Best: h={best_coarse_params[0]:.1f}m, "
+                                    f"slope={best_coarse_params[1]:+.1f}%, "
+                                    f"rotor={best_coarse_params[2]:+.2f}m"
+                                )
 
                     except Exception as e:
-                        self.logger.error(
-                            f"Error in coarse search at h={crane_h:.1f}, "
-                            f"slope={boom_slope:.1f}, rotor={rotor_offset:.2f}: {e}",
-                            exc_info=True
-                        )
-                        # Store first error for better diagnostics
-                        if best_coarse_params is None and scenario_count == 0:
-                            first_error = e
+                        failed += 1
+                        self.logger.error(f"Error in coarse scenario {scenario}: {e}")
+
+            self.logger.info(f"Coarse search: {completed - failed} successful, {failed} failed")
+
+        else:
+            # Sequential execution (fallback or small scenario count)
+            self.logger.info("Running coarse search sequentially")
+            scenario_count = 0
+            first_error = None
+
+            for crane_h, boom_slope, rotor_offset in coarse_scenarios:
+                if feedback and feedback.isCanceled():
+                    break
+
+                try:
+                    result = self.calculate_scenario(
+                        crane_height=crane_h,
+                        feedback=None,
+                        boom_slope_percent=boom_slope,
+                        rotor_height_offset=rotor_offset
+                    )
+
+                    if self.project.optimize_for_net_earthwork:
+                        metric_volume = abs(result.net_volume)
+                    else:
+                        metric_volume = result.total_volume_moved
+
+                    if metric_volume < best_coarse_volume:
+                        best_coarse_volume = metric_volume
+                        best_coarse_params = (crane_h, boom_slope, rotor_offset)
+                        best_coarse_result = result
+
+                    scenario_count += 1
+
+                    if feedback and scenario_count % 50 == 0:
+                        progress = int((scenario_count / num_coarse) * 50)
+                        feedback.setProgress(progress)
+                        if best_coarse_params:
+                            feedback.pushInfo(
+                                f"  Coarse: {scenario_count}/{num_coarse} - "
+                                f"Best: h={best_coarse_params[0]:.1f}m"
+                            )
+
+                except Exception as e:
+                    self.logger.error(f"Error in coarse search: {e}")
+                    if first_error is None:
+                        first_error = e
 
         if best_coarse_params is None:
             error_msg = "No valid scenarios found in coarse search"
-            if 'first_error' in locals():
-                error_msg += f". First error: {first_error}"
             raise ValueError(error_msg)
 
         crane_h_coarse, boom_slope_coarse, rotor_offset_coarse = best_coarse_params
@@ -1402,20 +1614,55 @@ class MultiSurfaceCalculator:
         best_fine_params = None
         best_fine_result = None
 
-        scenario_count = 0
-        for crane_h in heights_fine:
-            for boom_slope in boom_slopes_fine:
-                for rotor_offset in rotor_offsets_fine:
+        # Build scenario list for parallel execution
+        fine_scenarios = [
+            (float(crane_h), float(boom_slope), float(rotor_offset))
+            for crane_h in heights_fine
+            for boom_slope in boom_slopes_fine
+            for rotor_offset in rotor_offsets_fine
+        ]
+
+        # Decide parallel vs sequential based on scenario count and use_parallel flag
+        if use_parallel and num_fine >= 20:
+            # Parallel execution
+            self.logger.info(f"Running fine search in parallel ({max_workers} workers)")
+
+            # Prepare project dict for serialization
+            project_dict = self._create_project_dict()
+            dem_path = self.dem_layer.source()
+
+            if max_workers is None:
+                max_workers = max(1, mp.cpu_count() - 1)
+
+            completed = 0
+            failed = 0
+
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                worker_func = partial(
+                    _calculate_multi_param_scenario,
+                    dem_path=dem_path,
+                    project_dict=project_dict,
+                    use_vectorized=self._use_vectorized
+                )
+
+                futures = {
+                    executor.submit(worker_func, scenario): scenario
+                    for scenario in fine_scenarios
+                }
+
+                for future in as_completed(futures):
+                    scenario = futures[future]
+                    completed += 1
+
                     if feedback and feedback.isCanceled():
+                        executor.shutdown(wait=False, cancel_futures=True)
                         break
 
                     try:
-                        result = self.calculate_scenario(
-                            crane_height=crane_h,
-                            feedback=None,
-                            boom_slope_percent=boom_slope,
-                            rotor_height_offset=rotor_offset
-                        )
+                        _, result_dict = future.result()
+
+                        from .surface_types import MultiSurfaceCalculationResult
+                        result = MultiSurfaceCalculationResult.from_dict(result_dict)
 
                         # Choose optimization metric
                         if self.project.optimize_for_net_earthwork:
@@ -1425,28 +1672,67 @@ class MultiSurfaceCalculator:
 
                         if metric_volume < best_fine_volume:
                             best_fine_volume = metric_volume
-                            best_fine_params = (crane_h, boom_slope, rotor_offset)
+                            best_fine_params = scenario
                             best_fine_result = result
 
-                        scenario_count += 1
-
-                        # Progress update every 20 scenarios
-                        if feedback and scenario_count % 20 == 0:
-                            progress = 50 + int((scenario_count / num_fine) * 50)  # 50-100% for fine
+                        # Progress update
+                        if feedback and completed % 100 == 0:
+                            progress = 50 + int((completed / num_fine) * 50)
                             feedback.setProgress(progress)
-                            feedback.pushInfo(
-                                f"  Fine: {scenario_count}/{num_fine} - "
-                                f"Best so far: h={best_fine_params[0]:.2f}m, "
-                                f"slope={best_fine_params[1]:+.2f}%, "
-                                f"rotor={best_fine_params[2]:+.3f}m, "
-                                f"{'net' if self.project.optimize_for_net_earthwork else 'total'}={best_fine_volume:.0f}m³"
-                            )
+                            if best_fine_params:
+                                feedback.pushInfo(
+                                    f"  Fine: {completed}/{num_fine} - "
+                                    f"Best: h={best_fine_params[0]:.2f}m, "
+                                    f"slope={best_fine_params[1]:+.2f}%, "
+                                    f"rotor={best_fine_params[2]:+.3f}m"
+                                )
 
                     except Exception as e:
-                        self.logger.error(
-                            f"Error in fine search at h={crane_h:.2f}, "
-                            f"slope={boom_slope:.2f}, rotor={rotor_offset:.3f}: {e}"
-                        )
+                        failed += 1
+                        self.logger.error(f"Error in fine scenario {scenario}: {e}")
+
+            self.logger.info(f"Fine search: {completed - failed} successful, {failed} failed")
+
+        else:
+            # Sequential execution (fallback or small scenario count)
+            self.logger.info("Running fine search sequentially")
+            scenario_count = 0
+
+            for crane_h, boom_slope, rotor_offset in fine_scenarios:
+                if feedback and feedback.isCanceled():
+                    break
+
+                try:
+                    result = self.calculate_scenario(
+                        crane_height=crane_h,
+                        feedback=None,
+                        boom_slope_percent=boom_slope,
+                        rotor_height_offset=rotor_offset
+                    )
+
+                    if self.project.optimize_for_net_earthwork:
+                        metric_volume = abs(result.net_volume)
+                    else:
+                        metric_volume = result.total_volume_moved
+
+                    if metric_volume < best_fine_volume:
+                        best_fine_volume = metric_volume
+                        best_fine_params = (crane_h, boom_slope, rotor_offset)
+                        best_fine_result = result
+
+                    scenario_count += 1
+
+                    if feedback and scenario_count % 100 == 0:
+                        progress = 50 + int((scenario_count / num_fine) * 50)
+                        feedback.setProgress(progress)
+                        if best_fine_params:
+                            feedback.pushInfo(
+                                f"  Fine: {scenario_count}/{num_fine} - "
+                                f"Best: h={best_fine_params[0]:.2f}m"
+                            )
+
+                except Exception as e:
+                    self.logger.error(f"Error in fine search: {e}")
 
         if best_fine_params is None:
             # Fall back to coarse result
@@ -1511,15 +1797,21 @@ class MultiSurfaceCalculator:
         if use_parallel and num_scenarios >= 10:
             self.logger.info(f"Using parallel optimization for {num_scenarios} scenarios")
             try:
-                return self._find_optimum_sequential(heights, feedback)
+                return self._find_optimum_parallel(heights, feedback, max_workers)
             except ValueError as e:
                 if "No valid scenarios found" in str(e):
-                    self.logger.warning("Optimization failed completely")
+                    self.logger.warning("Parallel optimization failed, falling back to sequential")
                     if feedback:
-                        feedback.pushInfo("⚠ Optimization failed")
-                    raise
+                        feedback.pushInfo("Parallel optimization failed, trying sequential...")
+                    # Fallback to sequential
+                    return self._find_optimum_sequential(heights, feedback)
                 else:
                     raise
+            except Exception as e:
+                self.logger.warning(f"Parallel optimization error: {e}, falling back to sequential")
+                if feedback:
+                    feedback.pushInfo(f"Parallel error: {e}, trying sequential...")
+                return self._find_optimum_sequential(heights, feedback)
         else:
             self.logger.info(f"Using sequential optimization for {num_scenarios} scenarios")
             return self._find_optimum_sequential(heights, feedback)
