@@ -125,26 +125,46 @@ class MultiSurfaceProject:
         search_range_above_fok: Search range above FOK for optimization (meters)
         search_step: Step size for height optimization (meters)
     """
-    # Surface configurations
+    # Required surface configurations
     crane_pad: SurfaceConfig
     foundation: SurfaceConfig
-    boom: SurfaceConfig
-    rotor_storage: SurfaceConfig
 
     # Global height parameters (all in meters ü.NN or relative meters)
     fok: float  # Foundation top edge (Fundamentoberkante)
+
+    # Optional surface configurations
+    boom: Optional[SurfaceConfig] = None
+    rotor_storage: Optional[SurfaceConfig] = None
+
+    # Rotor blade support beams (Holme) - optional
+    rotor_holms: Optional[list] = None  # List of QgsGeometry polygons for support beams
     foundation_depth: float = 3.5
     foundation_diameter: Optional[float] = None
     gravel_thickness: float = 0.5
-    rotor_height_offset: float = 0.0
+    rotor_height_offset: float = 0.0  # Maximum allowed offset (will be optimized)
+    rotor_height_offset_max: float = 0.5  # Maximum allowed offset range for optimization
 
     # Slope/embankment parameters
     slope_angle: float = 45.0  # degrees
 
-    # Optimization parameters
+    # Optimization parameters - Crane pad height
     search_range_below_fok: float = 0.5
     search_range_above_fok: float = 0.5
     search_step: float = 0.1
+
+    # Optimization parameters - Boom slope
+    boom_slope_max: float = 4.0  # Maximum allowed boom slope in percent (will optimize between -max and +max or 0 to ±max)
+    boom_slope_optimize: bool = True  # Whether to optimize boom slope
+    boom_slope_step_coarse: float = 0.5  # Coarse step for boom slope optimization (percent)
+    boom_slope_step_fine: float = 0.1  # Fine step for boom slope optimization (percent)
+
+    # Optimization parameters - Rotor height
+    rotor_height_optimize: bool = True  # Whether to optimize rotor height
+    rotor_height_step_coarse: float = 0.2  # Coarse step for rotor height optimization (meters)
+    rotor_height_step_fine: float = 0.05  # Fine step for rotor height optimization (meters)
+
+    # Optimization mode
+    optimize_for_net_earthwork: bool = True  # True = minimize net (Cut-Fill), False = minimize total (Cut+Fill)
 
     @property
     def search_min_height(self) -> float:
@@ -194,13 +214,22 @@ class MultiSurfaceProject:
         if self.search_step <= 0:
             errors.append(f"Search step must be positive")
 
-        # Check geometries are valid
-        for surface_name in ['crane_pad', 'foundation', 'boom', 'rotor_storage']:
+        # Check geometries are valid (required surfaces)
+        for surface_name in ['crane_pad', 'foundation']:
             surface = getattr(self, surface_name)
             if surface.geometry.isEmpty():
                 errors.append(f"{surface.surface_type.display_name} geometry is empty")
             if not surface.geometry.isGeosValid():
                 errors.append(f"{surface.surface_type.display_name} geometry is invalid")
+
+        # Check geometries are valid (optional surfaces)
+        for surface_name in ['boom', 'rotor_storage']:
+            surface = getattr(self, surface_name)
+            if surface is not None:
+                if surface.geometry.isEmpty():
+                    errors.append(f"{surface.surface_type.display_name} geometry is empty")
+                if not surface.geometry.isGeosValid():
+                    errors.append(f"{surface.surface_type.display_name} geometry is invalid")
 
         if errors:
             return False, "; ".join(errors)
@@ -262,10 +291,16 @@ class MultiSurfaceCalculationResult:
         total_fill: Total fill volume across all surfaces
         total_volume_moved: Total volume moved
         net_volume: Net volume (cut - fill)
+        gravel_fill_external: External gravel fill volume (not from site)
+        boom_slope_percent: Optimized boom slope in percent
+        rotor_height_offset_optimized: Optimized rotor height offset in meters
     """
     crane_height: float
     fok: float
     surface_results: Dict[SurfaceType, SurfaceCalculationResult]
+    gravel_fill_external: float = 0.0  # External gravel volume (m³)
+    boom_slope_percent: float = 0.0  # Optimized boom slope (%)
+    rotor_height_offset_optimized: float = 0.0  # Optimized rotor height offset (m)
 
     @property
     def total_cut(self) -> float:
@@ -306,6 +341,9 @@ class MultiSurfaceCalculationResult:
             'total_fill': round(self.total_fill, 1),
             'total_volume_moved': round(self.total_volume_moved, 1),
             'net_volume': round(self.net_volume, 1),
+            'gravel_fill_external': round(self.gravel_fill_external, 1),
+            'boom_slope_percent': round(self.boom_slope_percent, 2),
+            'rotor_height_offset_optimized': round(self.rotor_height_offset_optimized, 3),
             'total_platform_area': round(self.total_platform_area, 1),
             'total_slope_area': round(self.total_slope_area, 1),
             'surfaces': {
@@ -371,5 +409,8 @@ class MultiSurfaceCalculationResult:
         return cls(
             crane_height=data['crane_height'],
             fok=data['fok'],
-            surface_results=surface_results
+            surface_results=surface_results,
+            gravel_fill_external=data.get('gravel_fill_external', 0.0),
+            boom_slope_percent=data.get('boom_slope_percent', 0.0),
+            rotor_height_offset_optimized=data.get('rotor_height_offset_optimized', 0.0)
         )

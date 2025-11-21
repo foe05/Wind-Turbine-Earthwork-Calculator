@@ -22,7 +22,8 @@ from qgis.core import (
     QgsRasterLayer,
     QgsGeometry,
     QgsPointXY,
-    QgsProcessingFeedback
+    QgsProcessingFeedback,
+    QgsRectangle
 )
 
 try:
@@ -201,37 +202,124 @@ class MultiSurfaceCalculator:
 
     def _prepare_surface_relationships(self):
         """Pre-calculate spatial relationships between surfaces."""
-        # Find connection edge between crane pad and boom
-        boom_edge, boom_length = find_connection_edge(
-            self.project.crane_pad.geometry,
-            self.project.boom.geometry
-        )
+        # Find connection edge between crane pad and boom (if boom exists)
+        if self.project.boom is not None:
+            boom_edge, boom_length = find_connection_edge(
+                self.project.crane_pad.geometry,
+                self.project.boom.geometry
+            )
 
-        if boom_length > 0:
-            self.boom_connection_edge = boom_edge
-            # Determine slope direction (perpendicular to edge, pointing into boom)
-            edge_angle = get_edge_direction(boom_edge)
-            # The slope goes perpendicular to the connection edge, into the boom surface
-            self.boom_slope_direction = perpendicular_direction(edge_angle)
+            if boom_length > 0:
+                self.boom_connection_edge = boom_edge
+                # Determine slope direction (perpendicular to edge, pointing into boom)
+                edge_angle = get_edge_direction(boom_edge)
+                # The slope goes perpendicular to the connection edge, into the boom surface
+                self.boom_slope_direction = perpendicular_direction(edge_angle)
 
+                self.logger.info(
+                    f"Boom connection edge: {boom_length:.1f}m, "
+                    f"slope direction: {self.boom_slope_direction:.1f}°"
+                )
+            else:
+                self.logger.warning("No connection edge found between crane pad and boom")
+        else:
+            self.logger.info("No boom surface configured (optional)")
+
+        # Find connection edge between crane pad and rotor storage (if rotor exists)
+        if self.project.rotor_storage is not None:
+            rotor_edge, rotor_length = find_connection_edge(
+                self.project.crane_pad.geometry,
+                self.project.rotor_storage.geometry
+            )
+
+            if rotor_length > 0:
+                self.rotor_connection_edge = rotor_edge
+                self.logger.info(f"Rotor storage connection edge: {rotor_length:.1f}m")
+            else:
+                self.logger.warning("No connection edge found between crane pad and rotor storage")
+        else:
+            self.logger.info("No rotor storage surface configured (optional)")
+
+    def detect_boom_slope_direction(self) -> tuple[float, float]:
+        """
+        Detect optimal boom slope direction based on terrain.
+
+        Analyzes terrain in boom area to determine if slope should be
+        positive (upward) or negative (downward).
+
+        Returns:
+            Tuple of (slope_min, slope_max) in percent
+            - If terrain slopes down: (negative, 0) e.g. (-4.0, 0.0)
+            - If terrain slopes up: (0, positive) e.g. (0.0, 4.0)
+        """
+        max_slope = self.project.boom_slope_max
+
+        # Check if boom surface exists
+        if self.project.boom is None:
+            self.logger.warning("No boom surface configured, returning zero slope")
+            return (0.0, 0.0)
+
+        if self.boom_connection_edge is None or self.boom_connection_edge.isEmpty():
+            self.logger.warning("No boom connection edge for slope direction detection, using full range")
+            return (-max_slope, max_slope)
+
+        if self.boom_slope_direction is None:
+            self.logger.warning("No boom slope direction calculated, using full range")
+            return (-max_slope, max_slope)
+
+        # Sample terrain in boom area
+        samples = self.sample_dem_with_positions(self.project.boom.geometry)
+
+        if len(samples) < 5:
+            self.logger.warning("Insufficient samples for slope direction detection, using full range")
+            return (-max_slope, max_slope)
+
+        # Calculate terrain slope in boom direction
+        distances = []
+        elevations = []
+
+        for point, elevation in samples:
+            distance = calculate_distance_from_edge(
+                point,
+                self.boom_connection_edge,
+                self.boom_slope_direction
+            )
+            if distance > 0:  # Only points in slope direction
+                distances.append(distance)
+                elevations.append(elevation)
+
+        if len(elevations) < 5:
+            self.logger.warning("Insufficient valid samples for slope direction detection, using full range")
+            return (-max_slope, max_slope)
+
+        # Calculate average terrain slope
+        terrain_slope = calculate_terrain_slope(elevations, distances)
+
+        max_slope = self.project.boom_slope_max
+
+        if terrain_slope < -0.5:
+            # Terrain slopes down significantly: allow negative slopes
+            slope_range = (-max_slope, 0.0)
             self.logger.info(
-                f"Boom connection edge: {boom_length:.1f}m, "
-                f"slope direction: {self.boom_slope_direction:.1f}°"
+                f"Boom terrain slopes DOWN ({terrain_slope:.1f}%), "
+                f"optimizing in range [{slope_range[0]:.1f}%, {slope_range[1]:.1f}%]"
+            )
+        elif terrain_slope > 0.5:
+            # Terrain slopes up significantly: allow positive slopes
+            slope_range = (0.0, max_slope)
+            self.logger.info(
+                f"Boom terrain slopes UP ({terrain_slope:.1f}%), "
+                f"optimizing in range [{slope_range[0]:.1f}%, {slope_range[1]:.1f}%]"
             )
         else:
-            self.logger.warning("No connection edge found between crane pad and boom")
+            # Terrain relatively flat: allow both directions
+            slope_range = (-max_slope, max_slope)
+            self.logger.info(
+                f"Boom terrain relatively FLAT ({terrain_slope:.1f}%), "
+                f"optimizing in range [{slope_range[0]:.1f}%, {slope_range[1]:.1f}%]"
+            )
 
-        # Find connection edge between crane pad and rotor storage
-        rotor_edge, rotor_length = find_connection_edge(
-            self.project.crane_pad.geometry,
-            self.project.rotor_storage.geometry
-        )
-
-        if rotor_length > 0:
-            self.rotor_connection_edge = rotor_edge
-            self.logger.info(f"Rotor storage connection edge: {rotor_length:.1f}m")
-        else:
-            self.logger.warning("No connection edge found between crane pad and rotor storage")
+        return slope_range
 
     def sample_dem_in_polygon(self, geometry: QgsGeometry, use_vectorized: bool = None) -> np.ndarray:
         """
@@ -281,12 +369,24 @@ class MultiSurfaceCalculator:
             # Get geometry bounding box
             bbox = geometry.boundingBox()
 
-            # Convert bbox to pixel coordinates
+            # Convert bbox to pixel coordinates using standard GDAL formula
+            # Geotransform: [origin_x, pixel_width, 0, origin_y, 0, pixel_height]
+            # pixel_height is typically negative (Y axis goes down in raster)
             origin_x, pixel_width, _, origin_y, _, pixel_height = geotransform
+
+            # Standard GDAL pixel coordinate calculation
+            # col = (x - origin_x) / pixel_width
+            # row = (y - origin_y) / pixel_height
             x_min_px = int((bbox.xMinimum() - origin_x) / pixel_width)
             x_max_px = int((bbox.xMaximum() - origin_x) / pixel_width) + 1
-            y_min_px = int((bbox.yMinimum() - origin_y) / pixel_height)
-            y_max_px = int((bbox.yMaximum() - origin_y) / pixel_height) + 1
+
+            # For Y: when pixel_height is negative, larger Y gives smaller row
+            y_min_px = int((bbox.yMaximum() - origin_y) / pixel_height)  # Note: yMaximum for min row
+            y_max_px = int((bbox.yMinimum() - origin_y) / pixel_height) + 1  # Note: yMinimum for max row
+
+            # Ensure min < max (in case of rounding issues)
+            if y_min_px > y_max_px:
+                y_min_px, y_max_px = y_max_px, y_min_px
 
             # Clamp to raster bounds
             x_min_px = max(0, x_min_px)
@@ -300,7 +400,12 @@ class MultiSurfaceCalculator:
 
             if width <= 0 or height <= 0:
                 ds = None
-                return np.array([])
+                self.logger.warning(
+                    f"Invalid raster window: width={width}, height={height}, "
+                    f"x_px=[{x_min_px},{x_max_px}], y_px=[{y_min_px},{y_max_px}], "
+                    f"pixel_height={pixel_height}, falling back to legacy method"
+                )
+                return self._sample_dem_legacy(geometry)
 
             # Read elevation data
             data = band.ReadAsArray(x_min_px, y_min_px, width, height)
@@ -327,9 +432,11 @@ class MultiSurfaceCalculator:
             mask_ds = mask_driver.Create('', width, height, 1, gdal.GDT_Byte)
 
             # Set geotransform for mask (adjusted to window)
+            # Standard GDAL: x = origin_x + col * pixel_width
+            #                y = origin_y + row * pixel_height
             mask_geotransform = list(geotransform)
             mask_geotransform[0] = origin_x + x_min_px * pixel_width
-            mask_geotransform[3] = origin_y + y_min_px * pixel_height
+            mask_geotransform[3] = origin_y + y_min_px * pixel_height  # Works for both positive and negative pixel_height
             mask_ds.SetGeoTransform(mask_geotransform)
 
             # Rasterize polygon to mask
@@ -351,6 +458,14 @@ class MultiSurfaceCalculator:
             ds = None
             mask_ds = None
             mem_ds = None
+
+            # If vectorized method returned no data, fall back to legacy
+            if len(masked_data) == 0:
+                self.logger.warning(
+                    f"Vectorized sampling returned no data (mask sum={np.sum(mask)}), "
+                    f"falling back to legacy method"
+                )
+                return self._sample_dem_legacy(geometry)
 
             return masked_data.astype(float).flatten()
 
@@ -390,8 +505,19 @@ class MultiSurfaceCalculator:
         if width <= 0 or height <= 0:
             return np.array([])
 
+        # Create pixel-aligned extent for block reading
+        # This is critical: provider.block() needs the actual extent that corresponds
+        # to the pixel coordinates we calculated
+        dem_extent = self.dem_layer.extent()
+        block_x_min = dem_extent.xMinimum() + x_min_px * self.pixel_size_x
+        block_x_max = dem_extent.xMinimum() + x_max_px * self.pixel_size_x
+        block_y_max = dem_extent.yMaximum() - y_min_px * self.pixel_size_y
+        block_y_min = dem_extent.yMaximum() - y_max_px * self.pixel_size_y
+
+        block_extent = QgsRectangle(block_x_min, block_y_min, block_x_max, block_y_max)
+
         # Read raster block
-        block = self.provider.block(1, bbox, width, height)
+        block = self.provider.block(1, block_extent, width, height)
 
         elevations = []
         for row in range(height):
@@ -441,15 +567,24 @@ class MultiSurfaceCalculator:
         if width <= 0 or height <= 0:
             return []
 
+        # Create pixel-aligned extent for block reading
+        dem_extent = self.dem_layer.extent()
+        block_x_min = dem_extent.xMinimum() + x_min_px * self.pixel_size_x
+        block_x_max = dem_extent.xMinimum() + x_max_px * self.pixel_size_x
+        block_y_max = dem_extent.yMaximum() - y_min_px * self.pixel_size_y
+        block_y_min = dem_extent.yMaximum() - y_max_px * self.pixel_size_y
+
+        block_extent = QgsRectangle(block_x_min, block_y_min, block_x_max, block_y_max)
+
         # Read raster block
-        block = self.provider.block(1, bbox, width, height)
+        block = self.provider.block(1, block_extent, width, height)
 
         samples = []
         for row in range(height):
             for col in range(width):
                 # Calculate world coordinates
-                x = self.dem_layer.extent().xMinimum() + (x_min_px + col) * self.pixel_size_x
-                y = self.dem_layer.extent().yMaximum() - (y_min_px + row) * self.pixel_size_y
+                x = dem_extent.xMinimum() + (x_min_px + col) * self.pixel_size_x
+                y = dem_extent.yMaximum() - (y_min_px + row) * self.pixel_size_y
 
                 point = QgsPointXY(x, y)
                 point_geom = QgsGeometry.fromPointXY(point)
@@ -539,7 +674,8 @@ class MultiSurfaceCalculator:
             terrain_mean=terrain_mean,
             additional_data={
                 'foundation_bottom': round(foundation_bottom, 2),
-                'foundation_depth': round(self.project.foundation_depth, 2)
+                'foundation_depth': round(self.project.foundation_depth, 2),
+                'planum_height': round(foundation_bottom, 2)  # Foundation bottom is the planum
             }
         )
 
@@ -643,7 +779,8 @@ class MultiSurfaceCalculator:
             }
         )
 
-    def _calculate_boom_surface(self, crane_height: float) -> SurfaceCalculationResult:
+    def _calculate_boom_surface(self, crane_height: float,
+                                boom_slope_percent: Optional[float] = None) -> SurfaceCalculationResult:
         """
         Calculate boom surface earthwork.
 
@@ -652,6 +789,7 @@ class MultiSurfaceCalculator:
 
         Args:
             crane_height: Crane pad height (connection edge is at this height)
+            boom_slope_percent: Optional slope override (if None, uses project default or auto-slope)
 
         Returns:
             Calculation result for boom surface
@@ -680,10 +818,15 @@ class MultiSurfaceCalculator:
             )
 
         # Determine slope percentage
-        slope_percent = self.project.boom.slope_longitudinal
+        if boom_slope_percent is not None:
+            # Use provided slope (from optimization)
+            slope_percent = boom_slope_percent
+        else:
+            # Use project default
+            slope_percent = self.project.boom.slope_longitudinal
 
-        # If auto-slope is enabled, try to match terrain
-        if self.project.boom.auto_slope:
+        # If auto-slope is enabled AND no explicit slope provided, try to match terrain
+        if self.project.boom.auto_slope and boom_slope_percent is None:
             # Calculate terrain slope in boom area
             distances = []
             elevations_for_slope = []
@@ -799,30 +942,38 @@ class MultiSurfaceCalculator:
             additional_data={
                 'slope_percent': round(slope_percent, 2),
                 'slope_direction': round(self.boom_slope_direction, 1),
-                'auto_slope': self.project.boom.auto_slope
+                'auto_slope': self.project.boom.auto_slope,
+                'slope_width': round(slope_width, 2),
+                'planum_height': round(crane_height - 50 * slope_percent / 100, 2)  # Estimated far end height
             }
         )
 
-    def _calculate_rotor_storage(self, crane_height: float) -> SurfaceCalculationResult:
+    def _calculate_rotor_storage(self, crane_height: float,
+                                 rotor_height_offset: Optional[float] = None) -> SurfaceCalculationResult:
         """
-        Calculate rotor storage earthwork.
+        Calculate rotor storage earthwork with holm logic.
 
-        The rotor storage is planar but at a different height than the crane pad,
-        determined by rotor_height_offset.
+        Special logic:
+        - If terrain is ABOVE rotor height: excavate entire area (cut)
+        - If terrain is BELOW rotor height: only fill at holm positions (not entire area)
 
         Args:
             crane_height: Crane pad height
+            rotor_height_offset: Optional height offset override (if None, uses project default)
 
         Returns:
             Calculation result for rotor storage
         """
         # Rotor storage height
-        rotor_height = crane_height + self.project.rotor_height_offset
+        if rotor_height_offset is not None:
+            rotor_height = crane_height + rotor_height_offset
+        else:
+            rotor_height = crane_height + self.project.rotor_height_offset
 
-        # Sample terrain
-        elevations = self.sample_dem_in_polygon(self.project.rotor_storage.geometry)
+        # Sample terrain with positions
+        samples = self.sample_dem_with_positions(self.project.rotor_storage.geometry)
 
-        if len(elevations) == 0:
+        if len(samples) == 0:
             self.logger.warning("No DEM data in rotor storage area")
             return SurfaceCalculationResult(
                 surface_type=SurfaceType.ROTOR_STORAGE,
@@ -832,33 +983,54 @@ class MultiSurfaceCalculator:
                 platform_area=0.0
             )
 
-        terrain_min = float(np.min(elevations))
-        terrain_max = float(np.max(elevations))
-        terrain_mean = float(np.mean(elevations))
+        elevations_only = [elev for _, elev in samples]
+        terrain_min = float(np.min(elevations_only))
+        terrain_max = float(np.max(elevations_only))
+        terrain_mean = float(np.mean(elevations_only))
 
-        # Calculate cut/fill
+        # Calculate cut/fill with holm logic
         cut_volume = 0.0
         fill_volume = 0.0
+        holm_fill_volume = 0.0
 
-        for elevation in elevations:
+        # Check if holms are defined
+        has_holms = (self.project.rotor_holms is not None and
+                     len(self.project.rotor_holms) > 0)
+
+        for point, elevation in samples:
             diff = elevation - rotor_height
+
             if diff > 0:
+                # Terrain ABOVE target: excavate (cut)
                 cut_volume += diff * self.pixel_area
             else:
-                fill_volume += abs(diff) * self.pixel_area
+                # Terrain BELOW target
+                if has_holms:
+                    # Only fill if point is within a holm
+                    point_geom = QgsGeometry.fromPointXY(point)
+                    is_in_holm = any(holm.contains(point_geom) for holm in self.project.rotor_holms)
 
-        # Calculate slope area
+                    if is_in_holm:
+                        holm_fill_volume += abs(diff) * self.pixel_area
+                else:
+                    # No holms defined: fill entire area (old behavior)
+                    fill_volume += abs(diff) * self.pixel_area
+
+        # Total fill is either holm fill or area fill
+        total_fill = holm_fill_volume if has_holms else fill_volume
+
+        # Calculate slope area (only for cut areas)
         max_height_diff = max(abs(terrain_max - rotor_height), abs(terrain_min - rotor_height))
         slope_width = self.calculate_slope_width(max_height_diff)
 
         slope_polygon = self.project.rotor_storage.geometry.buffer(slope_width, 16)
         slope_only = slope_polygon.difference(self.project.rotor_storage.geometry)
-        slope_elevations = self.sample_dem_in_polygon(slope_only)
+        slope_samples = self.sample_dem_with_positions(slope_only)
 
         slope_cut = 0.0
         slope_fill = 0.0
 
-        for elevation in slope_elevations:
+        for point, elevation in slope_samples:
             avg_height = (rotor_height + elevation) / 2.0
             diff = elevation - avg_height
 
@@ -868,21 +1040,26 @@ class MultiSurfaceCalculator:
                 slope_fill += abs(diff) * self.pixel_area
 
         total_cut = cut_volume + slope_cut
-        total_fill = fill_volume + slope_fill
+        total_fill_with_slope = total_fill + slope_fill
 
         area = self.project.rotor_storage.geometry.area()
         total_area = slope_polygon.area()
 
+        holm_info = ""
+        if has_holms:
+            holm_area = sum(holm.area() for holm in self.project.rotor_holms)
+            holm_info = f", holm_fill={holm_fill_volume:.1f}m³ (holm_area={holm_area:.1f}m²)"
+
         self.logger.info(
             f"Rotor storage @ {rotor_height:.2f}m: cut={total_cut:.1f}m³, "
-            f"fill={total_fill:.1f}m³, area={area:.1f}m²"
+            f"fill={total_fill_with_slope:.1f}m³, area={area:.1f}m²{holm_info}"
         )
 
         return SurfaceCalculationResult(
             surface_type=SurfaceType.ROTOR_STORAGE,
             target_height=rotor_height,
             cut_volume=total_cut,
-            fill_volume=total_fill,
+            fill_volume=total_fill_with_slope,
             platform_area=area,
             slope_area=total_area - area,
             total_area=total_area,
@@ -890,48 +1067,77 @@ class MultiSurfaceCalculator:
             terrain_max=terrain_max,
             terrain_mean=terrain_mean,
             additional_data={
-                'height_offset_from_crane': round(self.project.rotor_height_offset, 2)
+                'height_offset_from_crane': round(rotor_height_offset if rotor_height_offset is not None else self.project.rotor_height_offset, 2),
+                'holm_fill_volume': round(holm_fill_volume, 1) if has_holms else 0.0,
+                'has_holms': has_holms,
+                'slope_width': round(slope_width, 2),
+                'planum_height': round(rotor_height, 2)  # Rotor storage has flat target height
             }
         )
 
     def calculate_scenario(self, crane_height: float,
-                          feedback: Optional[QgsProcessingFeedback] = None) -> MultiSurfaceCalculationResult:
+                          feedback: Optional[QgsProcessingFeedback] = None,
+                          boom_slope_percent: Optional[float] = None,
+                          rotor_height_offset: Optional[float] = None) -> MultiSurfaceCalculationResult:
         """
         Calculate earthwork for all surfaces at a specific crane pad height.
 
         Args:
             crane_height: Crane pad height (m ü.NN)
             feedback: Optional feedback object
+            boom_slope_percent: Optional boom slope override (if None, uses project default)
+            rotor_height_offset: Optional rotor height offset override (if None, uses project default)
 
         Returns:
             Complete multi-surface calculation result
         """
+        # Use provided parameters or fall back to project defaults
+        if boom_slope_percent is None and self.project.boom is not None:
+            boom_slope_percent = self.project.boom.slope_longitudinal
+        if rotor_height_offset is None:
+            rotor_height_offset = self.project.rotor_height_offset
+
         # Calculate each surface
         foundation_result = self._calculate_foundation()
         crane_result = self._calculate_crane_pad(crane_height)
-        boom_result = self._calculate_boom_surface(crane_height)
-        rotor_result = self._calculate_rotor_storage(crane_height)
+
+        # Calculate optional surfaces
+        boom_result = None
+        if self.project.boom is not None:
+            boom_result = self._calculate_boom_surface(crane_height, boom_slope_percent or 0.0)
+
+        rotor_result = None
+        if self.project.rotor_storage is not None:
+            rotor_result = self._calculate_rotor_storage(crane_height, rotor_height_offset)
+
+        # Calculate gravel fill (external material)
+        gravel_volume = self.project.crane_pad.geometry.area() * self.project.gravel_thickness
 
         # Compile results
         surface_results = {
             SurfaceType.FOUNDATION: foundation_result,
             SurfaceType.CRANE_PAD: crane_result,
-            SurfaceType.BOOM: boom_result,
-            SurfaceType.ROTOR_STORAGE: rotor_result
         }
+
+        if boom_result is not None:
+            surface_results[SurfaceType.BOOM] = boom_result
+        if rotor_result is not None:
+            surface_results[SurfaceType.ROTOR_STORAGE] = rotor_result
 
         result = MultiSurfaceCalculationResult(
             crane_height=crane_height,
             fok=self.project.fok,
-            surface_results=surface_results
+            surface_results=surface_results,
+            gravel_fill_external=gravel_volume,
+            boom_slope_percent=boom_slope_percent,
+            rotor_height_offset_optimized=rotor_height_offset
         )
 
         if feedback:
             feedback.pushInfo(
-                f"  h={crane_height:.2f}m: "
-                f"total_cut={result.total_cut:.0f}m³, "
-                f"total_fill={result.total_fill:.0f}m³, "
-                f"total_moved={result.total_volume_moved:.0f}m³"
+                f"  h={crane_height:.2f}m, boom={boom_slope_percent:+.1f}%, rotor={rotor_height_offset:+.2f}m: "
+                f"cut={result.total_cut:.0f}m³, fill={result.total_fill:.0f}m³, "
+                f"net={result.net_volume:+.0f}m³, gravel={gravel_volume:.0f}m³"
             )
 
         return result
@@ -939,10 +1145,14 @@ class MultiSurfaceCalculator:
     def find_optimum(self, feedback: Optional[QgsProcessingFeedback] = None,
                     use_parallel: bool = True, max_workers: int = None) -> Tuple[float, MultiSurfaceCalculationResult]:
         """
-        Find optimal crane pad height that minimizes total earthwork volume.
+        Find optimal parameters that minimize net earthwork volume.
 
-        The search range is defined by project.search_min_height to project.search_max_height
-        (relative to FOK).
+        Multi-parameter optimization:
+        - Crane pad height
+        - Boom slope (if enabled)
+        - Rotor height offset (if enabled)
+
+        Uses two-stage optimization (coarse + fine) for efficiency.
 
         Args:
             feedback: Optional feedback object
@@ -952,6 +1162,324 @@ class MultiSurfaceCalculator:
         Returns:
             Tuple of (optimal_crane_height, results)
         """
+        # Check if multi-parameter optimization is enabled
+        optimize_boom = self.project.boom_slope_optimize
+        optimize_rotor = self.project.rotor_height_optimize
+        optimize_for_net = self.project.optimize_for_net_earthwork
+
+        if not optimize_boom and not optimize_rotor:
+            # Simple single-parameter optimization (old behavior)
+            self.logger.info("Single-parameter optimization (crane height only)")
+            return self._find_optimum_single_parameter(feedback, use_parallel, max_workers)
+        else:
+            # Multi-parameter optimization
+            self.logger.info(
+                f"Multi-parameter optimization: "
+                f"crane_height=YES, boom_slope={optimize_boom}, rotor_height={optimize_rotor}, "
+                f"optimize_for={'NET' if optimize_for_net else 'TOTAL'}"
+            )
+            return self._find_optimum_multi_parameter(feedback, use_parallel, max_workers)
+
+    def _find_optimum_multi_parameter(self, feedback: Optional[QgsProcessingFeedback],
+                                      use_parallel: bool, max_workers: int) -> Tuple[float, MultiSurfaceCalculationResult]:
+        """
+        Multi-parameter optimization with two-stage search (coarse + fine).
+
+        Optimizes:
+        - Crane pad height
+        - Boom slope (if enabled)
+        - Rotor height offset (if enabled)
+
+        Returns:
+            Tuple of (optimal_crane_height, best_result)
+        """
+        # Detect boom slope direction (only if boom surface exists)
+        if self.project.boom is not None and self.project.boom_slope_optimize:
+            boom_slope_min, boom_slope_max = self.detect_boom_slope_direction()
+        elif self.project.boom is not None:
+            boom_slope_min = boom_slope_max = self.project.boom.slope_longitudinal
+        else:
+            boom_slope_min = boom_slope_max = 0.0
+
+        # === STAGE 1: COARSE SEARCH ===
+        self.logger.info("=" * 60)
+        self.logger.info("STAGE 1: COARSE SEARCH")
+        self.logger.info("=" * 60)
+
+        if feedback:
+            feedback.pushInfo("\n" + "=" * 60)
+            feedback.pushInfo("STAGE 1: COARSE SEARCH")
+            feedback.pushInfo("=" * 60)
+
+        # Crane height range
+        height_min = self.project.search_min_height
+        height_max = self.project.search_max_height
+        height_step_coarse = 1.0  # 1m steps for coarse search
+
+        # Boom slope range (only if boom surface exists)
+        if self.project.boom is not None and self.project.boom_slope_optimize:
+            slope_step_coarse = self.project.boom_slope_step_coarse
+            boom_slopes_coarse = np.arange(boom_slope_min, boom_slope_max + slope_step_coarse, slope_step_coarse)
+        elif self.project.boom is not None:
+            boom_slopes_coarse = [self.project.boom.slope_longitudinal]
+        else:
+            boom_slopes_coarse = [0.0]  # No boom surface
+
+        # Rotor height range (only if rotor storage exists)
+        if self.project.rotor_storage is not None and self.project.rotor_height_optimize:
+            rotor_offset_min = -self.project.rotor_height_offset_max
+            rotor_offset_max = self.project.rotor_height_offset_max
+            rotor_step_coarse = self.project.rotor_height_step_coarse
+            rotor_offsets_coarse = np.arange(rotor_offset_min, rotor_offset_max + rotor_step_coarse, rotor_step_coarse)
+        elif self.project.rotor_storage is not None:
+            rotor_offsets_coarse = [self.project.rotor_height_offset]
+        else:
+            rotor_offsets_coarse = [0.0]  # No rotor storage
+
+        heights_coarse = np.arange(height_min, height_max + height_step_coarse, height_step_coarse)
+
+        num_coarse = len(heights_coarse) * len(boom_slopes_coarse) * len(rotor_offsets_coarse)
+
+        self.logger.info(
+            f"Coarse search: {len(heights_coarse)} heights × "
+            f"{len(boom_slopes_coarse)} boom slopes × "
+            f"{len(rotor_offsets_coarse)} rotor offsets = {num_coarse} scenarios"
+        )
+
+        if feedback:
+            feedback.pushInfo(
+                f"Testing {num_coarse} parameter combinations (coarse search)..."
+            )
+
+        best_coarse_volume = float('inf')
+        best_coarse_params = None
+        best_coarse_result = None
+
+        scenario_count = 0
+        for crane_h in heights_coarse:
+            for boom_slope in boom_slopes_coarse:
+                for rotor_offset in rotor_offsets_coarse:
+                    if feedback and feedback.isCanceled():
+                        break
+
+                    try:
+                        result = self.calculate_scenario(
+                            crane_height=crane_h,
+                            feedback=None,  # Suppress individual feedback
+                            boom_slope_percent=boom_slope,
+                            rotor_height_offset=rotor_offset
+                        )
+
+                        # Choose optimization metric
+                        if self.project.optimize_for_net_earthwork:
+                            metric_volume = abs(result.net_volume)
+                        else:
+                            metric_volume = result.total_volume_moved
+
+                        if metric_volume < best_coarse_volume:
+                            best_coarse_volume = metric_volume
+                            best_coarse_params = (crane_h, boom_slope, rotor_offset)
+                            best_coarse_result = result
+
+                        scenario_count += 1
+
+                        # Progress update every 50 scenarios
+                        if feedback and scenario_count % 50 == 0:
+                            progress = int((scenario_count / num_coarse) * 50)  # 0-50% for coarse
+                            feedback.setProgress(progress)
+                            feedback.pushInfo(
+                                f"  Coarse: {scenario_count}/{num_coarse} - "
+                                f"Best so far: h={best_coarse_params[0]:.1f}m, "
+                                f"slope={best_coarse_params[1]:+.1f}%, "
+                                f"rotor={best_coarse_params[2]:+.2f}m, "
+                                f"{'net' if self.project.optimize_for_net_earthwork else 'total'}={best_coarse_volume:.0f}m³"
+                            )
+
+                    except Exception as e:
+                        self.logger.error(
+                            f"Error in coarse search at h={crane_h:.1f}, "
+                            f"slope={boom_slope:.1f}, rotor={rotor_offset:.2f}: {e}",
+                            exc_info=True
+                        )
+                        # Store first error for better diagnostics
+                        if best_coarse_params is None and scenario_count == 0:
+                            first_error = e
+
+        if best_coarse_params is None:
+            error_msg = "No valid scenarios found in coarse search"
+            if 'first_error' in locals():
+                error_msg += f". First error: {first_error}"
+            raise ValueError(error_msg)
+
+        crane_h_coarse, boom_slope_coarse, rotor_offset_coarse = best_coarse_params
+
+        self.logger.info(
+            f"Coarse search complete: h={crane_h_coarse:.1f}m, "
+            f"slope={boom_slope_coarse:+.1f}%, rotor={rotor_offset_coarse:+.2f}m, "
+            f"{'net' if self.project.optimize_for_net_earthwork else 'total'}={best_coarse_volume:.0f}m³"
+        )
+
+        # === STAGE 2: FINE SEARCH ===
+        self.logger.info("=" * 60)
+        self.logger.info("STAGE 2: FINE SEARCH")
+        self.logger.info("=" * 60)
+
+        if feedback:
+            feedback.pushInfo("\n" + "=" * 60)
+            feedback.pushInfo("STAGE 2: FINE SEARCH")
+            feedback.pushInfo("=" * 60)
+
+        # Fine search around best coarse result
+        height_step_fine = self.project.search_step  # Use user-specified fine step
+        heights_fine = np.arange(
+            crane_h_coarse - 1.0,
+            crane_h_coarse + 1.0 + height_step_fine,
+            height_step_fine
+        )
+
+        if self.project.boom is not None and self.project.boom_slope_optimize:
+            slope_step_fine = self.project.boom_slope_step_fine
+            boom_slopes_fine = np.arange(
+                boom_slope_coarse - 0.5,
+                boom_slope_coarse + 0.5 + slope_step_fine,
+                slope_step_fine
+            )
+            # Clamp to valid range
+            boom_slopes_fine = boom_slopes_fine[
+                (boom_slopes_fine >= boom_slope_min) & (boom_slopes_fine <= boom_slope_max)
+            ]
+        elif self.project.boom is not None:
+            boom_slopes_fine = [boom_slope_coarse]
+        else:
+            boom_slopes_fine = [0.0]  # No boom surface
+
+        if self.project.rotor_storage is not None and self.project.rotor_height_optimize:
+            rotor_step_fine = self.project.rotor_height_step_fine
+            rotor_offsets_fine = np.arange(
+                rotor_offset_coarse - 0.2,
+                rotor_offset_coarse + 0.2 + rotor_step_fine,
+                rotor_step_fine
+            )
+            # Clamp to valid range
+            rotor_offsets_fine = rotor_offsets_fine[
+                (rotor_offsets_fine >= -self.project.rotor_height_offset_max) &
+                (rotor_offsets_fine <= self.project.rotor_height_offset_max)
+            ]
+        elif self.project.rotor_storage is not None:
+            rotor_offsets_fine = [rotor_offset_coarse]
+        else:
+            rotor_offsets_fine = [0.0]  # No rotor storage
+
+        num_fine = len(heights_fine) * len(boom_slopes_fine) * len(rotor_offsets_fine)
+
+        self.logger.info(
+            f"Fine search: {len(heights_fine)} heights × "
+            f"{len(boom_slopes_fine)} boom slopes × "
+            f"{len(rotor_offsets_fine)} rotor offsets = {num_fine} scenarios"
+        )
+
+        if feedback:
+            feedback.pushInfo(
+                f"Testing {num_fine} parameter combinations (fine search)..."
+            )
+
+        best_fine_volume = float('inf')
+        best_fine_params = None
+        best_fine_result = None
+
+        scenario_count = 0
+        for crane_h in heights_fine:
+            for boom_slope in boom_slopes_fine:
+                for rotor_offset in rotor_offsets_fine:
+                    if feedback and feedback.isCanceled():
+                        break
+
+                    try:
+                        result = self.calculate_scenario(
+                            crane_height=crane_h,
+                            feedback=None,
+                            boom_slope_percent=boom_slope,
+                            rotor_height_offset=rotor_offset
+                        )
+
+                        # Choose optimization metric
+                        if self.project.optimize_for_net_earthwork:
+                            metric_volume = abs(result.net_volume)
+                        else:
+                            metric_volume = result.total_volume_moved
+
+                        if metric_volume < best_fine_volume:
+                            best_fine_volume = metric_volume
+                            best_fine_params = (crane_h, boom_slope, rotor_offset)
+                            best_fine_result = result
+
+                        scenario_count += 1
+
+                        # Progress update every 20 scenarios
+                        if feedback and scenario_count % 20 == 0:
+                            progress = 50 + int((scenario_count / num_fine) * 50)  # 50-100% for fine
+                            feedback.setProgress(progress)
+                            feedback.pushInfo(
+                                f"  Fine: {scenario_count}/{num_fine} - "
+                                f"Best so far: h={best_fine_params[0]:.2f}m, "
+                                f"slope={best_fine_params[1]:+.2f}%, "
+                                f"rotor={best_fine_params[2]:+.3f}m, "
+                                f"{'net' if self.project.optimize_for_net_earthwork else 'total'}={best_fine_volume:.0f}m³"
+                            )
+
+                    except Exception as e:
+                        self.logger.error(
+                            f"Error in fine search at h={crane_h:.2f}, "
+                            f"slope={boom_slope:.2f}, rotor={rotor_offset:.3f}: {e}"
+                        )
+
+        if best_fine_params is None:
+            # Fall back to coarse result
+            self.logger.warning("Fine search failed, using coarse result")
+            best_fine_params = best_coarse_params
+            best_fine_result = best_coarse_result
+            best_fine_volume = best_coarse_volume
+
+        crane_h_opt, boom_slope_opt, rotor_offset_opt = best_fine_params
+
+        self.logger.info("=" * 60)
+        self.logger.info("OPTIMIZATION COMPLETE")
+        self.logger.info("=" * 60)
+        self.logger.info(
+            f"Optimal parameters:\n"
+            f"  Crane height: {crane_h_opt:.2f}m (offset from FOK: {(crane_h_opt - self.project.fok):+.2f}m)\n"
+            f"  Boom slope: {boom_slope_opt:+.2f}%\n"
+            f"  Rotor offset: {rotor_offset_opt:+.3f}m\n"
+            f"  {'Net' if self.project.optimize_for_net_earthwork else 'Total'} earthwork: {best_fine_volume:.0f}m³\n"
+            f"  Cut: {best_fine_result.total_cut:.0f}m³, Fill: {best_fine_result.total_fill:.0f}m³\n"
+            f"  Net: {best_fine_result.net_volume:+.0f}m³, Gravel: {best_fine_result.gravel_fill_external:.0f}m³"
+        )
+
+        if feedback:
+            feedback.pushInfo("\n" + "=" * 60)
+            feedback.pushInfo("✓ OPTIMIZATION COMPLETE")
+            feedback.pushInfo("=" * 60)
+            feedback.pushInfo(
+                f"Optimal crane height: {crane_h_opt:.2f}m (FOK: {self.project.fok:.2f}m, offset: {(crane_h_opt - self.project.fok):+.2f}m)"
+            )
+            feedback.pushInfo(f"Optimal boom slope: {boom_slope_opt:+.2f}%")
+            feedback.pushInfo(f"Optimal rotor offset: {rotor_offset_opt:+.3f}m")
+            feedback.pushInfo(
+                f"{'Net' if self.project.optimize_for_net_earthwork else 'Total'} earthwork: {best_fine_volume:.0f}m³"
+            )
+            feedback.pushInfo(
+                f"Cut: {best_fine_result.total_cut:.0f}m³, "
+                f"Fill: {best_fine_result.total_fill:.0f}m³, "
+                f"Net: {best_fine_result.net_volume:+.0f}m³"
+            )
+            feedback.pushInfo(f"External gravel: {best_fine_result.gravel_fill_external:.0f}m³")
+            feedback.setProgress(100)
+
+        return crane_h_opt, best_fine_result
+
+    def _find_optimum_single_parameter(self, feedback: Optional[QgsProcessingFeedback],
+                                       use_parallel: bool, max_workers: int) -> Tuple[float, MultiSurfaceCalculationResult]:
+        """Single-parameter optimization (crane height only, backward compatible)."""
         min_height = self.project.search_min_height
         max_height = self.project.search_max_height
         step = self.project.search_step
@@ -968,18 +1496,13 @@ class MultiSurfaceCalculator:
         if use_parallel and num_scenarios >= 10:
             self.logger.info(f"Using parallel optimization for {num_scenarios} scenarios")
             try:
-                return self._find_optimum_parallel(heights, feedback, max_workers)
+                return self._find_optimum_sequential(heights, feedback)
             except ValueError as e:
-                # If all parallel scenarios failed, fall back to sequential
                 if "No valid scenarios found" in str(e):
-                    self.logger.warning(
-                        "Parallel optimization failed completely, falling back to sequential processing"
-                    )
+                    self.logger.warning("Optimization failed completely")
                     if feedback:
-                        feedback.pushInfo(
-                            "⚠ Parallel processing failed, retrying with sequential processing..."
-                        )
-                    return self._find_optimum_sequential(heights, feedback)
+                        feedback.pushInfo("⚠ Optimization failed")
+                    raise
                 else:
                     raise
         else:
@@ -1010,13 +1533,19 @@ class MultiSurfaceCalculator:
                 result = self.calculate_scenario(height, feedback)
                 all_results.append(result)
 
-                total_volume = result.total_volume_moved
+                # Choose optimization metric
+                if self.project.optimize_for_net_earthwork:
+                    # Optimize for net volume (minimize absolute difference between cut and fill)
+                    metric_volume = abs(result.net_volume)
+                else:
+                    # Optimize for total volume (minimize total earthwork)
+                    metric_volume = result.total_volume_moved
 
-                if total_volume < best_volume:
-                    best_volume = total_volume
+                if metric_volume < best_volume:
+                    best_volume = metric_volume
                     best_height = height
                     best_result = result
-                elif total_volume == best_volume:
+                elif metric_volume == best_volume:
                     # Tie-breaker: prefer more balanced cut/fill
                     if abs(result.net_volume) < abs(best_result.net_volume):
                         best_height = height
@@ -1076,22 +1605,22 @@ class MultiSurfaceCalculator:
         project_dict = {
             'crane_wkt': self.project.crane_pad.geometry.asWkt(),
             'foundation_wkt': self.project.foundation.geometry.asWkt(),
-            'boom_wkt': self.project.boom.geometry.asWkt(),
-            'rotor_wkt': self.project.rotor_storage.geometry.asWkt(),
+            'boom_wkt': self.project.boom.geometry.asWkt() if self.project.boom else None,
+            'rotor_wkt': self.project.rotor_storage.geometry.asWkt() if self.project.rotor_storage else None,
             'dxf_path': getattr(self.project.crane_pad, 'dxf_path', ''),  # DXF source path
             'fok': self.project.fok,
             'foundation_depth': self.project.foundation_depth,
             'gravel_thickness': self.project.gravel_thickness,
             'rotor_height_offset': self.project.rotor_height_offset,
             'slope_angle': self.project.slope_angle,
-            'boom_slope': self.project.boom.slope_longitudinal,
-            'boom_auto_slope': self.project.boom.auto_slope,
-            'boom_slope_min': getattr(self.project.boom, 'slope_min', 2.0),
-            'boom_slope_max': getattr(self.project.boom, 'slope_max', 8.0),
+            'boom_slope': self.project.boom.slope_longitudinal if self.project.boom else 0.0,
+            'boom_auto_slope': self.project.boom.auto_slope if self.project.boom else False,
+            'boom_slope_min': getattr(self.project.boom, 'slope_min', 2.0) if self.project.boom else 2.0,
+            'boom_slope_max': getattr(self.project.boom, 'slope_max', 8.0) if self.project.boom else 8.0,
             'crane_metadata': self.project.crane_pad.metadata,
             'foundation_metadata': self.project.foundation.metadata,
-            'boom_metadata': self.project.boom.metadata,
-            'rotor_metadata': self.project.rotor_storage.metadata,
+            'boom_metadata': self.project.boom.metadata if self.project.boom else {},
+            'rotor_metadata': self.project.rotor_storage.metadata if self.project.rotor_storage else {},
         }
 
         dem_path = self.dem_layer.source()

@@ -387,6 +387,9 @@ class DEMDownloader:
                 feedback=feedback
             )
 
+            if result is None or 'OUTPUT' not in result:
+                raise Exception("GDAL merge failed - no output returned")
+
             mosaic_path = result['OUTPUT']
             self.logger.info(f"Mosaic created: {mosaic_path}")
 

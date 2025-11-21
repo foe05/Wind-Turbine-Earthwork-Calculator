@@ -705,3 +705,128 @@ class DXFImporter:
         """
         crs = QgsCoordinateReferenceSystem(f"EPSG:{self.crs_epsg}")
         return crs
+
+    def import_holms(self, layer_name: Optional[str] = None) -> Tuple[List[QgsGeometry], dict]:
+        """
+        Import multiple holm (blade support beam) polygons from DXF.
+
+        Holms are imported as separate polygons. Each closed polyline or
+        set of connected lines forms one holm polygon.
+
+        Args:
+            layer_name (str): Layer name to filter (None = all layers)
+
+        Returns:
+            Tuple[List[QgsGeometry], dict]: List of holm polygons and metadata
+
+        Raises:
+            ImportError: If required packages are not available
+            ValueError: If no holms can be imported
+        """
+        self.logger.info(f"Importing holms from DXF: {self.dxf_path}")
+
+        # Extract polylines from DXF
+        polylines = self.extract_polylines(layer_name=layer_name)
+
+        if not polylines:
+            raise ValueError(f"No polylines found in DXF file")
+
+        self.logger.info(f"Found {len(polylines)} polylines for holm import")
+
+        # Group polylines into separate closed polygons
+        holm_geometries = []
+        failed_holms = 0
+
+        # Strategy 1: Each polyline is a separate holm (if closed)
+        for i, polyline in enumerate(polylines):
+            try:
+                # Check if polyline is closed
+                if len(polyline) >= 3:
+                    first_pt = polyline[0]
+                    last_pt = polyline[-1]
+
+                    is_closed = point_distance(first_pt, last_pt) <= self.tolerance
+
+                    if is_closed:
+                        # Create polygon from closed polyline
+                        qgs_points = [QgsPointXY(x, y) for x, y in polyline]
+                        holm_geom = QgsGeometry.fromPolygonXY([qgs_points])
+
+                        if holm_geom and not holm_geom.isEmpty() and holm_geom.isGeosValid():
+                            holm_geometries.append(holm_geom)
+                            self.logger.info(
+                                f"Holm {len(holm_geometries)}: {len(polyline)} vertices, "
+                                f"area={holm_geom.area():.2f}m²"
+                            )
+                        else:
+                            self.logger.warning(f"Polyline {i} forms invalid holm geometry")
+                            failed_holms += 1
+                    else:
+                        self.logger.debug(
+                            f"Polyline {i} is not closed (gap: {point_distance(first_pt, last_pt):.3f}m)"
+                        )
+
+            except Exception as e:
+                self.logger.error(f"Error creating holm from polyline {i}: {e}")
+                failed_holms += 1
+
+        # Strategy 2: If we didn't find enough closed polylines, try to connect lines
+        if len(holm_geometries) == 0 and SHAPELY_AVAILABLE:
+            self.logger.info("No closed polylines found, attempting to polygonize all lines...")
+
+            try:
+                from shapely.ops import polygonize
+                from shapely.geometry import LineString
+
+                # Convert all polylines to shapely LineStrings
+                shapely_lines = []
+                for polyline in polylines:
+                    if len(polyline) >= 2:
+                        shapely_lines.append(LineString(polyline))
+
+                # Polygonize to find all closed polygons
+                polygons = list(polygonize(shapely_lines))
+
+                self.logger.info(f"Polygonize found {len(polygons)} polygons")
+
+                for poly in polygons:
+                    if not poly.is_empty and poly.is_valid and poly.area > 1.0:  # Min 1m² area
+                        coords = list(poly.exterior.coords)
+                        qgs_points = [QgsPointXY(x, y) for x, y in coords]
+                        holm_geom = QgsGeometry.fromPolygonXY([qgs_points])
+
+                        if holm_geom and not holm_geom.isEmpty():
+                            holm_geometries.append(holm_geom)
+                            self.logger.info(
+                                f"Holm {len(holm_geometries)} (from polygonize): "
+                                f"area={holm_geom.area():.2f}m²"
+                            )
+
+            except Exception as e:
+                self.logger.error(f"Polygonize method failed: {e}")
+
+        if not holm_geometries:
+            raise ValueError(
+                f"No valid holm geometries could be created from {len(polylines)} polylines. "
+                f"Failed attempts: {failed_holms}"
+            )
+
+        # Create metadata
+        total_area = sum(h.area() for h in holm_geometries)
+        metadata = {
+            'source_file': str(self.dxf_path),
+            'num_holms': len(holm_geometries),
+            'total_area': total_area,
+            'failed_holms': failed_holms,
+            'crs_epsg': self.crs_epsg,
+            'tolerance': self.tolerance,
+            'individual_areas': [round(h.area(), 2) for h in holm_geometries]
+        }
+
+        self.logger.info(
+            f"Successfully imported {len(holm_geometries)} holms: "
+            f"total area = {total_area:.2f}m², "
+            f"failed = {failed_holms}"
+        )
+
+        return holm_geometries, metadata

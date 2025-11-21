@@ -41,7 +41,9 @@ from ..utils.geometry_utils import (
     create_parallel_longitudinal_sections,
     create_oriented_bounding_box,
     create_cross_sections_over_bbox,
-    create_longitudinal_sections_over_bbox
+    create_longitudinal_sections_over_bbox,
+    calculate_distance_from_edge,
+    calculate_slope_height
 )
 from ..utils.logging_utils import get_plugin_logger
 
@@ -84,29 +86,97 @@ def _plot_single_profile(profile_data: Dict, output_path: str, profile_type: str
 
         distances = profile_data['distances']
         existing = profile_data['existing_z']
-        planned = profile_data['planned_z']
+        bottom_z = profile_data.get('bottom_z', profile_data['planned_z'])
         cut_fill = profile_data['cut_fill']
 
-        # Plot lines
-        ax.plot(distances, existing, 'k-', linewidth=2, label='Bestehendes Gelände')
-        ax.plot(distances, planned, 'b-', linewidth=2, label='Geplante Plattform')
+        # Get additional surface data
+        crane_top_z = profile_data.get('crane_top_z', None)
+        foundation_fok_z = profile_data.get('foundation_fok_z', profile_data.get('foundation_z', None))
+        foundation_bottom_z = profile_data.get('foundation_bottom_z', None)
+        boom_z = profile_data.get('boom_z', None)
+        rotor_z = profile_data.get('rotor_z', None)
 
-        # Fill areas
+        # Helper function to extract valid data for plotting
+        def extract_valid_data(arr, distances):
+            if arr is None:
+                return [], []
+            dist_list = []
+            height_list = []
+            for i, z in enumerate(arr):
+                if z is not None:
+                    dist_list.append(distances[i])
+                    height_list.append(z)
+            return dist_list, height_list
+
+        # Plot terrain (existing ground)
+        ax.plot(distances, existing, 'k-', linewidth=2, label='Bestehendes Gelände', zorder=10)
+
+        # Plot unified bottom line (Unterkante aller Flächen) - blue solid line
+        ax.plot(distances, bottom_z, color='#1f77b4', linewidth=2,
+                label='Unterkante (Planum/Sohle)', zorder=6)
+
+        # Plot crane pad top (gravel surface) - black dashed line
+        crane_top_dist, crane_top_heights = extract_valid_data(crane_top_z, distances)
+        if crane_top_dist:
+            ax.plot(crane_top_dist, crane_top_heights, color='black',
+                   linewidth=2, label='Kranstellfläche (OK Schotter)', zorder=7, linestyle='--')
+
+        # Plot foundation FOK - red dashed line
+        fok_dist, fok_heights = extract_valid_data(foundation_fok_z, distances)
+        if fok_dist:
+            ax.plot(fok_dist, fok_heights, color='#d62728',
+                   linewidth=2.5, label='Fundament (FOK)', zorder=8, linestyle='--')
+
+        # Plot foundation bottom - red dotted line (optional, for detail)
+        foundation_bottom_dist, foundation_bottom_heights = extract_valid_data(foundation_bottom_z, distances)
+        if foundation_bottom_dist:
+            ax.plot(foundation_bottom_dist, foundation_bottom_heights, color='#d62728',
+                   linewidth=1.5, label='Fundament (UK)', zorder=5, linestyle=':')
+
+        # Plot boom surface - orange solid line
+        boom_dist, boom_heights = extract_valid_data(boom_z, distances)
+        if boom_dist:
+            ax.plot(boom_dist, boom_heights, color='#ff7f0e',
+                   linewidth=2, label='Auslegerfläche', zorder=6)
+
+        # Plot rotor storage - green solid line
+        rotor_dist, rotor_heights = extract_valid_data(rotor_z, distances)
+        if rotor_dist:
+            ax.plot(rotor_dist, rotor_heights, color='#2ca02c',
+                   linewidth=2, label='Blattlagerfläche', zorder=6)
+
+        # Fill areas (Cut/Fill between existing terrain and bottom_z)
         cut_mask = cut_fill > 0
         if np.any(cut_mask):
             ax.fill_between(
-                distances, existing, planned,
+                distances, existing, bottom_z,
                 where=cut_mask,
-                color='red', alpha=0.3, label='Abtrag'
+                color='red', alpha=0.3, label='Abtrag', zorder=1
             )
 
         fill_mask = cut_fill < 0
         if np.any(fill_mask):
             ax.fill_between(
-                distances, existing, planned,
+                distances, existing, bottom_z,
                 where=fill_mask,
-                color='green', alpha=0.3, label='Auftrag'
+                color='green', alpha=0.3, label='Auftrag', zorder=1
             )
+
+        # Plot slope lines (Böschungen)
+        slope_lines = profile_data.get('slope_lines', [])
+        slope_plotted = False
+        for slope in slope_lines:
+            slope_label = 'Böschung' if not slope_plotted else None
+            ax.plot(
+                [slope['start_dist'], slope['end_dist']],
+                [slope['start_z'], slope['end_z']],
+                color='#8B4513',  # Brown color for slopes
+                linewidth=1.5,
+                linestyle='-.',
+                label=slope_label,
+                zorder=4
+            )
+            slope_plotted = True
 
         # Labels
         max_distance = distances[-1] if len(distances) > 0 else 0
@@ -126,8 +196,12 @@ def _plot_single_profile(profile_data: Dict, output_path: str, profile_type: str
 
         # Grid and legend
         ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+
+        # Dynamic column count based on number of legend entries
+        handles, labels = ax.get_legend_handles_labels()
+        ncols = min(5, len(handles))  # Max 5 columns
         ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08),
-                 ncol=4, fontsize=10, frameon=True, fancybox=True)
+                 ncol=ncols, fontsize=8, frameon=True, fancybox=True)
 
         # Set limits
         if xlim:
@@ -161,14 +235,38 @@ class ProfileGenerator:
     """
 
     def __init__(self, dem_layer: QgsRasterLayer, polygon: QgsGeometry,
-                 platform_height: float):
+                 platform_height: float,
+                 foundation_geometry: QgsGeometry = None,
+                 foundation_height: float = None,
+                 foundation_depth: float = 3.5,
+                 gravel_thickness: float = 0.5,
+                 slope_angle: float = 45.0,
+                 boom_geometry: QgsGeometry = None,
+                 boom_connection_edge: QgsGeometry = None,
+                 boom_slope_direction: float = None,
+                 boom_slope_percent: float = 0.0,
+                 rotor_geometry: QgsGeometry = None,
+                 rotor_height: float = None,
+                 rotor_holms: list = None):
         """
         Initialize profile generator.
 
         Args:
             dem_layer (QgsRasterLayer): Digital elevation model
-            polygon (QgsGeometry): Platform polygon
+            polygon (QgsGeometry): Platform polygon (crane pad)
             platform_height (float): Optimized platform height (m above sea level)
+            foundation_geometry (QgsGeometry): Foundation polygon (optional)
+            foundation_height (float): Foundation height (FOK) in m ü.NN (optional)
+            foundation_depth (float): Depth below FOK to foundation bottom (default: 3.5m)
+            gravel_thickness (float): Gravel layer thickness on crane pad (default: 0.5m)
+            slope_angle (float): Embankment slope angle in degrees (default: 45°)
+            boom_geometry (QgsGeometry): Boom surface polygon (optional)
+            boom_connection_edge (QgsGeometry): Connection edge between crane and boom (optional)
+            boom_slope_direction (float): Slope direction angle in degrees (optional)
+            boom_slope_percent (float): Boom slope in percent (optional)
+            rotor_geometry (QgsGeometry): Rotor storage polygon (optional)
+            rotor_height (float): Rotor storage height in m ü.NN (optional)
+            rotor_holms (list): List of QgsGeometry polygons for rotor support beams (optional)
         """
         if not MATPLOTLIB_AVAILABLE:
             raise ImportError(
@@ -180,6 +278,20 @@ class ProfileGenerator:
         self.polygon = polygon
         self.platform_height = platform_height
         self.logger = get_plugin_logger()
+
+        # Additional surface geometries and heights
+        self.foundation_geometry = foundation_geometry
+        self.foundation_height = foundation_height
+        self.foundation_depth = foundation_depth
+        self.gravel_thickness = gravel_thickness
+        self.slope_angle = slope_angle
+        self.boom_geometry = boom_geometry
+        self.boom_connection_edge = boom_connection_edge
+        self.boom_slope_direction = boom_slope_direction
+        self.boom_slope_percent = boom_slope_percent
+        self.rotor_geometry = rotor_geometry
+        self.rotor_height = rotor_height
+        self.rotor_holms = rotor_holms or []
 
         # Get polygon properties
         self.centroid = get_centroid(polygon)
@@ -404,8 +516,14 @@ class ProfileGenerator:
             Dict: Profile data with:
                 - distances: np.array of distances from line start
                 - existing_z: np.array of existing terrain elevations
-                - planned_z: np.array of planned elevations (platform height)
+                - bottom_z: np.array of bottom elevations for all surfaces (for Cut/Fill)
+                - crane_top_z: np.array of crane pad top (gravel surface) heights
+                - foundation_fok_z: np.array of foundation FOK heights (top edge)
+                - foundation_bottom_z: np.array of foundation bottom heights
+                - boom_z: np.array of boom surface heights
+                - rotor_z: np.array of rotor storage heights
                 - cut_fill: np.array of cut (+) / fill (-) values
+                - in_holm: np.array of boolean flags for holm areas
         """
         line_length = line_geom.length()
 
@@ -420,44 +538,258 @@ class ProfileGenerator:
         distances = np.linspace(0, line_length, num_samples)
 
         existing_z = []
-        planned_z = []
+        bottom_z = []  # Unified bottom line for Cut/Fill
+        crane_top_z = []  # Crane pad top (gravel surface)
+        foundation_fok_z = []  # Foundation top (FOK)
+        foundation_bottom_z = []  # Foundation bottom
+        boom_z = []
+        rotor_z = []
+        in_holm = []  # Flag for holm areas
+
+        # Calculate derived heights
+        crane_planum_height = self.platform_height - self.gravel_thickness
+        foundation_bottom_height = None
+        if self.foundation_height is not None:
+            foundation_bottom_height = self.foundation_height - self.foundation_depth
 
         for dist in distances:
             # Interpolate point on line at distance
             point = line_geom.interpolate(dist).asPoint()
+            point_geom = QgsGeometry.fromPointXY(point)
 
             # Sample DEM at point
             val, ok = self.provider.sample(point, 1)
             z_existing = float(val) if (ok and val is not None) else 0.0
             existing_z.append(z_existing)
 
-            # Calculate planned elevation
-            # Check if point is within platform polygon
-            point_geom = QgsGeometry.fromPointXY(point)
-            if self.polygon.contains(point_geom):
-                z_planned = self.platform_height
-            else:
-                # Outside platform: use existing terrain
-                z_planned = z_existing
+            # Initialize values for this point
+            z_bottom = z_existing  # Default: terrain level (outside all surfaces)
+            z_crane_top = None
+            z_foundation_fok = None
+            z_foundation_bottom = None
+            z_boom = None
+            z_rotor = None
+            is_in_holm = False
 
-            planned_z.append(z_planned)
+            # Check which surface contains the point (priority order matters)
+            in_foundation = self.foundation_geometry and self.foundation_geometry.contains(point_geom)
+            in_crane_pad = self.polygon.contains(point_geom)
+            in_boom = self.boom_geometry and self.boom_geometry.contains(point_geom)
+            in_rotor = self.rotor_geometry and self.rotor_geometry.contains(point_geom)
+
+            # Check if point is in any holm (support beam)
+            if self.rotor_holms:
+                for holm_geom in self.rotor_holms:
+                    if holm_geom and holm_geom.contains(point_geom):
+                        is_in_holm = True
+                        break
+
+            # Determine bottom elevation based on surface type
+            if in_foundation and foundation_bottom_height is not None:
+                # Foundation area: bottom is foundation base
+                z_bottom = foundation_bottom_height
+                z_foundation_fok = self.foundation_height
+                z_foundation_bottom = foundation_bottom_height
+            elif in_crane_pad:
+                # Crane pad area: bottom is planum (below gravel)
+                z_bottom = crane_planum_height
+                z_crane_top = self.platform_height
+            elif in_boom:
+                # Boom surface: calculate sloped height
+                if self.boom_connection_edge:
+                    distance_from_edge = calculate_distance_from_edge(
+                        point,
+                        self.boom_connection_edge,
+                        self.boom_slope_direction
+                    )
+                    if distance_from_edge < 0:
+                        z_boom = self.platform_height
+                    else:
+                        z_boom = calculate_slope_height(
+                            self.platform_height,
+                            distance_from_edge,
+                            self.boom_slope_percent,
+                            'down'
+                        )
+                else:
+                    z_boom = self.platform_height
+                z_bottom = z_boom  # Boom has no separate top/bottom
+            elif in_rotor:
+                # Rotor storage area
+                if self.rotor_height is not None:
+                    z_rotor = self.rotor_height
+                    # Special logic for rotor storage:
+                    # - If terrain is above rotor height: full cut to rotor height
+                    # - If terrain is below rotor height: only fill at holm positions
+                    if z_existing >= z_rotor:
+                        # Cut needed: bottom is rotor height
+                        z_bottom = z_rotor
+                    elif is_in_holm:
+                        # Fill only at holm positions
+                        z_bottom = z_rotor
+                    else:
+                        # No fill outside holms when terrain is below rotor
+                        z_bottom = z_existing
+
+            # Append values
+            bottom_z.append(z_bottom)
+            crane_top_z.append(z_crane_top)
+            foundation_fok_z.append(z_foundation_fok)
+            foundation_bottom_z.append(z_foundation_bottom)
+            boom_z.append(z_boom)
+            rotor_z.append(z_rotor)
+            in_holm.append(is_in_holm)
 
         # Convert to arrays
         existing_z = np.array(existing_z, dtype=float)
-        planned_z = np.array(planned_z, dtype=float)
+        bottom_z = np.array(bottom_z, dtype=float)
+        crane_top_z = np.array(crane_top_z, dtype=object)  # Can contain None
+        foundation_fok_z = np.array(foundation_fok_z, dtype=object)  # Can contain None
+        foundation_bottom_z = np.array(foundation_bottom_z, dtype=object)  # Can contain None
+        boom_z = np.array(boom_z, dtype=object)  # Can contain None
+        rotor_z = np.array(rotor_z, dtype=object)  # Can contain None
+        in_holm = np.array(in_holm, dtype=bool)
 
-        # Calculate cut/fill
+        # Calculate cut/fill based on bottom elevations
         # Positive = cut (remove material), Negative = fill (add material)
-        cut_fill = existing_z - planned_z
+        cut_fill = existing_z - bottom_z
+
+        # Legacy: planned_z for backward compatibility (now equals bottom_z)
+        planned_z = bottom_z.copy()
+
+        # Calculate slope lines (Böschungen)
+        # Slopes connect surface edges to terrain at the configured slope angle
+        slope_lines = self._calculate_slope_lines(
+            distances, existing_z, bottom_z, crane_top_z,
+            foundation_fok_z, foundation_bottom_z, crane_planum_height,
+            foundation_bottom_height
+        )
 
         profile_data = {
             'distances': distances,
             'existing_z': existing_z,
-            'planned_z': planned_z,
-            'cut_fill': cut_fill
+            'planned_z': planned_z,  # Legacy compatibility
+            'bottom_z': bottom_z,  # Unified bottom line
+            'crane_top_z': crane_top_z,  # Gravel top surface
+            'foundation_fok_z': foundation_fok_z,  # Foundation top edge (FOK)
+            'foundation_bottom_z': foundation_bottom_z,  # Foundation bottom
+            'foundation_z': foundation_fok_z,  # Legacy compatibility
+            'boom_z': boom_z,
+            'rotor_z': rotor_z,
+            'cut_fill': cut_fill,
+            'in_holm': in_holm,
+            'slope_lines': slope_lines  # Slope visualization data
         }
 
         return profile_data
+
+    def _calculate_slope_lines(self, distances, existing_z, bottom_z, crane_top_z,
+                               foundation_fok_z, foundation_bottom_z,
+                               crane_planum_height, foundation_bottom_height):
+        """
+        Calculate slope lines (Böschungen) for visualization.
+
+        Detects transitions between surfaces and terrain, and calculates
+        slope lines at the configured slope angle.
+
+        Returns:
+            List of slope line segments: [{'start_dist', 'start_z', 'end_dist', 'end_z', 'type'}, ...]
+        """
+        slope_lines = []
+        slope_ratio = 1.0 / math.tan(math.radians(self.slope_angle))  # horizontal/vertical
+
+        n = len(distances)
+        if n < 2:
+            return slope_lines
+
+        # Track state changes along the profile
+        for i in range(1, n):
+            prev_in_foundation = foundation_bottom_z[i-1] is not None
+            curr_in_foundation = foundation_bottom_z[i] is not None
+            prev_in_crane = crane_top_z[i-1] is not None
+            curr_in_crane = crane_top_z[i] is not None
+
+            # Foundation to Crane Pad transition (internal slope)
+            # From foundation bottom to crane pad top (gravel)
+            if prev_in_foundation and curr_in_crane and not curr_in_foundation:
+                # Transition from foundation to crane pad
+                # Draw slope from foundation bottom (prev) to crane top (curr)
+                height_diff = self.platform_height - foundation_bottom_height
+                if height_diff > 0:
+                    slope_horizontal = height_diff * slope_ratio
+                    slope_lines.append({
+                        'start_dist': distances[i-1],
+                        'start_z': foundation_bottom_height,
+                        'end_dist': distances[i-1] + slope_horizontal,
+                        'end_z': self.platform_height,
+                        'type': 'foundation_to_crane'
+                    })
+
+            elif curr_in_foundation and prev_in_crane and not prev_in_foundation:
+                # Transition from crane pad to foundation
+                height_diff = self.platform_height - foundation_bottom_height
+                if height_diff > 0:
+                    slope_horizontal = height_diff * slope_ratio
+                    slope_lines.append({
+                        'start_dist': distances[i] - slope_horizontal,
+                        'start_z': self.platform_height,
+                        'end_dist': distances[i],
+                        'end_z': foundation_bottom_height,
+                        'type': 'crane_to_foundation'
+                    })
+
+            # Crane pad to terrain transition (external slope)
+            if prev_in_crane and not curr_in_crane and not curr_in_foundation:
+                # Leaving crane pad to terrain
+                terrain_z = existing_z[i]
+                height_diff = crane_planum_height - terrain_z
+                if abs(height_diff) > 0.1:  # Only show significant slopes
+                    slope_horizontal = abs(height_diff) * slope_ratio
+                    if height_diff > 0:
+                        # Cut slope (terrain is lower)
+                        slope_lines.append({
+                            'start_dist': distances[i-1],
+                            'start_z': crane_planum_height,
+                            'end_dist': distances[i-1] + slope_horizontal,
+                            'end_z': terrain_z,
+                            'type': 'crane_to_terrain_cut'
+                        })
+                    else:
+                        # Fill slope (terrain is higher)
+                        slope_lines.append({
+                            'start_dist': distances[i-1],
+                            'start_z': crane_planum_height,
+                            'end_dist': distances[i-1] + slope_horizontal,
+                            'end_z': terrain_z,
+                            'type': 'crane_to_terrain_fill'
+                        })
+
+            elif curr_in_crane and not prev_in_crane and not prev_in_foundation:
+                # Entering crane pad from terrain
+                terrain_z = existing_z[i-1]
+                height_diff = crane_planum_height - terrain_z
+                if abs(height_diff) > 0.1:
+                    slope_horizontal = abs(height_diff) * slope_ratio
+                    if height_diff > 0:
+                        # Cut slope
+                        slope_lines.append({
+                            'start_dist': distances[i] - slope_horizontal,
+                            'start_z': terrain_z,
+                            'end_dist': distances[i],
+                            'end_z': crane_planum_height,
+                            'type': 'terrain_to_crane_cut'
+                        })
+                    else:
+                        # Fill slope
+                        slope_lines.append({
+                            'start_dist': distances[i] - slope_horizontal,
+                            'start_z': terrain_z,
+                            'end_dist': distances[i],
+                            'end_z': crane_planum_height,
+                            'type': 'terrain_to_crane_fill'
+                        })
+
+        return slope_lines
 
     def plot_profile(self, profile_data: Dict, output_path: str,
                     profile_type: str = "profile",
@@ -494,31 +826,97 @@ class ProfileGenerator:
 
             distances = profile_data['distances']
             existing = profile_data['existing_z']
-            planned = profile_data['planned_z']
+            bottom_z = profile_data.get('bottom_z', profile_data['planned_z'])
             cut_fill = profile_data['cut_fill']
 
-            # Plot terrain and platform lines
-            ax.plot(distances, existing, 'k-', linewidth=2, label='Bestehendes Gelände')
-            ax.plot(distances, planned, 'b-', linewidth=2, label='Geplante Plattform')
+            # Get additional surface data
+            crane_top_z = profile_data.get('crane_top_z', None)
+            foundation_fok_z = profile_data.get('foundation_fok_z', profile_data.get('foundation_z', None))
+            foundation_bottom_z = profile_data.get('foundation_bottom_z', None)
+            boom_z = profile_data.get('boom_z', None)
+            rotor_z = profile_data.get('rotor_z', None)
 
-            # Fill areas
-            # Cut (red) - where existing > planned
+            # Helper function to extract valid data for plotting
+            def extract_valid_data(arr, distances):
+                if arr is None:
+                    return [], []
+                dist_list = []
+                height_list = []
+                for i, z in enumerate(arr):
+                    if z is not None:
+                        dist_list.append(distances[i])
+                        height_list.append(z)
+                return dist_list, height_list
+
+            # Plot terrain (existing ground)
+            ax.plot(distances, existing, 'k-', linewidth=2, label='Bestehendes Gelände', zorder=10)
+
+            # Plot unified bottom line (Unterkante aller Flächen) - blue solid line
+            ax.plot(distances, bottom_z, color='#1f77b4', linewidth=2,
+                    label='Unterkante (Planum/Sohle)', zorder=6)
+
+            # Plot crane pad top (gravel surface) - black dashed line
+            crane_top_dist, crane_top_heights = extract_valid_data(crane_top_z, distances)
+            if crane_top_dist:
+                ax.plot(crane_top_dist, crane_top_heights, color='black',
+                       linewidth=2, label='Kranstellfläche (OK Schotter)', zorder=7, linestyle='--')
+
+            # Plot foundation FOK - red dashed line
+            fok_dist, fok_heights = extract_valid_data(foundation_fok_z, distances)
+            if fok_dist:
+                ax.plot(fok_dist, fok_heights, color='#d62728',
+                       linewidth=2.5, label='Fundament (FOK)', zorder=8, linestyle='--')
+
+            # Plot foundation bottom - red dotted line
+            foundation_bottom_dist, foundation_bottom_heights = extract_valid_data(foundation_bottom_z, distances)
+            if foundation_bottom_dist:
+                ax.plot(foundation_bottom_dist, foundation_bottom_heights, color='#d62728',
+                       linewidth=1.5, label='Fundament (UK)', zorder=5, linestyle=':')
+
+            # Plot boom surface - orange solid line
+            boom_dist, boom_heights = extract_valid_data(boom_z, distances)
+            if boom_dist:
+                ax.plot(boom_dist, boom_heights, color='#ff7f0e',
+                       linewidth=2, label='Auslegerfläche', zorder=6)
+
+            # Plot rotor storage - green solid line
+            rotor_dist, rotor_heights = extract_valid_data(rotor_z, distances)
+            if rotor_dist:
+                ax.plot(rotor_dist, rotor_heights, color='#2ca02c',
+                       linewidth=2, label='Blattlagerfläche', zorder=6)
+
+            # Fill areas (Cut/Fill between existing terrain and bottom_z)
             cut_mask = cut_fill > 0
             if np.any(cut_mask):
                 ax.fill_between(
-                    distances, existing, planned,
+                    distances, existing, bottom_z,
                     where=cut_mask,
-                    color='red', alpha=0.3, label='Abtrag'
+                    color='red', alpha=0.3, label='Abtrag', zorder=1
                 )
 
-            # Fill (green) - where existing < planned
             fill_mask = cut_fill < 0
             if np.any(fill_mask):
                 ax.fill_between(
-                    distances, existing, planned,
+                    distances, existing, bottom_z,
                     where=fill_mask,
-                    color='green', alpha=0.3, label='Auftrag'
+                    color='green', alpha=0.3, label='Auftrag', zorder=1
                 )
+
+            # Plot slope lines (Böschungen)
+            slope_lines = profile_data.get('slope_lines', [])
+            slope_plotted = False
+            for slope in slope_lines:
+                slope_label = 'Böschung' if not slope_plotted else None
+                ax.plot(
+                    [slope['start_dist'], slope['end_dist']],
+                    [slope['start_z'], slope['end_z']],
+                    color='#8B4513',  # Brown color for slopes
+                    linewidth=1.5,
+                    linestyle='-.',
+                    label=slope_label,
+                    zorder=4
+                )
+                slope_plotted = True
 
             # Labels and title with actual distance range
             max_distance = distances[-1] if len(distances) > 0 else 0
@@ -538,17 +936,19 @@ class ProfileGenerator:
 
             # Enhanced grid
             ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
-            
-            # Legend below plot (horizontal)
-            ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08), 
-                     ncol=4, fontsize=10, frameon=True, fancybox=True)
+
+            # Dynamic column count based on number of legend entries
+            handles, labels = ax.get_legend_handles_labels()
+            ncols = min(5, len(handles))
+            ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08),
+                     ncol=ncols, fontsize=8, frameon=True, fancybox=True)
 
             # Set axis limits
             if xlim:
                 ax.set_xlim(xlim)
             else:
                 ax.set_xlim(0, max_distance)
-            
+
             if ylim:
                 ax.set_ylim(ylim)
 

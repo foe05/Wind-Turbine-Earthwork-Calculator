@@ -53,20 +53,23 @@ class SurfaceValidator:
         if not valid:
             errors.append(error)
 
-        # 3. Boom touches crane pad
-        valid, error = self.validate_boom_touches_crane_pad()
-        if not valid:
-            errors.append(error)
+        # 3. Boom touches crane pad (only if boom exists)
+        if self.project.boom is not None:
+            valid, error = self.validate_boom_touches_crane_pad()
+            if not valid:
+                errors.append(error)
 
-        # 4. Rotor storage touches crane pad
-        valid, error = self.validate_rotor_touches_crane_pad()
-        if not valid:
-            errors.append(error)
+        # 4. Rotor storage touches crane pad (only if rotor storage exists)
+        if self.project.rotor_storage is not None:
+            valid, error = self.validate_rotor_touches_crane_pad()
+            if not valid:
+                errors.append(error)
 
-        # 5. No overlap between boom and rotor
-        valid, error = self.validate_no_overlap_boom_rotor()
-        if not valid:
-            errors.append(error)
+        # 5. No overlap between boom and rotor (only if both exist)
+        if self.project.boom is not None and self.project.rotor_storage is not None:
+            valid, error = self.validate_no_overlap_boom_rotor()
+            if not valid:
+                errors.append(error)
 
         # 6. All surfaces have reasonable sizes
         valid, error = self.validate_surface_sizes()
@@ -211,8 +214,33 @@ class SurfaceValidator:
             SurfaceType.ROTOR_STORAGE: (50, 5000),   # Various sizes up to ~70×70m
         }
 
-        for surface_name in ['crane_pad', 'foundation', 'boom', 'rotor_storage']:
+        # Required surfaces
+        for surface_name in ['crane_pad', 'foundation']:
             surface: SurfaceConfig = getattr(self.project, surface_name)
+            area = surface.geometry.area()
+            min_area, max_area = size_limits[surface.surface_type]
+
+            if area < min_area:
+                errors.append(
+                    f"{surface.surface_type.display_name} zu klein: {area:.1f}m² "
+                    f"(Minimum: {min_area}m²)"
+                )
+            elif area > max_area:
+                errors.append(
+                    f"{surface.surface_type.display_name} zu groß: {area:.1f}m² "
+                    f"(Maximum: {max_area}m²)"
+                )
+            else:
+                self.logger.info(
+                    f"✓ {surface.surface_type.display_name} size OK: {area:.1f}m²"
+                )
+
+        # Optional surfaces
+        for surface_name in ['boom', 'rotor_storage']:
+            surface: SurfaceConfig = getattr(self.project, surface_name)
+            if surface is None:
+                continue
+
             area = surface.geometry.area()
             min_area, max_area = size_limits[surface.surface_type]
 

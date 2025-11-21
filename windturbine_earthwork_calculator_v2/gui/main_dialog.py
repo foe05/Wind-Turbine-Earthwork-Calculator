@@ -143,27 +143,38 @@ class MainDialog(QDialog):
         foundation_layout.addWidget(btn_browse_foundation)
         form_dxf.addRow("Fundamentfläche:", foundation_layout)
 
-        # Boom surface DXF
+        # Boom surface DXF (optional)
         self.input_dxf_boom = QLineEdit()
-        self.input_dxf_boom.setPlaceholderText("Pfad zur DXF-Datei mit Auslegerflächen-Umriss...")
+        self.input_dxf_boom.setPlaceholderText("Optional: DXF-Datei mit Auslegerflächen-Umriss...")
         btn_browse_boom = QPushButton("Durchsuchen...")
         btn_browse_boom.clicked.connect(lambda: self._browse_dxf(self.input_dxf_boom, "Auslegerfläche"))
 
         boom_layout = QHBoxLayout()
         boom_layout.addWidget(self.input_dxf_boom)
         boom_layout.addWidget(btn_browse_boom)
-        form_dxf.addRow("Auslegerfläche:", boom_layout)
+        form_dxf.addRow("Auslegerfläche (optional):", boom_layout)
 
-        # Blade storage DXF
+        # Blade storage DXF (optional)
         self.input_dxf_rotor = QLineEdit()
-        self.input_dxf_rotor.setPlaceholderText("Pfad zur DXF-Datei mit Blattlagerflächen-Umriss...")
+        self.input_dxf_rotor.setPlaceholderText("Optional: DXF-Datei mit Blattlagerflächen-Umriss...")
         btn_browse_rotor = QPushButton("Durchsuchen...")
         btn_browse_rotor.clicked.connect(lambda: self._browse_dxf(self.input_dxf_rotor, "Blattlagerfläche"))
 
         rotor_layout = QHBoxLayout()
         rotor_layout.addWidget(self.input_dxf_rotor)
         rotor_layout.addWidget(btn_browse_rotor)
-        form_dxf.addRow("Blattlagerfläche:", rotor_layout)
+        form_dxf.addRow("Blattlagerfläche (optional):", rotor_layout)
+
+        # Holms DXF (optional)
+        self.input_dxf_holms = QLineEdit()
+        self.input_dxf_holms.setPlaceholderText("Optional: DXF-Datei mit Holmen (Rotorblatt-Auflagepunkten)...")
+        btn_browse_holms = QPushButton("Durchsuchen...")
+        btn_browse_holms.clicked.connect(lambda: self._browse_dxf(self.input_dxf_holms, "Holme"))
+
+        holms_layout = QHBoxLayout()
+        holms_layout.addWidget(self.input_dxf_holms)
+        holms_layout.addWidget(btn_browse_holms)
+        form_dxf.addRow("Holme (optional):", holms_layout)
 
         # DXF tolerance
         self.input_dxf_tolerance = QDoubleSpinBox()
@@ -575,19 +586,29 @@ class MainDialog(QDialog):
         """Validate user inputs."""
         errors = []
 
-        # Check all 4 DXF files
-        dxf_inputs = [
+        # Check required DXF files (Kranstellfläche and Fundament)
+        required_dxf_inputs = [
             ("Kranstellfläche", self.input_dxf_crane),
             ("Fundamentfläche", self.input_dxf_foundation),
-            ("Auslegerfläche", self.input_dxf_boom),
-            ("Blattlagerfläche", self.input_dxf_rotor),
         ]
 
-        for name, line_edit in dxf_inputs:
+        for name, line_edit in required_dxf_inputs:
             path = line_edit.text().strip()
             if not path:
                 errors.append(f"Bitte DXF-Datei für {name} auswählen")
             elif not os.path.exists(path):
+                errors.append(f"DXF-Datei für {name} nicht gefunden: {path}")
+
+        # Check optional DXF files (only validate if provided)
+        optional_dxf_inputs = [
+            ("Auslegerfläche", self.input_dxf_boom),
+            ("Blattlagerfläche", self.input_dxf_rotor),
+            ("Holme", self.input_dxf_holms),
+        ]
+
+        for name, line_edit in optional_dxf_inputs:
+            path = line_edit.text().strip()
+            if path and not os.path.exists(path):
                 errors.append(f"DXF-Datei für {name} nicht gefunden: {path}")
 
         # Check workspace
@@ -631,9 +652,12 @@ class MainDialog(QDialog):
             # DXF files
             'dxf_crane': self.input_dxf_crane.text().strip(),
             'dxf_foundation': self.input_dxf_foundation.text().strip(),
-            'dxf_boom': self.input_dxf_boom.text().strip(),
-            'dxf_rotor': self.input_dxf_rotor.text().strip(),
+            'dxf_boom': self.input_dxf_boom.text().strip() if self.input_dxf_boom.text().strip() else None,
+            'dxf_rotor': self.input_dxf_rotor.text().strip() if self.input_dxf_rotor.text().strip() else None,
             'dxf_tolerance': self.input_dxf_tolerance.value(),
+
+            # Holms DXF (optional)
+            'holm_dxf_path': self.input_dxf_holms.text().strip() if self.input_dxf_holms.text().strip() else None,
 
             # Foundation parameters
             'fok': self.input_fok.value(),
