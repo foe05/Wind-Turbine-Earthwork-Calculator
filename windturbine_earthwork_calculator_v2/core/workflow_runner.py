@@ -29,8 +29,10 @@ from qgis.core import (
     QgsPalLayerSettings,
     QgsTextFormat,
     QgsTextBufferSettings,
-    QgsVectorLayerSimpleLabeling
+    QgsVectorLayerSimpleLabeling,
+    QgsLayerTreeGroup
 )
+import shutil
 from qgis.PyQt.QtGui import QColor, QFont
 from qgis.PyQt.QtCore import QVariant
 
@@ -355,6 +357,12 @@ class WorkflowWorker(QObject):
             if not dem_layer.isValid():
                 raise Exception(f"DEM konnte nicht geladen werden: {dem_path}")
 
+            # Save DEM mosaic to results directory
+            dem_result_name = f"WKA_{int(get_centroid(surfaces['crane']['geometry']).x())}_{int(get_centroid(surfaces['crane']['geometry']).y())}_DEM.tif"
+            dem_result_path = results_dir / dem_result_name
+            shutil.copy2(dem_path, dem_result_path)
+            self.logger.info(f"DEM mosaic saved to results: {dem_result_path}")
+
             self.progress_updated.emit(50, "✓ DGM-Mosaik erstellt")
 
         except Exception as e:
@@ -557,7 +565,23 @@ class WorkflowWorker(QObject):
         self.logger.info("Adding layers to QGIS project")
 
         try:
-            self._add_to_qgis(str(gpkg_path), str(report_path))
+            # Collect DXF paths for loading
+            dxf_paths = {
+                'crane': surfaces['crane']['dxf_path'],
+                'foundation': surfaces['foundation']['dxf_path'],
+            }
+            if surfaces.get('boom'):
+                dxf_paths['boom'] = surfaces['boom']['dxf_path']
+            if surfaces.get('rotor'):
+                dxf_paths['rotor'] = surfaces['rotor']['dxf_path']
+
+            self._add_to_qgis(
+                str(gpkg_path),
+                str(report_path),
+                str(dem_result_path),
+                dxf_paths,
+                workspace.name  # Use workspace folder name for layer group
+            )
         except Exception as e:
             self.logger.warning(f"Could not add layers to QGIS: {e}")
 
@@ -693,22 +717,34 @@ class WorkflowWorker(QObject):
         })
         profile_lines_layer.renderer().setSymbol(line_symbol)
 
-        # Add labels with white halo
+        # Add labels with white halo - positioned at start of line
         label_settings = QgsPalLayerSettings()
         label_settings.fieldName = 'name'
         label_settings.placement = QgsPalLayerSettings.Line
         label_settings.placementFlags = QgsPalLayerSettings.AboveLine
 
-        # Text format
+        # Position label at start of line by using a small repeat distance
+        # and limiting to one label per feature
+        label_settings.repeatDistance = 0
+        label_settings.overrunDistance = 0
+        label_settings.labelPerPart = False
+
+        # Use priority to place at start (lower distance from start)
+        label_settings.priority = 5
+
+        # Offset to position outside the main area
+        label_settings.dist = 1.5  # Distance from line in mm
+
+        # Text format - smaller font (5pt instead of 7pt)
         text_format = QgsTextFormat()
-        text_format.setFont(QFont('Arial', 7))
-        text_format.setSize(7)
+        text_format.setFont(QFont('Arial', 5))
+        text_format.setSize(5)
         text_format.setColor(QColor(0, 0, 0))  # Black text
 
-        # White halo/buffer around text
+        # White halo/buffer around text (smaller buffer for smaller text)
         buffer_settings = QgsTextBufferSettings()
         buffer_settings.setEnabled(True)
-        buffer_settings.setSize(1.0)
+        buffer_settings.setSize(0.8)
         buffer_settings.setColor(QColor(255, 255, 255))  # White buffer
         buffer_settings.setOpacity(0.9)
         text_format.setBuffer(buffer_settings)
@@ -847,9 +883,28 @@ class WorkflowWorker(QObject):
 
         self.logger.info(f"GeoPackage saved with 4 surface layers + profiles: {gpkg_path}")
 
-    def _add_to_qgis(self, gpkg_path, report_path):
-        """Add layers to QGIS project."""
-        layer_names = [
+    def _add_to_qgis(self, gpkg_path, report_path, dem_path=None, dxf_paths=None, group_name=None):
+        """Add all result layers to QGIS project in a layer group.
+
+        Args:
+            gpkg_path: Path to the GeoPackage with result layers
+            report_path: Path to the HTML report
+            dem_path: Path to the DEM mosaic GeoTIFF
+            dxf_paths: Dict with DXF file paths {type: path}
+            group_name: Name for the layer group (usually workspace folder name)
+        """
+        project = QgsProject.instance()
+        root = project.layerTreeRoot()
+
+        # Create layer group
+        if group_name:
+            group = root.insertGroup(0, group_name)
+            self.logger.info(f"Created layer group: {group_name}")
+        else:
+            group = root
+
+        # GeoPackage layer names and display names
+        gpkg_layer_names = [
             ('kranstellflaechen', 'Kranstellflächen'),
             ('fundamentflaechen', 'Fundamentflächen'),
             ('auslegerflaechen', 'Auslegerflächen'),
@@ -857,15 +912,61 @@ class WorkflowWorker(QObject):
             ('schnitte', 'Geländeschnitte'),
         ]
 
-        for layer_name, display_name in layer_names:
+        # Add GeoPackage layers
+        for layer_name, display_name in gpkg_layer_names:
             layer = QgsVectorLayer(
                 f"{gpkg_path}|layername={layer_name}",
                 display_name,
                 "ogr"
             )
             if layer.isValid():
-                QgsProject.instance().addMapLayer(layer)
+                project.addMapLayer(layer, False)  # Don't add to legend yet
+                if group_name:
+                    group.addLayer(layer)
+                else:
+                    root.addLayer(layer)
                 self.logger.info(f"Added layer: {display_name}")
+
+        # Add DEM mosaic layer
+        if dem_path:
+            dem_layer = QgsRasterLayer(dem_path, "DGM Mosaik")
+            if dem_layer.isValid():
+                project.addMapLayer(dem_layer, False)
+                if group_name:
+                    group.addLayer(dem_layer)
+                else:
+                    root.addLayer(dem_layer)
+                self.logger.info(f"Added DEM layer: {dem_path}")
+            else:
+                self.logger.warning(f"Could not load DEM layer: {dem_path}")
+
+        # Add DXF layers
+        if dxf_paths:
+            dxf_display_names = {
+                'crane': 'DXF Kranstellfläche',
+                'foundation': 'DXF Fundament',
+                'boom': 'DXF Ausleger',
+                'rotor': 'DXF Blattlager'
+            }
+
+            for dxf_type, dxf_path in dxf_paths.items():
+                if dxf_path and os.path.exists(dxf_path):
+                    display_name = dxf_display_names.get(dxf_type, f'DXF {dxf_type}')
+                    # Load DXF as vector layer (entities sublayer)
+                    dxf_layer = QgsVectorLayer(
+                        f"{dxf_path}|layername=entities",
+                        display_name,
+                        "ogr"
+                    )
+                    if dxf_layer.isValid():
+                        project.addMapLayer(dxf_layer, False)
+                        if group_name:
+                            group.addLayer(dxf_layer)
+                        else:
+                            root.addLayer(dxf_layer)
+                        self.logger.info(f"Added DXF layer: {display_name}")
+                    else:
+                        self.logger.warning(f"Could not load DXF layer: {dxf_path}")
 
         self.logger.info("All layers added to QGIS project")
 
