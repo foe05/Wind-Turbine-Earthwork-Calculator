@@ -2183,6 +2183,9 @@ class MultiSurfaceCalculator:
             sample_configs.append(sample_config)
 
         # Run samples sequentially
+        failed_samples = 0
+        last_error = None
+
         for i, sample_config in enumerate(sample_configs):
             if feedback and feedback.isCanceled():
                 break
@@ -2200,7 +2203,27 @@ class MultiSurfaceCalculator:
                     )
 
             except Exception as e:
+                failed_samples += 1
+                last_error = e
                 self.logger.error(f"Error in MC sample {i}: {e}")
+
+                # If first sample fails, raise immediately to provide better error message
+                if i == 0:
+                    raise ValueError(
+                        f"Fehler im ersten Monte-Carlo-Sample: {e}. "
+                        f"Bitte prüfen Sie die Eingabeparameter."
+                    ) from e
+
+        # Log summary of failures
+        if failed_samples > 0:
+            self.logger.warning(
+                f"{failed_samples}/{n_samples} Monte Carlo samples failed. "
+                f"Last error: {last_error}"
+            )
+            if feedback:
+                feedback.pushWarning(
+                    f"⚠️ {failed_samples} von {n_samples} Samples fehlgeschlagen"
+                )
 
         return results
 
@@ -2272,6 +2295,15 @@ class MultiSurfaceCalculator:
         Returns:
             UncertaintyAnalysisResult with statistics
         """
+        # Check if we have any results
+        if not mc_results:
+            self.logger.error("No Monte Carlo results to analyze - all samples failed!")
+            raise ValueError(
+                "Keine Monte-Carlo-Ergebnisse vorhanden. "
+                "Alle Samples sind fehlgeschlagen. "
+                "Bitte prüfen Sie die Eingabeparameter und Geometrien."
+            )
+
         # Extract output arrays
         heights = np.array([r['optimal_height'] for r in mc_results])
         cuts = np.array([r['total_cut'] for r in mc_results])
