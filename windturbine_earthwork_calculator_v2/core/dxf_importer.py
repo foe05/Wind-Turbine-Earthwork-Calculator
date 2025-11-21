@@ -11,20 +11,25 @@ Version: 2.0
 from pathlib import Path
 from typing import List, Tuple, Optional
 import math
+import sys
 
 try:
     import ezdxf
     EZDXF_AVAILABLE = True
-except ImportError:
+    EZDXF_ERROR = None
+except ImportError as e:
     EZDXF_AVAILABLE = False
+    EZDXF_ERROR = str(e)
 
 try:
     from shapely.geometry import LineString, Polygon as ShapelyPolygon
     from shapely.ops import linemerge, polygonize, unary_union
     import shapely
     SHAPELY_AVAILABLE = True
-except ImportError:
+    SHAPELY_ERROR = None
+except ImportError as e:
     SHAPELY_AVAILABLE = False
+    SHAPELY_ERROR = str(e)
 
 from qgis.core import (
     QgsGeometry,
@@ -66,10 +71,22 @@ class DXFImporter:
             FileNotFoundError: If DXF file doesn't exist
         """
         if not EZDXF_AVAILABLE:
-            raise ImportError(
-                "ezdxf package is required for DXF import. "
-                "Please install it using: pip install ezdxf"
+            # Get Python executable path for better error message
+            python_path = sys.executable
+            site_packages = [p for p in sys.path if 'site-packages' in p]
+
+            error_msg = (
+                f"ezdxf package is required for DXF import.\n"
+                f"Original error: {EZDXF_ERROR}\n\n"
+                f"Python executable: {python_path}\n"
+                f"Site-packages paths: {site_packages[:3]}\n\n"
+                f"For QGIS on Windows, install using OSGeo4W Shell:\n"
+                f"  1. Open OSGeo4W Shell (Start Menu -> OSGeo4W -> OSGeo4W Shell)\n"
+                f"  2. Run: pip install ezdxf shapely\n\n"
+                f"Or use the Python Console in QGIS:\n"
+                f"  import subprocess; subprocess.check_call(['pip', 'install', 'ezdxf', 'shapely'])"
             )
+            raise ImportError(error_msg)
 
         self.dxf_path = Path(dxf_path)
         if not self.dxf_path.exists():

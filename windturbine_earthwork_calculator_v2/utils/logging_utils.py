@@ -5,9 +5,44 @@ Provides consistent logging across all modules.
 """
 
 import logging
+import sys
 import os
 from pathlib import Path
 from datetime import datetime
+
+
+class SafeStreamHandler(logging.StreamHandler):
+    """
+    A StreamHandler that safely handles None streams on Windows QGIS.
+
+    On Windows, when running in QGIS without a console, sys.stdout and
+    sys.stderr may be None, causing AttributeError when trying to write.
+    """
+
+    def emit(self, record):
+        """Emit a record, safely handling None streams."""
+        try:
+            # Check if stream is valid before writing
+            if self.stream is None:
+                return
+
+            msg = self.format(record)
+            stream = self.stream
+
+            # Check again after getting stream
+            if stream is None:
+                return
+
+            # Try to write, catching any stream-related errors
+            try:
+                stream.write(msg + self.terminator)
+                self.flush()
+            except (AttributeError, OSError):
+                # Stream is not writable, silently ignore
+                pass
+
+        except Exception:
+            self.handleError(record)
 
 
 def setup_logger(name, log_file=None, level=logging.INFO):
@@ -35,11 +70,17 @@ def setup_logger(name, log_file=None, level=logging.INFO):
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(level)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    # Console handler - use SafeStreamHandler for Windows compatibility
+    # Check if stderr is available
+    if sys.stderr is not None:
+        console_handler = SafeStreamHandler(sys.stderr)
+        console_handler.setLevel(level)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    else:
+        # On Windows QGIS without console, only use file handler
+        # We'll ensure a file handler is always added below
+        pass
 
     # File handler (if log_file specified)
     if log_file:
