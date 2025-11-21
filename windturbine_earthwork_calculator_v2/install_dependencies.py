@@ -69,6 +69,37 @@ def install_package(package_name, version=None):
         return False
 
 
+def get_environment_info():
+    """
+    Get diagnostic information about the Python environment.
+
+    Returns:
+        dict: Environment information
+    """
+    info = {
+        'python_version': sys.version,
+        'python_executable': sys.executable,
+        'platform': sys.platform,
+        'site_packages': [p for p in sys.path if 'site-packages' in p.lower()],
+    }
+    return info
+
+
+def print_environment_info():
+    """Print environment information for debugging."""
+    info = get_environment_info()
+    print("\n" + "=" * 60)
+    print("Python Environment Information")
+    print("=" * 60)
+    print(f"Python version: {info['python_version'].split()[0]}")
+    print(f"Executable: {info['python_executable']}")
+    print(f"Platform: {info['platform']}")
+    print("\nSite-packages paths:")
+    for path in info['site_packages'][:5]:
+        print(f"  - {path}")
+    print("")
+
+
 def install_dependencies():
     """
     Check and install all required dependencies.
@@ -78,6 +109,7 @@ def install_dependencies():
     """
     dependencies = {
         'ezdxf': ('ezdxf', '>=1.1.0'),
+        'shapely': ('shapely', '>=2.0.0'),
         'requests': ('requests', '>=2.28.0'),
     }
 
@@ -132,6 +164,9 @@ def install_dependencies():
 
 def main():
     """Main entry point for the dependency installer."""
+    # Print environment information for debugging
+    print_environment_info()
+
     success, missing = install_dependencies()
 
     if not success:
@@ -140,6 +175,9 @@ def main():
         print("=" * 60)
         print("The plugin may not work correctly without all dependencies.")
         print("Please resolve the installation issues before using the plugin.")
+        print("\nFor QGIS on Windows, try using the OSGeo4W Shell:")
+        print("  1. Open OSGeo4W Shell (Start Menu -> OSGeo4W -> OSGeo4W Shell)")
+        print("  2. Run: pip install ezdxf shapely")
         sys.exit(1)
     else:
         print("\n" + "=" * 60)
