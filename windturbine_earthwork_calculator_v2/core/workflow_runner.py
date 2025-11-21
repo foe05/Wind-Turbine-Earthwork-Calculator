@@ -413,7 +413,7 @@ class WorkflowWorker(QObject):
                 )
 
                 # Run optimization with uncertainty analysis
-                uncertainty_result = calculator.find_optimal_with_uncertainty(uncertainty_config)
+                uncertainty_result = calculator.find_optimum_with_uncertainty(uncertainty_config)
 
                 # Extract optimal height and results from uncertainty analysis
                 optimal_crane_height = uncertainty_result.crane_height.mean
