@@ -6,7 +6,7 @@ Generates terrain cross-sections and visualizations.
 Adapted from WindTurbine_Earthwork_Calculator.py
 
 Author: Wind Energy Site Planning
-Version: 2.0
+Version: 2.0.0
 """
 
 import math

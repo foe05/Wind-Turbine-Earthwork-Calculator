@@ -5,7 +5,7 @@ Imports DXF files containing crane pad outlines (LWPOLYLINE entities)
 and converts them to QGIS polygon geometries.
 
 Author: Wind Energy Site Planning
-Version: 2.0
+Version: 2.0.0
 """
 
 from pathlib import Path

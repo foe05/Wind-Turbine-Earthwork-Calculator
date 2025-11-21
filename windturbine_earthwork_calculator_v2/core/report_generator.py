@@ -4,7 +4,7 @@ Report Generator for Wind Turbine Earthwork Calculator V2
 Generates HTML reports with results, maps, and profile images.
 
 Author: Wind Energy Site Planning
-Version: 2.0
+Version: 2.0.0
 """
 
 import base64
@@ -871,7 +871,7 @@ class ReportGenerator:
         """Generate HTML footer."""
         return f"""
     <div class="footer">
-        <p>Erdmassenberechnung Windenergieanlagen V2</p>
+        <p>Erdmassenberechnung Windenergieanlagen V2.0.0</p>
         <p>Erstellt mit QGIS Processing Plugin</p>
         <p style="font-size: 0.8rem;">Bericht erstellt am: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</p>
     </div>

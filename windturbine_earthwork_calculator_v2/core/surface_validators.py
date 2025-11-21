@@ -8,7 +8,7 @@ Validates spatial relationships between different surface types:
 - No overlaps between boom and rotor surfaces
 
 Author: Wind Energy Site Planning
-Version: 2.0 - Multi-Surface Extension
+Version: 2.0.0 - Multi-Surface Extension
 """
 
 from typing import Tuple, List, Dict

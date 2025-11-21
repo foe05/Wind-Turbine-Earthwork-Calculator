@@ -2,7 +2,7 @@
 
 **A QGIS Processing Plugin for Optimizing Wind Turbine Crane Pad Heights**
 
-Version: 2.0
+Version: 2.0.0
 Author: Wind Energy Site Planning
 Date: November 2025
 
@@ -294,7 +294,7 @@ Terrain Range: 8.5 m (min: 301.2, max: 309.7)
 
 ## 🔄 Changelog
 
-### Version 2.0 (November 2025)
+### Version 2.0.0 (November 2025)
 
 - Complete refactoring as QGIS Processing Plugin
 - Modular architecture (separation of concerns)

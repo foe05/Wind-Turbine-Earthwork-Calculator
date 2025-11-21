@@ -8,7 +8,7 @@ Defines the data structures for handling multiple surface types:
 - Blade storage (Blattlagerfläche)
 
 Author: Wind Energy Site Planning
-Version: 2.0 - Multi-Surface Extension
+Version: 2.0.0 - Multi-Surface Extension
 """
 
 from dataclasses import dataclass, field

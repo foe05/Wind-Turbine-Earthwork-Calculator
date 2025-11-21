@@ -8,7 +8,7 @@ Calculates cut/fill volumes for all surface types in a wind turbine construction
 - Blade Storage (Blattlagerfläche): Planar surface with height offset
 
 Author: Wind Energy Site Planning
-Version: 2.0 - Multi-Surface Extension
+Version: 2.0.0 - Multi-Surface Extension
 """
 
 import math

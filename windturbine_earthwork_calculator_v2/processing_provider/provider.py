@@ -2,7 +2,7 @@
 Processing Provider for Wind Turbine Earthwork Calculator V2
 
 Author: Wind Energy Site Planning
-Version: 2.0
+Version: 2.0.0
 """
 
 from qgis.core import QgsProcessingProvider
