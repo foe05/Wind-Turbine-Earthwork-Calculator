@@ -48,6 +48,7 @@ from .surface_types import (
     HeightMode
 )
 from .surface_validators import validate_project
+from .uncertainty import UncertaintyConfig, TerrainType
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
 
@@ -376,21 +377,78 @@ class WorkflowWorker(QObject):
             f"{project.search_max_height:.2f}m ü.NN"
         )
 
+        uncertainty_result = None  # Will be set if uncertainty analysis is enabled
+
         try:
             calculator = MultiSurfaceCalculator(dem_layer, project)
 
-            optimal_crane_height, results = calculator.find_optimum()
+            # Check if uncertainty analysis is enabled
+            if self.params.get('uncertainty_enabled', False):
+                self.progress_updated.emit(54, "📊 Unsicherheitsanalyse wird durchgeführt...")
+                self.logger.info("Uncertainty analysis enabled - running Monte Carlo simulation")
 
-            self.logger.info(f"Optimization complete: {optimal_crane_height:.2f} m ü.NN")
-            self.logger.info(
-                f"Results: Total cut={results.total_cut:.0f} m³, "
-                f"Total fill={results.total_fill:.0f} m³"
-            )
+                # Map terrain type index to TerrainType enum
+                terrain_type_map = {
+                    0: TerrainType.FLAT,
+                    1: TerrainType.MODERATE,
+                    2: TerrainType.STEEP
+                }
+                terrain_type = terrain_type_map.get(
+                    self.params.get('terrain_type_index', 0),
+                    TerrainType.FLAT
+                )
 
-            self.progress_updated.emit(
-                70,
-                f"✓ Optimale Kranstellflächen-Höhe: {optimal_crane_height:.2f} m ü.NN"
-            )
+                # Create uncertainty configuration
+                uncertainty_config = UncertaintyConfig(
+                    num_samples=self.params.get('mc_samples', 1000),
+                    terrain_type=terrain_type,
+                    foundation_depth_std=self.params.get('foundation_depth_std', 0.1),
+                    slope_angle_std=self.params.get('slope_angle_std', 3.0),
+                    use_latin_hypercube=True
+                )
+
+                self.logger.info(
+                    f"Monte Carlo config: {uncertainty_config.num_samples} samples, "
+                    f"terrain={terrain_type.value}, DEM σ={uncertainty_config.dem_vertical_std*100:.1f}cm"
+                )
+
+                # Run optimization with uncertainty analysis
+                uncertainty_result = calculator.find_optimum_with_uncertainty(uncertainty_config)
+
+                # Extract optimal height and results from uncertainty analysis
+                optimal_crane_height = uncertainty_result.crane_height.mean
+                results = uncertainty_result.nominal_result
+
+                self.logger.info(
+                    f"Uncertainty analysis complete: {optimal_crane_height:.2f} m ü.NN "
+                    f"(90% CI: [{uncertainty_result.crane_height.percentile_5:.2f}, "
+                    f"{uncertainty_result.crane_height.percentile_95:.2f}])"
+                )
+                self.logger.info(
+                    f"Total volume moved: {uncertainty_result.total_volume_moved.mean:.0f} m³ "
+                    f"± {uncertainty_result.total_volume_moved.std:.0f} m³"
+                )
+
+                self.progress_updated.emit(
+                    70,
+                    f"✓ Optimale Höhe: {optimal_crane_height:.2f} m ü.NN "
+                    f"(90% CI: [{uncertainty_result.crane_height.percentile_5:.2f}, "
+                    f"{uncertainty_result.crane_height.percentile_95:.2f}])"
+                )
+            else:
+                # Standard optimization without uncertainty
+                optimal_crane_height, results = calculator.find_optimum()
+
+                self.logger.info(f"Optimization complete: {optimal_crane_height:.2f} m ü.NN")
+                self.logger.info(
+                    f"Results: Total cut={results.total_cut:.0f} m³, "
+                    f"Total fill={results.total_fill:.0f} m³"
+                )
+
+                self.progress_updated.emit(
+                    70,
+                    f"✓ Optimale Kranstellflächen-Höhe: {optimal_crane_height:.2f} m ü.NN"
+                )
 
         except Exception as e:
             self.logger.error(f"Optimization failed: {e}", exc_info=True)
@@ -538,7 +596,8 @@ class WorkflowWorker(QObject):
             foundation_layer=surface_layers.get('foundation'),
             boom_layer=surface_layers.get('boom'),
             rotor_layer=surface_layers.get('rotor_storage'),
-            profile_lines_layer=surface_layers.get('profile_lines')
+            profile_lines_layer=surface_layers.get('profile_lines'),
+            uncertainty_result=uncertainty_result
         )
         report_gen.generate_html(
             str(report_path),

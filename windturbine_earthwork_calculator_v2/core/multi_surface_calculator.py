@@ -286,6 +286,130 @@ def _calculate_multi_param_scenario(scenario: tuple, dem_path: str, project_dict
         raise RuntimeError(error_msg) from e
 
 
+def _calculate_mc_sample_parallel(sample_config: dict, dem_path: str, project_dict: dict,
+                                   use_vectorized: bool = True) -> dict:
+    """
+    Worker function to calculate a single Monte Carlo sample in parallel.
+
+    This function runs in a separate process and must be pickle-able.
+
+    Args:
+        sample_config: Dictionary with perturbed parameter values
+        dem_path: Path to DEM file
+        project_dict: Serialized project configuration
+        use_vectorized: Use vectorized sampling
+
+    Returns:
+        Dictionary with results from this sample
+    """
+    import traceback
+
+    try:
+        # Import inside function to avoid pickling issues
+        from qgis.core import QgsRasterLayer, QgsGeometry
+        from .surface_types import MultiSurfaceProject, SurfaceConfig, SurfaceType, HeightMode
+
+        # Reconstruct project from dict with perturbed parameters
+        crane_config = SurfaceConfig(
+            surface_type=SurfaceType.CRANE_PAD,
+            geometry=QgsGeometry.fromWkt(project_dict['crane_wkt']),
+            dxf_path=project_dict.get('dxf_path', ''),
+            height_mode=HeightMode.OPTIMIZED,
+            metadata=project_dict.get('crane_metadata', {})
+        )
+
+        foundation_config = SurfaceConfig(
+            surface_type=SurfaceType.FOUNDATION,
+            geometry=QgsGeometry.fromWkt(project_dict['foundation_wkt']),
+            dxf_path=project_dict.get('dxf_path', ''),
+            height_mode=HeightMode.FIXED,
+            height_value=sample_config['fok'],  # Use perturbed FOK
+            metadata=project_dict.get('foundation_metadata', {})
+        )
+
+        boom_config = None
+        if project_dict.get('boom_wkt'):
+            boom_config = SurfaceConfig(
+                surface_type=SurfaceType.BOOM,
+                geometry=QgsGeometry.fromWkt(project_dict['boom_wkt']),
+                dxf_path=project_dict.get('dxf_path', ''),
+                height_mode=HeightMode.SLOPED,
+                slope_longitudinal=project_dict['boom_slope'],
+                auto_slope=project_dict['boom_auto_slope'],
+                slope_min=project_dict.get('boom_slope_min', 2.0),
+                slope_max=project_dict.get('boom_slope_max', 8.0),
+                metadata=project_dict.get('boom_metadata', {})
+            )
+
+        rotor_config = None
+        if project_dict.get('rotor_wkt'):
+            rotor_config = SurfaceConfig(
+                surface_type=SurfaceType.ROTOR_STORAGE,
+                geometry=QgsGeometry.fromWkt(project_dict['rotor_wkt']),
+                dxf_path=project_dict.get('dxf_path', ''),
+                height_mode=HeightMode.RELATIVE,
+                height_reference='crane',
+                metadata=project_dict.get('rotor_metadata', {})
+            )
+
+        project = MultiSurfaceProject(
+            crane_pad=crane_config,
+            foundation=foundation_config,
+            boom=boom_config,
+            rotor_storage=rotor_config,
+            fok=sample_config['fok'],  # Use perturbed FOK
+            foundation_depth=sample_config['foundation_depth'],  # Perturbed
+            gravel_thickness=sample_config['gravel_thickness'],  # Perturbed
+            rotor_height_offset=project_dict['rotor_height_offset'],
+            slope_angle=sample_config['slope_angle'],  # Perturbed
+            search_range_below_fok=project_dict.get('search_range_below_fok', 2.0),
+            search_range_above_fok=project_dict.get('search_range_above_fok', 2.0),
+            search_step=project_dict.get('search_step', 0.1)
+        )
+
+        # Load DEM
+        dem_layer = QgsRasterLayer(dem_path, "DEM")
+        if not dem_layer.isValid():
+            raise RuntimeError(f"Could not load DEM: {dem_path}")
+
+        # Create calculator and run optimization
+        calculator = MultiSurfaceCalculator(dem_layer, project)
+        calculator._use_vectorized = use_vectorized
+
+        # Store DEM noise for this sample
+        calculator._dem_noise = sample_config.get('dem_noise', 0.0)
+
+        # Run optimization (without parallel to avoid nested parallelism)
+        optimal_height, result = calculator.find_optimum(
+            feedback=None,
+            use_parallel=False
+        )
+
+        # Apply boom slope and rotor offset noise to result
+        boom_slope = result.boom_slope_percent + sample_config.get('boom_slope_noise', 0.0)
+        rotor_offset = result.rotor_height_offset_optimized + sample_config.get('rotor_offset_noise', 0.0)
+
+        return {
+            'optimal_height': optimal_height,
+            'total_cut': result.total_cut,
+            'total_fill': result.total_fill,
+            'net_volume': result.net_volume,
+            'total_volume_moved': result.total_volume_moved,
+            'boom_slope': boom_slope,
+            'rotor_offset': rotor_offset,
+            'fok': sample_config['fok'],
+            'slope_angle': sample_config['slope_angle'],
+            'foundation_depth': sample_config['foundation_depth'],
+            'gravel_thickness': sample_config['gravel_thickness'],
+        }
+
+    except Exception as e:
+        import sys
+        error_msg = (f"MC worker error: {str(e)}\n{traceback.format_exc()}")
+        print(error_msg, file=sys.stderr, flush=True)
+        raise RuntimeError(error_msg) from e
+
+
 class MultiSurfaceCalculator:
     """
     Calculator for multi-surface earthwork optimization.
@@ -2149,7 +2273,8 @@ class MultiSurfaceCalculator:
         self,
         samples: Dict[str, np.ndarray],
         config: UncertaintyConfig,
-        feedback: Optional[QgsProcessingFeedback]
+        feedback: Optional[QgsProcessingFeedback],
+        use_parallel: bool = True
     ) -> List[Dict]:
         """
         Run Monte Carlo samples with perturbed parameters.
@@ -2158,6 +2283,7 @@ class MultiSurfaceCalculator:
             samples: Dictionary of parameter samples
             config: Uncertainty configuration
             feedback: Optional feedback object
+            use_parallel: Use parallel processing (default True)
 
         Returns:
             List of result dictionaries from each sample
@@ -2165,8 +2291,17 @@ class MultiSurfaceCalculator:
         n_samples = config.num_samples
         results = []
 
+        # Determine number of workers
+        max_workers = max(1, mp.cpu_count() - 1)
+
         if feedback:
-            feedback.pushInfo(f"Running {n_samples} Monte Carlo samples...")
+            if use_parallel:
+                feedback.pushInfo(
+                    f"Running {n_samples} Monte Carlo samples in parallel "
+                    f"({max_workers} CPU cores)..."
+                )
+            else:
+                feedback.pushInfo(f"Running {n_samples} Monte Carlo samples...")
 
         # Create sample configurations
         sample_configs = []
@@ -2182,25 +2317,148 @@ class MultiSurfaceCalculator:
             }
             sample_configs.append(sample_config)
 
-        # Run samples sequentially
-        for i, sample_config in enumerate(sample_configs):
-            if feedback and feedback.isCanceled():
-                break
+        failed_samples = 0
+        last_error = None
 
-            try:
-                result = self._calculate_single_mc_sample(sample_config)
-                results.append(result)
+        if use_parallel and n_samples >= 10:
+            # Parallel execution using ProcessPoolExecutor
+            self.logger.info(
+                f"Running {n_samples} MC samples in parallel with {max_workers} workers"
+            )
 
-                # Progress update
-                if feedback and (i + 1) % max(1, n_samples // 20) == 0:
-                    progress = int((i + 1) / n_samples * 100)
-                    feedback.setProgress(progress)
-                    feedback.pushInfo(
-                        f"  [{i+1}/{n_samples}] Completed sample"
-                    )
+            # Helper function to filter metadata for pickle-safe values
+            def safe_metadata(metadata):
+                """Filter metadata to only include pickle-safe primitive types."""
+                if not metadata:
+                    return {}
+                safe = {}
+                for key, value in metadata.items():
+                    if isinstance(value, (int, float, str, bool, type(None))):
+                        safe[key] = value
+                    elif isinstance(value, (list, tuple)):
+                        # Only include if all items are primitive
+                        if all(isinstance(v, (int, float, str, bool, type(None))) for v in value):
+                            safe[key] = value
+                return safe
 
-            except Exception as e:
-                self.logger.error(f"Error in MC sample {i}: {e}")
+            # Prepare serializable project dict
+            project_dict = {
+                'crane_wkt': self.project.crane_pad.geometry.asWkt(),
+                'foundation_wkt': self.project.foundation.geometry.asWkt(),
+                'boom_wkt': self.project.boom.geometry.asWkt() if self.project.boom else None,
+                'rotor_wkt': self.project.rotor_storage.geometry.asWkt() if self.project.rotor_storage else None,
+                'dxf_path': getattr(self.project.crane_pad, 'dxf_path', ''),
+                'fok': self.project.fok,
+                'foundation_depth': self.project.foundation_depth,
+                'gravel_thickness': self.project.gravel_thickness,
+                'rotor_height_offset': self.project.rotor_height_offset,
+                'slope_angle': self.project.slope_angle,
+                'boom_slope': self.project.boom.slope_longitudinal if self.project.boom else 0.0,
+                'boom_auto_slope': self.project.boom.auto_slope if self.project.boom else False,
+                'boom_slope_min': getattr(self.project.boom, 'slope_min', 2.0) if self.project.boom else 2.0,
+                'boom_slope_max': getattr(self.project.boom, 'slope_max', 8.0) if self.project.boom else 8.0,
+                'crane_metadata': safe_metadata(self.project.crane_pad.metadata),
+                'foundation_metadata': safe_metadata(self.project.foundation.metadata),
+                'boom_metadata': safe_metadata(self.project.boom.metadata) if self.project.boom else {},
+                'rotor_metadata': safe_metadata(self.project.rotor_storage.metadata) if self.project.rotor_storage else {},
+                'search_range_below_fok': self.project.search_range_below_fok,
+                'search_range_above_fok': self.project.search_range_above_fok,
+                'search_step': self.project.search_step,
+            }
+
+            dem_path = self.dem_layer.source()
+
+            # Use ProcessPoolExecutor for parallel execution
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks
+                worker_func = partial(
+                    _calculate_mc_sample_parallel,
+                    dem_path=dem_path,
+                    project_dict=project_dict,
+                    use_vectorized=self._use_vectorized
+                )
+
+                futures = {
+                    executor.submit(worker_func, sample_config): i
+                    for i, sample_config in enumerate(sample_configs)
+                }
+
+                completed = 0
+
+                # Process results as they complete
+                for future in as_completed(futures):
+                    sample_idx = futures[future]
+                    completed += 1
+
+                    if feedback and feedback.isCanceled():
+                        self.logger.info("MC simulation cancelled by user")
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+
+                    try:
+                        result = future.result()
+                        results.append(result)
+
+                        # Progress update
+                        if feedback and completed % max(1, n_samples // 20) == 0:
+                            progress = int(completed / n_samples * 100)
+                            feedback.setProgress(progress)
+                            feedback.pushInfo(
+                                f"  [{completed}/{n_samples}] Completed samples"
+                            )
+
+                    except Exception as e:
+                        failed_samples += 1
+                        last_error = e
+                        self.logger.error(f"Error in MC sample {sample_idx}: {e}")
+
+                        # If first few samples fail, raise to provide better error message
+                        if completed <= 3 and failed_samples == completed:
+                            raise ValueError(
+                                f"Fehler in den ersten Monte-Carlo-Samples: {e}. "
+                                f"Bitte prüfen Sie die Eingabeparameter."
+                            ) from e
+
+        else:
+            # Sequential execution (for small sample counts or when parallel is disabled)
+            for i, sample_config in enumerate(sample_configs):
+                if feedback and feedback.isCanceled():
+                    break
+
+                try:
+                    result = self._calculate_single_mc_sample(sample_config)
+                    results.append(result)
+
+                    # Progress update
+                    if feedback and (i + 1) % max(1, n_samples // 20) == 0:
+                        progress = int((i + 1) / n_samples * 100)
+                        feedback.setProgress(progress)
+                        feedback.pushInfo(
+                            f"  [{i+1}/{n_samples}] Completed sample"
+                        )
+
+                except Exception as e:
+                    failed_samples += 1
+                    last_error = e
+                    self.logger.error(f"Error in MC sample {i}: {e}")
+
+                    # If first sample fails, raise immediately to provide better error message
+                    if i == 0:
+                        raise ValueError(
+                            f"Fehler im ersten Monte-Carlo-Sample: {e}. "
+                            f"Bitte prüfen Sie die Eingabeparameter."
+                        ) from e
+
+        # Log summary of failures
+        if failed_samples > 0:
+            self.logger.warning(
+                f"{failed_samples}/{n_samples} Monte Carlo samples failed. "
+                f"Last error: {last_error}"
+            )
+            if feedback:
+                feedback.pushWarning(
+                    f"⚠️ {failed_samples} von {n_samples} Samples fehlgeschlagen"
+                )
 
         return results
 
@@ -2272,6 +2530,15 @@ class MultiSurfaceCalculator:
         Returns:
             UncertaintyAnalysisResult with statistics
         """
+        # Check if we have any results
+        if not mc_results:
+            self.logger.error("No Monte Carlo results to analyze - all samples failed!")
+            raise ValueError(
+                "Keine Monte-Carlo-Ergebnisse vorhanden. "
+                "Alle Samples sind fehlgeschlagen. "
+                "Bitte prüfen Sie die Eingabeparameter und Geometrien."
+            )
+
         # Extract output arrays
         heights = np.array([r['optimal_height'] for r in mc_results])
         cuts = np.array([r['total_cut'] for r in mc_results])
