@@ -268,29 +268,34 @@ def add_labels_to_profile_lines(layer, label_field='type'):
         layer_settings.fieldName = label_field
         layer_settings.enabled = True
 
-        # Text format
+        # Text format - smaller font size for less clutter
         text_format = QgsTextFormat()
-        text_format.setFont(QFont('Arial', 10, QFont.Bold))
-        text_format.setSize(10)
+        text_format.setFont(QFont('Arial', 7, QFont.Bold))
+        text_format.setSize(7)
         text_format.setColor(QColor(0, 0, 139))  # Dark blue
 
         # Text buffer (white outline)
         buffer_settings = QgsTextBufferSettings()
         buffer_settings.setEnabled(True)
-        buffer_settings.setSize(1.0)
+        buffer_settings.setSize(0.8)
         buffer_settings.setColor(QColor(255, 255, 255))
         text_format.setBuffer(buffer_settings)
 
         layer_settings.setFormat(text_format)
 
-        # Placement settings for lines
+        # Placement settings for lines - place at start of line, above the line
         layer_settings.placement = QgsPalLayerSettings.Line
         layer_settings.lineSettings().setPlacementFlags(
-            QgsPalLayerSettings.OnLine | QgsPalLayerSettings.MapOrientation
+            QgsPalLayerSettings.AboveLine | QgsPalLayerSettings.MapOrientation
         )
 
-        # Center the label on the line
-        layer_settings.dist = 0
+        # Position label at the start of the line (outside construction site)
+        # lineAnchorPercent: 0 = start, 50 = middle, 100 = end
+        layer_settings.lineSettings().setLineAnchorPercent(0.0)
+        layer_settings.lineSettings().setAnchorType(1)  # 1 = Strict anchor at position
+
+        # Small offset above the line
+        layer_settings.dist = 1.5
         layer_settings.distUnits = QgsPalLayerSettings.MM
 
         # Apply labeling
