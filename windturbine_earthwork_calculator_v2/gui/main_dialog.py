@@ -363,10 +363,87 @@ class MainDialog(QDialog):
         group_slope.setLayout(form_slope)
         layout.addWidget(group_slope)
 
+        # Uncertainty Analysis
+        group_uncertainty = QGroupBox("Unsicherheitsanalyse (Monte Carlo)")
+        form_uncertainty = QFormLayout()
+
+        # Enable uncertainty analysis
+        self.input_uncertainty_enabled = QCheckBox("Unsicherheitsanalyse aktivieren")
+        self.input_uncertainty_enabled.setChecked(False)
+        self.input_uncertainty_enabled.setToolTip(
+            "Führt Monte-Carlo-Simulation durch, um Unsicherheiten in den Ergebnissen zu quantifizieren"
+        )
+        self.input_uncertainty_enabled.stateChanged.connect(self._on_uncertainty_toggled)
+        form_uncertainty.addRow(self.input_uncertainty_enabled)
+
+        # Monte Carlo samples
+        self.input_mc_samples = QSpinBox()
+        self.input_mc_samples.setRange(100, 10000)
+        self.input_mc_samples.setValue(1000)
+        self.input_mc_samples.setSingleStep(100)
+        self.input_mc_samples.setToolTip("Anzahl der Monte-Carlo-Samples (mehr = genauer, aber langsamer)")
+        self.input_mc_samples.setEnabled(False)
+        form_uncertainty.addRow("Monte Carlo Samples:", self.input_mc_samples)
+
+        # Terrain type for DEM uncertainty
+        from qgis.PyQt.QtWidgets import QComboBox
+        self.input_terrain_type = QComboBox()
+        self.input_terrain_type.addItems([
+            "Flach (σ = 7.5 cm)",
+            "Moderat (σ = 10 cm)",
+            "Steil/Bewaldet (σ = 15 cm)"
+        ])
+        self.input_terrain_type.setCurrentIndex(0)
+        self.input_terrain_type.setToolTip(
+            "DEM-Unsicherheit basierend auf Geländetyp (nach deutschen Standards)"
+        )
+        self.input_terrain_type.setEnabled(False)
+        form_uncertainty.addRow("Geländetyp (DEM-Unsicherheit):", self.input_terrain_type)
+
+        # DEM uncertainty info
+        dem_info = QLabel(
+            "<i>DEM-Unsicherheit basiert auf offiziellen deutschen Spezifikationen<br>"
+            "(hoehendaten.de: ±15-30cm bei 95% Konfidenz)</i>"
+        )
+        dem_info.setWordWrap(True)
+        dem_info.setStyleSheet("color: gray; font-size: 10px;")
+        form_uncertainty.addRow("", dem_info)
+
+        # Foundation depth uncertainty
+        self.input_foundation_depth_std = QDoubleSpinBox()
+        self.input_foundation_depth_std.setRange(0, 0.5)
+        self.input_foundation_depth_std.setValue(0.1)
+        self.input_foundation_depth_std.setDecimals(2)
+        self.input_foundation_depth_std.setSuffix(" m (σ)")
+        self.input_foundation_depth_std.setToolTip("Standardabweichung der Fundamenttiefe")
+        self.input_foundation_depth_std.setEnabled(False)
+        form_uncertainty.addRow("Fundamenttiefe-Unsicherheit:", self.input_foundation_depth_std)
+
+        # Slope angle uncertainty
+        self.input_slope_angle_std = QDoubleSpinBox()
+        self.input_slope_angle_std.setRange(0, 10.0)
+        self.input_slope_angle_std.setValue(3.0)
+        self.input_slope_angle_std.setDecimals(1)
+        self.input_slope_angle_std.setSuffix(" ° (σ)")
+        self.input_slope_angle_std.setToolTip("Standardabweichung des Böschungswinkels")
+        self.input_slope_angle_std.setEnabled(False)
+        form_uncertainty.addRow("Böschungswinkel-Unsicherheit:", self.input_slope_angle_std)
+
+        group_uncertainty.setLayout(form_uncertainty)
+        layout.addWidget(group_uncertainty)
+
         layout.addStretch()
         widget.setLayout(layout)
         scroll.setWidget(widget)
         return scroll
+
+    def _on_uncertainty_toggled(self, state):
+        """Enable/disable uncertainty input fields based on checkbox state."""
+        enabled = state == Qt.Checked
+        self.input_mc_samples.setEnabled(enabled)
+        self.input_terrain_type.setEnabled(enabled)
+        self.input_foundation_depth_std.setEnabled(enabled)
+        self.input_slope_angle_std.setEnabled(enabled)
 
     def _create_profiles_tab(self):
         """Create profiles tab."""
@@ -690,7 +767,14 @@ class MainDialog(QDialog):
 
             # Output parameters
             'workspace': self.input_workspace.text().strip(),
-            'force_refresh': self.input_force_refresh.isChecked()
+            'force_refresh': self.input_force_refresh.isChecked(),
+
+            # Uncertainty analysis parameters
+            'uncertainty_enabled': self.input_uncertainty_enabled.isChecked(),
+            'mc_samples': self.input_mc_samples.value(),
+            'terrain_type_index': self.input_terrain_type.currentIndex(),
+            'foundation_depth_std': self.input_foundation_depth_std.value(),
+            'slope_angle_std': self.input_slope_angle_std.value()
         }
 
         # Emit signal

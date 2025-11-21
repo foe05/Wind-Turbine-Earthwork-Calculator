@@ -28,6 +28,7 @@ from qgis.PyQt.QtCore import QSize
 
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
+from .uncertainty import UncertaintyAnalysisResult
 
 
 class ReportGenerator:
@@ -49,7 +50,8 @@ class ReportGenerator:
                  boom_layer: Optional[QgsVectorLayer] = None,
                  rotor_layer: Optional[QgsVectorLayer] = None,
                  profile_lines_layer: Optional[QgsVectorLayer] = None,
-                 dxf_layer: Optional[QgsVectorLayer] = None):
+                 dxf_layer: Optional[QgsVectorLayer] = None,
+                 uncertainty_result: Optional[UncertaintyAnalysisResult] = None):
         """
         Initialize report generator.
 
@@ -63,6 +65,7 @@ class ReportGenerator:
             rotor_layer (QgsVectorLayer): Rotor storage polygon layer (optional)
             profile_lines_layer (QgsVectorLayer): Profile lines layer (optional)
             dxf_layer (QgsVectorLayer): DXF import layer (optional)
+            uncertainty_result (UncertaintyAnalysisResult): Monte Carlo uncertainty results (optional)
         """
         self.results = results
         self.polygon = polygon
@@ -73,6 +76,7 @@ class ReportGenerator:
         self.rotor_layer = rotor_layer
         self.profile_lines_layer = profile_lines_layer
         self.dxf_layer = dxf_layer
+        self.uncertainty_result = uncertainty_result
         self.logger = get_plugin_logger()
 
         # Get centroid coordinates
@@ -110,6 +114,7 @@ class ReportGenerator:
         html_summary = self._generate_summary()
         html_parameters = self._generate_parameters(config)
         html_results = self._generate_results()
+        html_uncertainty = self._generate_uncertainty_section()
         html_overview = self._generate_overview_section(overview_map_path)
         html_profiles = self._generate_profiles_section(profile_pngs)
         html_footer = self._generate_footer()
@@ -129,6 +134,7 @@ class ReportGenerator:
         {html_summary}
         {html_parameters}
         {html_results}
+        {html_uncertainty}
         {html_overview}
         {html_profiles}
     </div>
@@ -632,6 +638,149 @@ class ReportGenerator:
             </tr>
             {''.join(surface_rows)}
         </table>
+    </div>
+"""
+
+    def _generate_uncertainty_section(self) -> str:
+        """Generate uncertainty analysis section if available."""
+        if not self.uncertainty_result:
+            return ""
+
+        ur = self.uncertainty_result
+
+        # Build sensitivity ranking table
+        sensitivity_rows = []
+        ranking = ur.get_sensitivity_ranking()
+        for param_name, sens_index in ranking:
+            result = ur.sensitivity.get(param_name)
+            if result:
+                corr = result.correlation
+                sens_pct = sens_index * 100
+                # Create visual bar
+                bar_width = min(100, int(sens_pct))
+                sensitivity_rows.append(f"""
+                <tr>
+                    <td>{param_name}</td>
+                    <td>{sens_pct:.1f}%</td>
+                    <td>{corr:+.3f}</td>
+                    <td>
+                        <div style="background: #667eea; height: 12px; width: {bar_width}%; border-radius: 2px;"></div>
+                    </td>
+                </tr>""")
+
+        sensitivity_table = ""
+        if sensitivity_rows:
+            sensitivity_table = f"""
+        <h3>Sensitivitätsanalyse</h3>
+        <p><i>Welche Parameter beeinflussen das Ergebnis am stärksten?</i></p>
+        <table>
+            <tr>
+                <th>Parameter</th>
+                <th>Sensitivität</th>
+                <th>Korrelation</th>
+                <th>Einfluss</th>
+            </tr>
+            {''.join(sensitivity_rows)}
+        </table>
+"""
+
+        return f"""
+    <div class="section">
+        <h2>📊 Unsicherheitsanalyse (Monte Carlo)</h2>
+        <p>Ergebnisse der Monte-Carlo-Simulation mit {ur.num_samples} Samples
+           (Berechnungszeit: {ur.computation_time_seconds:.1f}s)</p>
+
+        <h3>Optimale Kranstellflächen-Höhe</h3>
+        <div class="highlight-box">
+            <div class="grid">
+                <div class="card">
+                    <h3>Mittelwert</h3>
+                    <div class="value">{ur.crane_height.mean:.2f}</div>
+                    <div class="unit">m ü.NN</div>
+                </div>
+                <div class="card">
+                    <h3>Standardabweichung</h3>
+                    <div class="value">± {ur.crane_height.std:.3f}</div>
+                    <div class="unit">m</div>
+                </div>
+                <div class="card">
+                    <h3>90% Konfidenzintervall</h3>
+                    <div class="value" style="font-size: 1.2rem;">[{ur.crane_height.percentile_5:.2f}, {ur.crane_height.percentile_95:.2f}]</div>
+                    <div class="unit">m ü.NN</div>
+                </div>
+            </div>
+        </div>
+
+        <h3>Volumen-Unsicherheiten</h3>
+        <table>
+            <tr>
+                <th>Kennwert</th>
+                <th>Mittelwert</th>
+                <th>Std.-Abw.</th>
+                <th>90% Konfidenzintervall</th>
+                <th>CV</th>
+            </tr>
+            <tr>
+                <td><strong>Abtrag (Cut)</strong></td>
+                <td>{ur.total_cut.mean:,.0f} m³</td>
+                <td>± {ur.total_cut.std:,.0f} m³</td>
+                <td>[{ur.total_cut.percentile_5:,.0f}, {ur.total_cut.percentile_95:,.0f}] m³</td>
+                <td>{ur.total_cut.coefficient_of_variation*100:.1f}%</td>
+            </tr>
+            <tr>
+                <td><strong>Auftrag (Fill)</strong></td>
+                <td>{ur.total_fill.mean:,.0f} m³</td>
+                <td>± {ur.total_fill.std:,.0f} m³</td>
+                <td>[{ur.total_fill.percentile_5:,.0f}, {ur.total_fill.percentile_95:,.0f}] m³</td>
+                <td>{ur.total_fill.coefficient_of_variation*100:.1f}%</td>
+            </tr>
+            <tr>
+                <td><strong>Netto-Volumen</strong></td>
+                <td>{ur.net_volume.mean:,.0f} m³</td>
+                <td>± {ur.net_volume.std:,.0f} m³</td>
+                <td>[{ur.net_volume.percentile_5:,.0f}, {ur.net_volume.percentile_95:,.0f}] m³</td>
+                <td>{ur.net_volume.coefficient_of_variation*100:.1f}%</td>
+            </tr>
+            <tr style="font-weight: bold; background-color: #f0f0f0;">
+                <td><strong>Gesamt bewegt</strong></td>
+                <td>{ur.total_volume_moved.mean:,.0f} m³</td>
+                <td>± {ur.total_volume_moved.std:,.0f} m³</td>
+                <td>[{ur.total_volume_moved.percentile_5:,.0f}, {ur.total_volume_moved.percentile_95:,.0f}] m³</td>
+                <td>{ur.total_volume_moved.coefficient_of_variation*100:.1f}%</td>
+            </tr>
+        </table>
+
+        {sensitivity_table}
+
+        <h3>Unsicherheits-Konfiguration</h3>
+        <div class="grid">
+            <div class="card">
+                <h3>DEM-Unsicherheit</h3>
+                <div class="value">{ur.config.dem_vertical_std*100:.1f}</div>
+                <div class="unit">cm (σ)</div>
+            </div>
+            <div class="card">
+                <h3>Geländetyp</h3>
+                <div class="value" style="font-size: 1rem;">{ur.config.terrain_type.value}</div>
+                <div class="unit"></div>
+            </div>
+            <div class="card">
+                <h3>Böschungswinkel-Unsicherheit</h3>
+                <div class="value">{ur.config.slope_angle_std:.1f}</div>
+                <div class="unit">° (σ)</div>
+            </div>
+            <div class="card">
+                <h3>Sampling-Methode</h3>
+                <div class="value" style="font-size: 0.9rem;">{'Latin Hypercube' if ur.config.use_latin_hypercube else 'Random'}</div>
+                <div class="unit"></div>
+            </div>
+        </div>
+
+        <p style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
+            <strong>Hinweis:</strong> Die Unsicherheiten basieren auf der Fehlerfortpflanzung durch die gesamte Berechnung.
+            DEM-Unsicherheiten entsprechen den offiziellen deutschen Spezifikationen (hoehendaten.de).
+            CV = Variationskoeffizient (relative Unsicherheit).
+        </p>
     </div>
 """
 
