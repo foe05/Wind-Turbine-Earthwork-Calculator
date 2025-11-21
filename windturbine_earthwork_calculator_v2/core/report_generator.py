@@ -752,9 +752,12 @@ class ReportGenerator:
         self.background_sources = []  # Store sources for later use
         # Calculate extent based on polygon with buffer
         polygon_extent = self.polygon.boundingBox()
-        
-        # Add 20% buffer
-        buffer_size = max(polygon_extent.width(), polygon_extent.height()) * 0.2
+
+        # Add 100% buffer (increased from 20% for better context visibility)
+        # Also ensure minimum buffer of 200m for small sites
+        buffer_percent = max(polygon_extent.width(), polygon_extent.height()) * 1.0
+        min_buffer_m = 200.0  # Minimum 200m buffer to show surrounding context
+        buffer_size = max(buffer_percent, min_buffer_m)
         extent = QgsRectangle(
             polygon_extent.xMinimum() - buffer_size,
             polygon_extent.yMinimum() - buffer_size,
