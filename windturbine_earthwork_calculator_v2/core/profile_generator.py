@@ -596,6 +596,8 @@ class ProfileGenerator:
                 z_crane_top = self.platform_height
             elif in_boom:
                 # Boom surface: calculate sloped height
+                # Positive slope_percent = height increases with distance (terrain rises)
+                # Negative slope_percent = height decreases with distance (terrain falls)
                 if self.boom_connection_edge:
                     distance_from_edge = calculate_distance_from_edge(
                         point,
@@ -605,12 +607,8 @@ class ProfileGenerator:
                     if distance_from_edge < 0:
                         z_boom = self.platform_height
                     else:
-                        z_boom = calculate_slope_height(
-                            self.platform_height,
-                            distance_from_edge,
-                            self.boom_slope_percent,
-                            'down'
-                        )
+                        # Direct formula: positive slope = height increases with distance
+                        z_boom = self.platform_height + distance_from_edge * self.boom_slope_percent / 100.0
                 else:
                     z_boom = self.platform_height
                 z_bottom = z_boom  # Boom has no separate top/bottom

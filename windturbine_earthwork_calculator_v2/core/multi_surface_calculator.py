@@ -1153,16 +1153,14 @@ class MultiSurfaceCalculator:
 
             # Target height at this distance
             # Note: distance can be negative (wrong side of edge), handle gracefully
+            # Positive slope_percent = terrain rises away from crane pad
+            # Negative slope_percent = terrain falls away from crane pad
             if distance < 0:
                 # Point is on wrong side of connection edge (shouldn't happen if geometries are correct)
                 target_height = crane_height
             else:
-                target_height = calculate_slope_height(
-                    crane_height,
-                    distance,
-                    slope_percent,
-                    'down'
-                )
+                # Direct formula: positive slope = height increases with distance
+                target_height = crane_height + distance * slope_percent / 100.0
 
             elevations_only.append(terrain_elevation)
 
@@ -1178,7 +1176,8 @@ class MultiSurfaceCalculator:
         terrain_mean = float(np.mean(elevations_only)) if elevations_only else 0.0
 
         # Calculate far end height based on actual maximum distance
-        far_end_height = crane_height - max_distance * slope_percent / 100
+        # Positive slope = far end is higher than crane pad
+        far_end_height = crane_height + max_distance * slope_percent / 100.0
 
         # Calculate slope area (embankment around boom surface)
         # Similar to crane pad but potentially more complex due to sloped target
