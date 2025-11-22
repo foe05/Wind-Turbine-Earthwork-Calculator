@@ -473,6 +473,12 @@ class WorkflowWorker(QObject):
                 project.boom.slope_longitudinal if project.boom else 0.0
             )
 
+            # Debug logging for boom parameters passed to ProfileGenerator
+            self.logger.info(f"Creating ProfileGenerator with boom parameters:")
+            self.logger.info(f"  optimized_boom_slope: {optimized_boom_slope}")
+            self.logger.info(f"  boom_connection_edge: {boom_connection_edge is not None}")
+            self.logger.info(f"  boom_slope_direction: {boom_slope_direction}")
+
             profile_gen = ProfileGenerator(
                 dem_layer,
                 project.crane_pad.geometry,
