@@ -1133,6 +1133,7 @@ class MultiSurfaceCalculator:
         cut_volume = 0.0
         fill_volume = 0.0
         elevations_only = []
+        max_distance = 0.0  # Track maximum distance from connection edge
 
         for point, terrain_elevation in samples:
             # Calculate distance from connection edge in slope direction
@@ -1141,6 +1142,10 @@ class MultiSurfaceCalculator:
                 self.boom_connection_edge,
                 self.boom_slope_direction
             )
+
+            # Track maximum distance for planum_height calculation
+            if distance > max_distance:
+                max_distance = distance
 
             # Target height at this distance
             # Note: distance can be negative (wrong side of edge), handle gracefully
@@ -1168,11 +1173,14 @@ class MultiSurfaceCalculator:
         terrain_max = float(np.max(elevations_only)) if elevations_only else 0.0
         terrain_mean = float(np.mean(elevations_only)) if elevations_only else 0.0
 
+        # Calculate far end height based on actual maximum distance
+        far_end_height = crane_height - max_distance * slope_percent / 100
+
         # Calculate slope area (embankment around boom surface)
         # Similar to crane pad but potentially more complex due to sloped target
         max_height_diff = max(
             abs(terrain_max - crane_height),
-            abs(terrain_min - (crane_height - 50 * slope_percent / 100))  # Estimate far end
+            abs(terrain_min - far_end_height)
         )
         slope_width = self.calculate_slope_width(max_height_diff)
 
@@ -1184,8 +1192,8 @@ class MultiSurfaceCalculator:
         slope_fill = 0.0
 
         for elevation in slope_elevations:
-            # Simplified: use average of crane height and estimated far end
-            avg_height = crane_height - 25 * slope_percent / 100
+            # Simplified: use average of crane height and actual far end height
+            avg_height = (crane_height + far_end_height) / 2.0
             diff = elevation - avg_height
 
             if diff > 0:
@@ -1201,6 +1209,7 @@ class MultiSurfaceCalculator:
 
         self.logger.info(
             f"Boom surface @ {crane_height:.2f}m: slope={slope_percent:.2f}%, "
+            f"max_dist={max_distance:.1f}m, far_end={far_end_height:.2f}m, "
             f"cut={total_cut:.1f}m³, fill={total_fill:.1f}m³"
         )
 
@@ -1220,7 +1229,8 @@ class MultiSurfaceCalculator:
                 'slope_direction': round(self.boom_slope_direction, 1),
                 'auto_slope': self.project.boom.auto_slope,
                 'slope_width': round(slope_width, 2),
-                'planum_height': round(crane_height - 50 * slope_percent / 100, 2)  # Estimated far end height
+                'planum_height': round(far_end_height, 2),  # Actual far end height based on max distance
+                'max_distance': round(max_distance, 2)  # Length of boom surface
             }
         )
 
