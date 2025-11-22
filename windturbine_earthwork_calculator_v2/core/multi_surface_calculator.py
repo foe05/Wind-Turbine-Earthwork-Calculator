@@ -459,12 +459,47 @@ class MultiSurfaceCalculator:
                 self.boom_connection_edge = boom_edge
                 # Determine slope direction (perpendicular to edge, pointing into boom)
                 edge_angle = get_edge_direction(boom_edge)
-                # The slope goes perpendicular to the connection edge, into the boom surface
-                self.boom_slope_direction = perpendicular_direction(edge_angle)
+
+                # We need to find which perpendicular direction points INTO the boom
+                # There are two perpendiculars: edge_angle + 90° and edge_angle - 90°
+                dir1 = perpendicular_direction(edge_angle)  # +90°
+                dir2 = (edge_angle - 90.0) % 360.0  # -90°
+
+                # Get a test point on the edge (centroid)
+                edge_centroid = boom_edge.centroid().asPoint()
+
+                # Move slightly (1m) in each direction and check which is inside boom
+                test_dist = 1.0  # 1 meter
+
+                # Direction 1 test point
+                dir1_rad = math.radians(dir1)
+                test_x1 = edge_centroid.x() + test_dist * math.cos(dir1_rad)
+                test_y1 = edge_centroid.y() + test_dist * math.sin(dir1_rad)
+                test_point1 = QgsGeometry.fromPointXY(QgsPointXY(test_x1, test_y1))
+
+                # Direction 2 test point
+                dir2_rad = math.radians(dir2)
+                test_x2 = edge_centroid.x() + test_dist * math.cos(dir2_rad)
+                test_y2 = edge_centroid.y() + test_dist * math.sin(dir2_rad)
+                test_point2 = QgsGeometry.fromPointXY(QgsPointXY(test_x2, test_y2))
+
+                # Check which direction points into the boom
+                if self.project.boom.geometry.contains(test_point1):
+                    self.boom_slope_direction = dir1
+                elif self.project.boom.geometry.contains(test_point2):
+                    self.boom_slope_direction = dir2
+                else:
+                    # Fallback: use original calculation
+                    self.boom_slope_direction = dir1
+                    self.logger.warning(
+                        f"Could not determine correct slope direction into boom, "
+                        f"using default: {dir1:.1f}°"
+                    )
 
                 self.logger.info(
                     f"Boom connection edge: {boom_length:.1f}m, "
-                    f"slope direction: {self.boom_slope_direction:.1f}°"
+                    f"slope direction: {self.boom_slope_direction:.1f}° "
+                    f"(edge angle: {edge_angle:.1f}°)"
                 )
             else:
                 self.logger.warning("No connection edge found between crane pad and boom")
