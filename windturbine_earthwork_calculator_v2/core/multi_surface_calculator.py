@@ -1119,11 +1119,15 @@ class MultiSurfaceCalculator:
 
             if len(elevations_for_slope) > 5:
                 terrain_slope = calculate_terrain_slope(elevations_for_slope, distances)
-                # Clamp to allowed range
-                slope_percent = max(
-                    self.project.boom.slope_min,
-                    min(self.project.boom.slope_max, abs(terrain_slope))
-                )
+                # Clamp absolute value to allowed range, but preserve sign
+                # Negative slope = terrain falls away from crane pad
+                # Positive slope = terrain rises away from crane pad
+                abs_slope = min(self.project.boom.slope_max, max(self.project.boom.slope_min, abs(terrain_slope)))
+                # Preserve the sign of the terrain slope
+                if terrain_slope < 0:
+                    slope_percent = -abs_slope  # Terrain falls: negative slope
+                else:
+                    slope_percent = abs_slope   # Terrain rises: positive slope
                 self.logger.info(
                     f"Auto-adjusted boom slope: terrain={terrain_slope:.2f}%, "
                     f"used={slope_percent:.2f}%"
