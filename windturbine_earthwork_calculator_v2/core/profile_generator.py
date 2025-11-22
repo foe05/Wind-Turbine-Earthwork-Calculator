@@ -247,7 +247,13 @@ class ProfileGenerator:
                  boom_slope_percent: float = 0.0,
                  rotor_geometry: QgsGeometry = None,
                  rotor_height: float = None,
-                 rotor_holms: list = None):
+                 rotor_holms: list = None,
+                 road_geometry: QgsGeometry = None,
+                 road_connection_edge: QgsGeometry = None,
+                 road_slope_direction: float = None,
+                 road_slope_percent: float = 0.0,
+                 road_gravel_enabled: bool = True,
+                 road_gravel_thickness: float = 0.3):
         """
         Initialize profile generator.
 
@@ -267,6 +273,12 @@ class ProfileGenerator:
             rotor_geometry (QgsGeometry): Rotor storage polygon (optional)
             rotor_height (float): Rotor storage height in m ü.NN (optional)
             rotor_holms (list): List of QgsGeometry polygons for rotor support beams (optional)
+            road_geometry (QgsGeometry): Road access polygon (optional)
+            road_connection_edge (QgsGeometry): Connection edge between crane and road (optional)
+            road_slope_direction (float): Road slope direction angle in degrees (optional)
+            road_slope_percent (float): Road slope in percent - can be positive or negative (optional)
+            road_gravel_enabled (bool): Whether road has gravel layer (default: True)
+            road_gravel_thickness (float): Road gravel thickness in meters (default: 0.3m)
         """
         if not MATPLOTLIB_AVAILABLE:
             raise ImportError(
@@ -292,6 +304,14 @@ class ProfileGenerator:
         self.rotor_geometry = rotor_geometry
         self.rotor_height = rotor_height
         self.rotor_holms = rotor_holms or []
+
+        # Road access parameters
+        self.road_geometry = road_geometry
+        self.road_connection_edge = road_connection_edge
+        self.road_slope_direction = road_slope_direction
+        self.road_slope_percent = road_slope_percent
+        self.road_gravel_enabled = road_gravel_enabled
+        self.road_gravel_thickness = road_gravel_thickness
 
         # Get polygon properties
         self.centroid = get_centroid(polygon)
@@ -544,6 +564,7 @@ class ProfileGenerator:
         foundation_bottom_z = []  # Foundation bottom
         boom_z = []
         rotor_z = []
+        road_z = []  # Road access surface
         in_holm = []  # Flag for holm areas
 
         # Calculate derived heights
@@ -569,6 +590,7 @@ class ProfileGenerator:
             z_foundation_bottom = None
             z_boom = None
             z_rotor = None
+            z_road = None
             is_in_holm = False
 
             # Check which surface contains the point (priority order matters)
@@ -576,6 +598,7 @@ class ProfileGenerator:
             in_crane_pad = self.polygon.contains(point_geom)
             in_boom = self.boom_geometry and self.boom_geometry.contains(point_geom)
             in_rotor = self.rotor_geometry and self.rotor_geometry.contains(point_geom)
+            in_road = self.road_geometry and self.road_geometry.contains(point_geom)
 
             # Check if point is in any holm (support beam)
             if self.rotor_holms:
@@ -630,6 +653,30 @@ class ProfileGenerator:
                     else:
                         # No fill outside holms when terrain is below rotor
                         z_bottom = z_existing
+            elif in_road:
+                # Road access area: calculate sloped height (can be positive or negative slope)
+                if self.road_connection_edge:
+                    distance_from_edge = calculate_distance_from_edge(
+                        point,
+                        self.road_connection_edge,
+                        self.road_slope_direction
+                    )
+                    if distance_from_edge < 0:
+                        road_surface_height = self.platform_height
+                    else:
+                        # Positive slope = road rises away from crane
+                        # Negative slope = road falls away from crane
+                        road_surface_height = self.platform_height + (distance_from_edge * self.road_slope_percent / 100)
+                else:
+                    road_surface_height = self.platform_height
+
+                z_road = road_surface_height
+
+                # Calculate planum (accounting for gravel if enabled)
+                if self.road_gravel_enabled:
+                    z_bottom = road_surface_height - self.road_gravel_thickness
+                else:
+                    z_bottom = road_surface_height
 
             # Append values
             bottom_z.append(z_bottom)
@@ -638,6 +685,7 @@ class ProfileGenerator:
             foundation_bottom_z.append(z_foundation_bottom)
             boom_z.append(z_boom)
             rotor_z.append(z_rotor)
+            road_z.append(z_road)
             in_holm.append(is_in_holm)
 
         # Convert to arrays
@@ -648,6 +696,7 @@ class ProfileGenerator:
         foundation_bottom_z = np.array(foundation_bottom_z, dtype=object)  # Can contain None
         boom_z = np.array(boom_z, dtype=object)  # Can contain None
         rotor_z = np.array(rotor_z, dtype=object)  # Can contain None
+        road_z = np.array(road_z, dtype=object)  # Can contain None
         in_holm = np.array(in_holm, dtype=bool)
 
         # Calculate cut/fill based on bottom elevations
@@ -676,6 +725,7 @@ class ProfileGenerator:
             'foundation_z': foundation_fok_z,  # Legacy compatibility
             'boom_z': boom_z,
             'rotor_z': rotor_z,
+            'road_z': road_z,
             'cut_fill': cut_fill,
             'in_holm': in_holm,
             'slope_lines': slope_lines  # Slope visualization data

@@ -24,6 +24,7 @@ class SurfaceType(Enum):
     FOUNDATION = "fundamentflaeche"
     BOOM = "auslegerflaeche"
     ROTOR_STORAGE = "rotorflaeche"
+    ROAD_ACCESS = "zufahrt"
 
     def __str__(self):
         return self.value
@@ -35,7 +36,8 @@ class SurfaceType(Enum):
             SurfaceType.CRANE_PAD: "Kranstellfläche",
             SurfaceType.FOUNDATION: "Fundamentfläche",
             SurfaceType.BOOM: "Auslegerfläche",
-            SurfaceType.ROTOR_STORAGE: "Blattlagerfläche"
+            SurfaceType.ROTOR_STORAGE: "Blattlagerfläche",
+            SurfaceType.ROAD_ACCESS: "Zufahrtsstraße"
         }
         return names[self]
 
@@ -135,6 +137,7 @@ class MultiSurfaceProject:
     # Optional surface configurations
     boom: Optional[SurfaceConfig] = None
     rotor_storage: Optional[SurfaceConfig] = None
+    road_access: Optional[SurfaceConfig] = None
 
     # Rotor blade support beams (Holme) - optional
     rotor_holms: Optional[list] = None  # List of QgsGeometry polygons for support beams
@@ -162,6 +165,18 @@ class MultiSurfaceProject:
     rotor_height_optimize: bool = True  # Whether to optimize rotor height
     rotor_height_step_coarse: float = 0.2  # Coarse step for rotor height optimization (meters)
     rotor_height_step_fine: float = 0.05  # Fine step for rotor height optimization (meters)
+
+    # Road access parameters
+    road_slope_percent: float = 8.0  # Longitudinal slope in percent (can be positive or negative based on terrain)
+    road_gravel_enabled: bool = True  # Whether to apply gravel on road
+    road_gravel_thickness: float = 0.3  # Gravel thickness in meters (only if enabled)
+
+    # Optimization parameters - Road slope
+    road_slope_optimize: bool = False  # Whether to optimize road slope
+    road_slope_min: float = 4.0  # Minimum road slope in percent
+    road_slope_max: float = 12.0  # Maximum road slope in percent
+    road_slope_step_coarse: float = 1.0  # Coarse step for road slope optimization (percent)
+    road_slope_step_fine: float = 0.5  # Fine step for road slope optimization (percent)
 
     # Optimization mode
     optimize_for_net_earthwork: bool = True  # True = minimize net (Cut-Fill), False = minimize total (Cut+Fill)
@@ -223,13 +238,20 @@ class MultiSurfaceProject:
                 errors.append(f"{surface.surface_type.display_name} geometry is invalid")
 
         # Check geometries are valid (optional surfaces)
-        for surface_name in ['boom', 'rotor_storage']:
+        for surface_name in ['boom', 'rotor_storage', 'road_access']:
             surface = getattr(self, surface_name)
             if surface is not None:
                 if surface.geometry.isEmpty():
                     errors.append(f"{surface.surface_type.display_name} geometry is empty")
                 if not surface.geometry.isGeosValid():
                     errors.append(f"{surface.surface_type.display_name} geometry is invalid")
+
+        # Check road access specific parameters
+        if self.road_access is not None:
+            if self.road_slope_percent < 0 or self.road_slope_percent > 20:
+                errors.append(f"Road slope {self.road_slope_percent}% outside reasonable range [0%, 20%]")
+            if self.road_gravel_enabled and (self.road_gravel_thickness < 0 or self.road_gravel_thickness > 1.0):
+                errors.append(f"Road gravel thickness {self.road_gravel_thickness}m outside reasonable range [0, 1.0m]")
 
         if errors:
             return False, "; ".join(errors)
@@ -298,9 +320,12 @@ class MultiSurfaceCalculationResult:
     crane_height: float
     fok: float
     surface_results: Dict[SurfaceType, SurfaceCalculationResult]
-    gravel_fill_external: float = 0.0  # External gravel volume (m³)
+    gravel_fill_external: float = 0.0  # External gravel volume (m³) - total (crane + road)
+    gravel_crane_external: float = 0.0  # External gravel for crane pad only (m³)
+    gravel_road_external: float = 0.0  # External gravel for road only (m³)
     boom_slope_percent: float = 0.0  # Optimized boom slope (%)
     rotor_height_offset_optimized: float = 0.0  # Optimized rotor height offset (m)
+    road_slope_percent: float = 0.0  # Road slope in percent (positive = uphill from crane, negative = downhill)
 
     @property
     def total_cut(self) -> float:
@@ -342,8 +367,11 @@ class MultiSurfaceCalculationResult:
             'total_volume_moved': round(self.total_volume_moved, 1),
             'net_volume': round(self.net_volume, 1),
             'gravel_fill_external': round(self.gravel_fill_external, 1),
+            'gravel_crane_external': round(self.gravel_crane_external, 1),
+            'gravel_road_external': round(self.gravel_road_external, 1),
             'boom_slope_percent': round(self.boom_slope_percent, 2),
             'rotor_height_offset_optimized': round(self.rotor_height_offset_optimized, 3),
+            'road_slope_percent': round(self.road_slope_percent, 2),
             'total_platform_area': round(self.total_platform_area, 1),
             'total_slope_area': round(self.total_slope_area, 1),
             'surfaces': {
@@ -411,6 +439,9 @@ class MultiSurfaceCalculationResult:
             fok=data['fok'],
             surface_results=surface_results,
             gravel_fill_external=data.get('gravel_fill_external', 0.0),
+            gravel_crane_external=data.get('gravel_crane_external', 0.0),
+            gravel_road_external=data.get('gravel_road_external', 0.0),
             boom_slope_percent=data.get('boom_slope_percent', 0.0),
-            rotor_height_offset_optimized=data.get('rotor_height_offset_optimized', 0.0)
+            rotor_height_offset_optimized=data.get('rotor_height_offset_optimized', 0.0),
+            road_slope_percent=data.get('road_slope_percent', 0.0)
         )

@@ -117,6 +117,7 @@ class WorkflowWorker(QObject):
         optional_dxf_files = [
             ('boom', 'dxf_boom', SurfaceType.BOOM, "Auslegerfläche"),
             ('rotor', 'dxf_rotor', SurfaceType.ROTOR_STORAGE, "Blattlagerfläche"),
+            ('road', 'dxf_road', SurfaceType.ROAD_ACCESS, "Zufahrtsstraße"),
         ]
 
         progress_per_dxf = 5
@@ -248,6 +249,21 @@ class WorkflowWorker(QObject):
                     metadata=surfaces['rotor']['metadata']
                 )
 
+            # Create road access config
+            road_config = None
+            if surfaces.get('road'):
+                road_config = SurfaceConfig(
+                    surface_type=SurfaceType.ROAD_ACCESS,
+                    geometry=surfaces['road']['geometry'],
+                    dxf_path=surfaces['road']['dxf_path'],
+                    height_mode=HeightMode.SLOPED,
+                    slope_longitudinal=self.params.get('road_slope_percent', 8.0),
+                    auto_slope=True,  # Auto-detect slope direction from terrain
+                    slope_min=1.0,
+                    slope_max=15.0,
+                    metadata=surfaces['road']['metadata']
+                )
+
             # Import holms if holm DXF path is provided
             rotor_holms = None
             if self.params.get('holm_dxf_path'):
@@ -273,6 +289,7 @@ class WorkflowWorker(QObject):
                 foundation=foundation_config,
                 boom=boom_config,
                 rotor_storage=rotor_config,
+                road_access=road_config,
                 rotor_holms=rotor_holms,
                 fok=self.params['fok'],
                 foundation_depth=self.params['foundation_depth'],
@@ -291,7 +308,14 @@ class WorkflowWorker(QObject):
                 rotor_height_optimize=self.params.get('rotor_height_optimize', True),
                 rotor_height_step_coarse=self.params.get('rotor_height_step_coarse', 0.2),
                 rotor_height_step_fine=self.params.get('rotor_height_step_fine', 0.05),
-                optimize_for_net_earthwork=self.params.get('optimize_for_net_earthwork', True)
+                optimize_for_net_earthwork=self.params.get('optimize_for_net_earthwork', True),
+                # Road access parameters
+                road_slope_percent=self.params.get('road_slope_percent', 8.0),
+                road_gravel_enabled=self.params.get('road_gravel_enabled', True),
+                road_gravel_thickness=self.params.get('road_gravel_thickness', 0.3),
+                road_slope_optimize=self.params.get('road_slope_optimize', False),
+                road_slope_min=self.params.get('road_slope_min', 4.0),
+                road_slope_max=self.params.get('road_slope_max', 12.0)
             )
 
             self.logger.info("MultiSurfaceProject created successfully")
@@ -330,6 +354,8 @@ class WorkflowWorker(QObject):
                 all_geoms.append(surfaces['boom']['geometry'])
             if surfaces['rotor'] is not None:
                 all_geoms.append(surfaces['rotor']['geometry'])
+            if surfaces['road'] is not None:
+                all_geoms.append(surfaces['road']['geometry'])
 
             # Create union of all geometries
             from qgis.core import QgsGeometry

@@ -527,13 +527,14 @@ class ReportGenerator:
             'kranstellflaeche': 'Kranstellfläche',
             'fundamentflaeche': 'Fundamentfläche',
             'auslegerflaeche': 'Auslegerfläche',
-            'rotorflaeche': 'Rotorblattlagerfläche'
+            'rotorflaeche': 'Rotorblattlagerfläche',
+            'zufahrt': 'Zufahrtsstraße'
         }
 
         # Build table rows for each surface
         surface_rows = []
 
-        for surface_key in ['kranstellflaeche', 'fundamentflaeche', 'auslegerflaeche', 'rotorflaeche']:
+        for surface_key in ['kranstellflaeche', 'fundamentflaeche', 'auslegerflaeche', 'rotorflaeche', 'zufahrt']:
             surface_data = surfaces.get(surface_key, {})
             if not surface_data:
                 continue
@@ -613,7 +614,21 @@ class ReportGenerator:
         crane_height = self.results.get('crane_height', 0)
         boom_slope = self.results.get('boom_slope_percent', 0)
         rotor_offset = self.results.get('rotor_height_offset_optimized', 0)
+        road_slope = self.results.get('road_slope_percent', 0)
         gravel_external = self.results.get('gravel_fill_external', 0)
+        gravel_crane = self.results.get('gravel_crane_external', 0)
+        gravel_road = self.results.get('gravel_road_external', 0)
+
+        # Build gravel info string
+        if gravel_road > 0:
+            gravel_info = f"Kranstellfläche: <strong>{gravel_crane:,.0f} m³</strong> | Zufahrt: <strong>{gravel_road:,.0f} m³</strong> | Gesamt: <strong>{gravel_external:,.0f} m³</strong>"
+        else:
+            gravel_info = f"<strong>{gravel_external:,.0f} m³</strong>"
+
+        # Build road slope info
+        road_info = ""
+        if road_slope != 0:
+            road_info = f" | Zufahrt-Gefälle: <strong>{road_slope:+.1f}%</strong>"
 
         return f"""
     <div class="section">
@@ -624,8 +639,8 @@ class ReportGenerator:
             <p>FOK (Fundamentoberkante): <strong>{fok:.2f} m ü.NN</strong> |
                Kranstellflächen-Höhe: <strong>{crane_height:.2f} m ü.NN</strong></p>
             <p>Ausleger-Gefälle: <strong>{boom_slope:.1f}%</strong> |
-               Rotor-Höhenversatz: <strong>{rotor_offset:.3f} m</strong></p>
-            <p>Externes Schottermaterial: <strong>{gravel_external:,.0f} m³</strong></p>
+               Rotor-Höhenversatz: <strong>{rotor_offset:.3f} m</strong>{road_info}</p>
+            <p>Externes Schottermaterial: {gravel_info}</p>
         </div>
 
         <table>

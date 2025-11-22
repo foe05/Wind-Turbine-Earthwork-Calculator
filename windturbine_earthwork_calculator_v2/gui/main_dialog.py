@@ -176,6 +176,17 @@ class MainDialog(QDialog):
         holms_layout.addWidget(btn_browse_holms)
         form_dxf.addRow("Holme (optional):", holms_layout)
 
+        # Road access DXF (optional)
+        self.input_dxf_road = QLineEdit()
+        self.input_dxf_road.setPlaceholderText("Optional: DXF-Datei mit Zufahrtsstraßen-Umriss...")
+        btn_browse_road = QPushButton("Durchsuchen...")
+        btn_browse_road.clicked.connect(lambda: self._browse_dxf(self.input_dxf_road, "Zufahrtsstraße"))
+
+        road_layout = QHBoxLayout()
+        road_layout.addWidget(self.input_dxf_road)
+        road_layout.addWidget(btn_browse_road)
+        form_dxf.addRow("Zufahrtsstraße (optional):", road_layout)
+
         # DXF tolerance
         self.input_dxf_tolerance = QDoubleSpinBox()
         self.input_dxf_tolerance.setRange(0.001, 10.0)
@@ -316,6 +327,51 @@ class MainDialog(QDialog):
 
         group_rotor.setLayout(form_rotor)
         layout.addWidget(group_rotor)
+
+        # ========== Road Access Parameters Group ==========
+        group_road = QGroupBox("Zufahrtsstraßen-Parameter")
+        form_road = QFormLayout()
+
+        # Longitudinal slope
+        self.input_road_slope = QDoubleSpinBox()
+        self.input_road_slope.setRange(1.0, 15.0)
+        self.input_road_slope.setValue(8.0)
+        self.input_road_slope.setDecimals(1)
+        self.input_road_slope.setSuffix(" %")
+        self.input_road_slope.setToolTip("Maximale Längsneigung der Zufahrtsstraße (Richtung wird automatisch erkannt)")
+        form_road.addRow("Maximale Längsneigung:", self.input_road_slope)
+
+        road_slope_info = QLabel("<i>Richtung (ansteigend/abfallend) wird automatisch vom Gelände erkannt</i>")
+        road_slope_info.setStyleSheet("color: gray; font-size: 10px;")
+        form_road.addRow("", road_slope_info)
+
+        # Enable gravel
+        self.input_road_gravel_enabled = QCheckBox("Zufahrt schottern")
+        self.input_road_gravel_enabled.setChecked(True)
+        self.input_road_gravel_enabled.setToolTip("Aktivieren um Schotterschicht auf Zufahrt aufzubringen")
+        self.input_road_gravel_enabled.stateChanged.connect(self._toggle_road_gravel)
+        form_road.addRow(self.input_road_gravel_enabled)
+
+        # Gravel thickness
+        self.input_road_gravel_thickness = QDoubleSpinBox()
+        self.input_road_gravel_thickness.setRange(0.1, 1.0)
+        self.input_road_gravel_thickness.setValue(0.3)
+        self.input_road_gravel_thickness.setDecimals(2)
+        self.input_road_gravel_thickness.setSuffix(" m")
+        self.input_road_gravel_thickness.setToolTip("Dicke der Schotterschicht auf Zufahrtsstraße")
+        form_road.addRow("Schotterdicke Zufahrt:", self.input_road_gravel_thickness)
+
+        road_gravel_info = QLabel("<i>Wird von Oberkante Zufahrt abgezogen für Planum</i>")
+        road_gravel_info.setStyleSheet("color: gray; font-size: 10px;")
+        form_road.addRow("", road_gravel_info)
+
+        # Connection info
+        road_connection_info = QLabel("<i>Zufahrt schließt an Kranstellfläche auf gleicher Höhe an</i>")
+        road_connection_info.setStyleSheet("color: #0066cc; font-size: 10px;")
+        form_road.addRow("", road_connection_info)
+
+        group_road.setLayout(form_road)
+        layout.addWidget(group_road)
 
         layout.addStretch()
         widget.setLayout(layout)
@@ -659,6 +715,10 @@ class MainDialog(QDialog):
             f"<b>{min_height:.2f} - {max_height:.2f} m ü.NN</b>"
         )
 
+    def _toggle_road_gravel(self, state):
+        """Toggle road gravel thickness input based on checkbox state."""
+        self.input_road_gravel_thickness.setEnabled(state == Qt.Checked)
+
     def _validate_inputs(self):
         """Validate user inputs."""
         errors = []
@@ -681,6 +741,7 @@ class MainDialog(QDialog):
             ("Auslegerfläche", self.input_dxf_boom),
             ("Blattlagerfläche", self.input_dxf_rotor),
             ("Holme", self.input_dxf_holms),
+            ("Zufahrtsstraße", self.input_dxf_road),
         ]
 
         for name, line_edit in optional_dxf_inputs:
@@ -752,6 +813,12 @@ class MainDialog(QDialog):
 
             # Rotor storage parameters
             'rotor_height_offset': self.input_rotor_height_offset.value(),
+
+            # Road access parameters
+            'dxf_road': self.input_dxf_road.text().strip() if self.input_dxf_road.text().strip() else None,
+            'road_slope_percent': self.input_road_slope.value(),
+            'road_gravel_enabled': self.input_road_gravel_enabled.isChecked(),
+            'road_gravel_thickness': self.input_road_gravel_thickness.value(),
 
             # Optimization parameters
             'height_step': self.input_height_step.value(),
