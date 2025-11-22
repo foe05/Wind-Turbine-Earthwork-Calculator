@@ -1414,18 +1414,23 @@ class MultiSurfaceCalculator:
         if rotor_result is not None:
             surface_results[SurfaceType.ROTOR_STORAGE] = rotor_result
 
+        # Get actual boom slope used (may differ from input due to auto_slope)
+        actual_boom_slope = boom_slope_percent
+        if boom_result is not None and 'slope_percent' in boom_result.additional_data:
+            actual_boom_slope = boom_result.additional_data['slope_percent']
+
         result = MultiSurfaceCalculationResult(
             crane_height=crane_height,
             fok=self.project.fok,
             surface_results=surface_results,
             gravel_fill_external=gravel_volume,
-            boom_slope_percent=boom_slope_percent,
+            boom_slope_percent=actual_boom_slope,
             rotor_height_offset_optimized=rotor_height_offset
         )
 
         if feedback:
             feedback.pushInfo(
-                f"  h={crane_height:.2f}m, boom={boom_slope_percent:+.1f}%, rotor={rotor_height_offset:+.2f}m: "
+                f"  h={crane_height:.2f}m, boom={actual_boom_slope:+.1f}%, rotor={rotor_height_offset:+.2f}m: "
                 f"cut={result.total_cut:.0f}m³, fill={result.total_fill:.0f}m³, "
                 f"net={result.net_volume:+.0f}m³, gravel={gravel_volume:.0f}m³"
             )
