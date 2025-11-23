@@ -12,7 +12,7 @@ Version: 2.0.0 - Multi-Surface Extension
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from enum import Enum
 
 from qgis.core import QgsGeometry
@@ -275,6 +275,8 @@ class SurfaceCalculationResult:
         terrain_min: Minimum terrain elevation in surface
         terrain_max: Maximum terrain elevation in surface
         terrain_mean: Mean terrain elevation in surface
+        geometry_3d: 3D geometry (PolygonZ) for QGIS 3D visualization
+        slope_geometry_3d: 3D slope/embankment geometry (MultiPolygonZ)
         additional_data: Surface-specific additional data
     """
     surface_type: SurfaceType
@@ -287,6 +289,8 @@ class SurfaceCalculationResult:
     terrain_min: float = 0.0
     terrain_max: float = 0.0
     terrain_mean: float = 0.0
+    geometry_3d: Optional[QgsGeometry] = None
+    slope_geometry_3d: Optional[QgsGeometry] = None
     additional_data: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -316,6 +320,7 @@ class MultiSurfaceCalculationResult:
         gravel_fill_external: External gravel fill volume (not from site)
         boom_slope_percent: Optimized boom slope in percent
         rotor_height_offset_optimized: Optimized rotor height offset in meters
+        profile_geometries_3d: List of 3D profile geometries (vertical PolygonZ)
     """
     crane_height: float
     fok: float
@@ -326,6 +331,7 @@ class MultiSurfaceCalculationResult:
     boom_slope_percent: float = 0.0  # Optimized boom slope (%)
     rotor_height_offset_optimized: float = 0.0  # Optimized rotor height offset (m)
     road_slope_percent: float = 0.0  # Road slope in percent (positive = uphill from crane, negative = downhill)
+    profile_geometries_3d: List[Dict[str, Any]] = field(default_factory=list)  # 3D profile data
 
     @property
     def total_cut(self) -> float:

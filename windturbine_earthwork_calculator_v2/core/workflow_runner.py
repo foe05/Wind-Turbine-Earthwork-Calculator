@@ -494,6 +494,17 @@ class WorkflowWorker(QObject):
                 boom_slope_direction = calculator.boom_slope_direction
 
             # Create ProfileGenerator with all surface information
+            # Use the optimized boom slope from results, not the project default
+            optimized_boom_slope = results.boom_slope_percent if hasattr(results, 'boom_slope_percent') else (
+                project.boom.slope_longitudinal if project.boom else 0.0
+            )
+
+            # Debug logging for boom parameters passed to ProfileGenerator
+            self.logger.info(f"Creating ProfileGenerator with boom parameters:")
+            self.logger.info(f"  optimized_boom_slope: {optimized_boom_slope}")
+            self.logger.info(f"  boom_connection_edge: {boom_connection_edge is not None}")
+            self.logger.info(f"  boom_slope_direction: {boom_slope_direction}")
+
             profile_gen = ProfileGenerator(
                 dem_layer,
                 project.crane_pad.geometry,
@@ -506,9 +517,9 @@ class WorkflowWorker(QObject):
                 boom_geometry=project.boom.geometry if project.boom else None,
                 boom_connection_edge=boom_connection_edge,
                 boom_slope_direction=boom_slope_direction,
-                boom_slope_percent=project.boom.slope_longitudinal if project.boom else 0.0,
+                boom_slope_percent=optimized_boom_slope,
                 rotor_geometry=project.rotor_storage.geometry if project.rotor_storage else None,
-                rotor_height=optimal_crane_height + project.rotor_height_offset,
+                rotor_height=optimal_crane_height + results.rotor_height_offset_optimized if hasattr(results, 'rotor_height_offset_optimized') else optimal_crane_height + project.rotor_height_offset,
                 rotor_holms=project.rotor_holms if project.rotor_holms else None
             )
 
@@ -966,7 +977,131 @@ class WorkflowWorker(QObject):
 
         del writer
 
-        self.logger.info(f"GeoPackage saved with 4 surface layers + profiles: {gpkg_path}")
+        # === 3D LAYERS ===
+        # Layer 6: kranstellflaechen_3d (PolygonZ)
+        if SurfaceType.CRANE_PAD in results.surface_results:
+            crane_result = results.surface_results[SurfaceType.CRANE_PAD]
+            if crane_result.geometry_3d and not crane_result.geometry_3d.isEmpty():
+                fields_crane_3d = QgsFields()
+                fields_crane_3d.append(QgsField('id', QVariant.Int))
+                fields_crane_3d.append(QgsField('height', QVariant.Double))
+                fields_crane_3d.append(QgsField('surface_type', QVariant.String))
+
+                feat_crane_3d = QgsFeature(fields_crane_3d)
+                feat_crane_3d.setGeometry(crane_result.geometry_3d)
+                feat_crane_3d.setAttribute('id', 1)
+                feat_crane_3d.setAttribute('height', float(crane_result.target_height))
+                feat_crane_3d.setAttribute('surface_type', 'kranstellflaeche')
+
+                options.layerName = 'kranstellflaechen_3d'
+                writer = QgsVectorFileWriter.create(
+                    gpkg_path, fields_crane_3d, QgsWkbTypes.PolygonZ, crs,
+                    QgsCoordinateTransformContext(), options
+                )
+                writer.addFeature(feat_crane_3d)
+                del writer
+
+        # Layer 7: fundamentflaechen_3d (PolygonZ)
+        if SurfaceType.FOUNDATION in results.surface_results:
+            foundation_result = results.surface_results[SurfaceType.FOUNDATION]
+            if foundation_result.geometry_3d and not foundation_result.geometry_3d.isEmpty():
+                fields_foundation_3d = QgsFields()
+                fields_foundation_3d.append(QgsField('id', QVariant.Int))
+                fields_foundation_3d.append(QgsField('height', QVariant.Double))
+                fields_foundation_3d.append(QgsField('surface_type', QVariant.String))
+
+                feat_foundation_3d = QgsFeature(fields_foundation_3d)
+                feat_foundation_3d.setGeometry(foundation_result.geometry_3d)
+                feat_foundation_3d.setAttribute('id', 1)
+                feat_foundation_3d.setAttribute('height', float(foundation_result.target_height))
+                feat_foundation_3d.setAttribute('surface_type', 'fundamentflaeche')
+
+                options.layerName = 'fundamentflaechen_3d'
+                writer = QgsVectorFileWriter.create(
+                    gpkg_path, fields_foundation_3d, QgsWkbTypes.PolygonZ, crs,
+                    QgsCoordinateTransformContext(), options
+                )
+                writer.addFeature(feat_foundation_3d)
+                del writer
+
+        # Layer 8: auslegerflaechen_3d (PolygonZ) - optional
+        if project.boom and SurfaceType.BOOM in results.surface_results:
+            boom_result = results.surface_results[SurfaceType.BOOM]
+            if boom_result.geometry_3d and not boom_result.geometry_3d.isEmpty():
+                fields_boom_3d = QgsFields()
+                fields_boom_3d.append(QgsField('id', QVariant.Int))
+                fields_boom_3d.append(QgsField('height', QVariant.Double))
+                fields_boom_3d.append(QgsField('slope_percent', QVariant.Double))
+                fields_boom_3d.append(QgsField('surface_type', QVariant.String))
+
+                feat_boom_3d = QgsFeature(fields_boom_3d)
+                feat_boom_3d.setGeometry(boom_result.geometry_3d)
+                feat_boom_3d.setAttribute('id', 1)
+                feat_boom_3d.setAttribute('height', float(boom_result.target_height))
+                feat_boom_3d.setAttribute('slope_percent', float(results.boom_slope_percent))
+                feat_boom_3d.setAttribute('surface_type', 'auslegerflaeche')
+
+                options.layerName = 'auslegerflaechen_3d'
+                writer = QgsVectorFileWriter.create(
+                    gpkg_path, fields_boom_3d, QgsWkbTypes.PolygonZ, crs,
+                    QgsCoordinateTransformContext(), options
+                )
+                writer.addFeature(feat_boom_3d)
+                del writer
+
+        # Layer 9: rotorflaechen_3d (PolygonZ) - optional
+        if project.rotor_storage and SurfaceType.ROTOR_STORAGE in results.surface_results:
+            rotor_result = results.surface_results[SurfaceType.ROTOR_STORAGE]
+            if rotor_result.geometry_3d and not rotor_result.geometry_3d.isEmpty():
+                fields_rotor_3d = QgsFields()
+                fields_rotor_3d.append(QgsField('id', QVariant.Int))
+                fields_rotor_3d.append(QgsField('height', QVariant.Double))
+                fields_rotor_3d.append(QgsField('height_offset', QVariant.Double))
+                fields_rotor_3d.append(QgsField('surface_type', QVariant.String))
+
+                feat_rotor_3d = QgsFeature(fields_rotor_3d)
+                feat_rotor_3d.setGeometry(rotor_result.geometry_3d)
+                feat_rotor_3d.setAttribute('id', 1)
+                feat_rotor_3d.setAttribute('height', float(rotor_result.target_height))
+                feat_rotor_3d.setAttribute('height_offset', float(results.rotor_height_offset_optimized))
+                feat_rotor_3d.setAttribute('surface_type', 'rotorflaeche')
+
+                options.layerName = 'rotorflaechen_3d'
+                writer = QgsVectorFileWriter.create(
+                    gpkg_path, fields_rotor_3d, QgsWkbTypes.PolygonZ, crs,
+                    QgsCoordinateTransformContext(), options
+                )
+                writer.addFeature(feat_rotor_3d)
+                del writer
+
+        # Layer 10: boeschungen_3d (MultiPolygonZ) - slope surfaces
+        # Collect all slope geometries
+        slope_geometries = []
+        for surface_type, surface_result in results.surface_results.items():
+            if surface_result.slope_geometry_3d and not surface_result.slope_geometry_3d.isEmpty():
+                slope_geometries.append((surface_type.value, surface_result.slope_geometry_3d))
+
+        if slope_geometries:
+            fields_slope_3d = QgsFields()
+            fields_slope_3d.append(QgsField('id', QVariant.Int))
+            fields_slope_3d.append(QgsField('surface_type', QVariant.String))
+
+            options.layerName = 'boeschungen_3d'
+            writer = QgsVectorFileWriter.create(
+                gpkg_path, fields_slope_3d, QgsWkbTypes.MultiPolygonZ, crs,
+                QgsCoordinateTransformContext(), options
+            )
+
+            for i, (surface_name, slope_geom) in enumerate(slope_geometries):
+                feat_slope = QgsFeature(fields_slope_3d)
+                feat_slope.setGeometry(slope_geom)
+                feat_slope.setAttribute('id', i + 1)
+                feat_slope.setAttribute('surface_type', surface_name)
+                writer.addFeature(feat_slope)
+
+            del writer
+
+        self.logger.info(f"GeoPackage saved with 2D layers, 3D layers, and profiles: {gpkg_path}")
 
     def _add_to_qgis(self, gpkg_path, report_path, dem_path=None, dxf_paths=None, group_name=None):
         """Add all result layers to QGIS project in a layer group.

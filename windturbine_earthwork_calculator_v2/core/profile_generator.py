@@ -317,6 +317,14 @@ class ProfileGenerator:
         self.centroid = get_centroid(polygon)
         self.radius = get_polygon_radius(polygon)
 
+        # Debug logging for boom parameters
+        self.logger.info(f"ProfileGenerator initialized with boom parameters:")
+        self.logger.info(f"  boom_slope_percent: {self.boom_slope_percent}")
+        self.logger.info(f"  boom_connection_edge: {self.boom_connection_edge is not None}")
+        self.logger.info(f"  boom_slope_direction: {self.boom_slope_direction}")
+        self.logger.info(f"  boom_geometry: {self.boom_geometry is not None}")
+        self.logger.info(f"  platform_height: {self.platform_height}")
+
         self.provider = dem_layer.dataProvider()
 
     def generate_auto_profiles(self, num_profiles: int = 8,
@@ -567,6 +575,10 @@ class ProfileGenerator:
         road_z = []  # Road access surface
         in_holm = []  # Flag for holm areas
 
+        # Debug counters
+        boom_point_count = 0
+        boom_debug_logged = False
+
         # Calculate derived heights
         crane_planum_height = self.platform_height - self.gravel_thickness
         foundation_bottom_height = None
@@ -619,6 +631,9 @@ class ProfileGenerator:
                 z_crane_top = self.platform_height
             elif in_boom:
                 # Boom surface: calculate sloped height
+                # Positive slope_percent = height increases with distance (terrain rises)
+                # Negative slope_percent = height decreases with distance (terrain falls)
+                boom_point_count += 1
                 if self.boom_connection_edge:
                     distance_from_edge = calculate_distance_from_edge(
                         point,
@@ -628,14 +643,23 @@ class ProfileGenerator:
                     if distance_from_edge < 0:
                         z_boom = self.platform_height
                     else:
-                        z_boom = calculate_slope_height(
-                            self.platform_height,
-                            distance_from_edge,
-                            self.boom_slope_percent,
-                            'down'
+                        # Direct formula: positive slope = height increases with distance
+                        z_boom = self.platform_height + distance_from_edge * self.boom_slope_percent / 100.0
+
+                    # Debug logging for first few boom points
+                    if not boom_debug_logged and boom_point_count <= 5:
+                        self.logger.info(
+                            f"  Boom point {boom_point_count}: dist_from_edge={distance_from_edge:.1f}m, "
+                            f"z_boom={z_boom:.2f}m (platform={self.platform_height:.2f}, "
+                            f"slope={self.boom_slope_percent}%)"
                         )
+                        if boom_point_count == 5:
+                            boom_debug_logged = True
                 else:
                     z_boom = self.platform_height
+                    if not boom_debug_logged:
+                        self.logger.warning("  No boom_connection_edge - using flat platform_height")
+                        boom_debug_logged = True
                 z_bottom = z_boom  # Boom has no separate top/bottom
             elif in_rotor:
                 # Rotor storage area
@@ -713,6 +737,14 @@ class ProfileGenerator:
             foundation_fok_z, foundation_bottom_z, crane_planum_height,
             foundation_bottom_height
         )
+
+        # Debug summary
+        boom_points_with_height = sum(1 for z in boom_z if z is not None)
+        if boom_point_count > 0:
+            self.logger.info(
+                f"Profile extraction: {boom_point_count} boom points, "
+                f"{boom_points_with_height} with calculated height"
+            )
 
         profile_data = {
             'distances': distances,

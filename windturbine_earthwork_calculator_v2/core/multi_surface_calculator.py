@@ -56,7 +56,13 @@ from ..utils.geometry_utils import (
     calculate_distance_from_edge,
     calculate_slope_height,
     perpendicular_direction,
-    calculate_terrain_slope
+    calculate_terrain_slope,
+    get_polygon_orientation
+)
+from ..utils.geometry_3d import (
+    polygon_to_polygonz,
+    polygon_to_sloped_polygonz,
+    create_slope_surface_3d
 )
 from ..utils.logging_utils import get_plugin_logger
 
@@ -463,12 +469,46 @@ class MultiSurfaceCalculator:
                 self.boom_connection_edge = boom_edge
                 # Determine slope direction (perpendicular to edge, pointing into boom)
                 edge_angle = get_edge_direction(boom_edge)
-                # The slope goes perpendicular to the connection edge, into the boom surface
-                self.boom_slope_direction = perpendicular_direction(edge_angle)
+
+                # Use the boom centroid to determine which direction points INTO the boom
+                # This is more reliable than testing boundary points
+                edge_centroid = boom_edge.centroid().asPoint()
+                boom_centroid = self.project.boom.geometry.centroid().asPoint()
+
+                # Calculate direction from edge to boom centroid
+                dx = boom_centroid.x() - edge_centroid.x()
+                dy = boom_centroid.y() - edge_centroid.y()
+                direction_to_boom = math.degrees(math.atan2(dy, dx))
+                if direction_to_boom < 0:
+                    direction_to_boom += 360.0
+
+                # Get both perpendiculars to the edge
+                dir1 = perpendicular_direction(edge_angle)  # +90°
+                dir2 = (edge_angle - 90.0) % 360.0  # -90°
+
+                # Choose the perpendicular that's closest to the direction to boom centroid
+                def angle_diff(a1, a2):
+                    diff = abs(a1 - a2)
+                    return min(diff, 360 - diff)
+
+                diff1 = angle_diff(dir1, direction_to_boom)
+                diff2 = angle_diff(dir2, direction_to_boom)
+
+                if diff1 <= diff2:
+                    self.boom_slope_direction = dir1
+                else:
+                    self.boom_slope_direction = dir2
 
                 self.logger.info(
-                    f"Boom connection edge: {boom_length:.1f}m, "
-                    f"slope direction: {self.boom_slope_direction:.1f}°"
+                    f"Boom connection edge: {boom_length:.1f}m"
+                )
+                self.logger.info(
+                    f"  Edge angle: {edge_angle:.1f}°, "
+                    f"perpendiculars: {dir1:.1f}° / {dir2:.1f}°"
+                )
+                self.logger.info(
+                    f"  Direction to boom centroid: {direction_to_boom:.1f}°, "
+                    f"chosen slope direction: {self.boom_slope_direction:.1f}°"
                 )
             else:
                 self.logger.warning("No connection edge found between crane pad and boom")
@@ -1045,6 +1085,12 @@ class MultiSurfaceCalculator:
             f"depth={self.project.foundation_depth:.2f}m, area={area:.1f}m²"
         )
 
+        # Create 3D geometry at FOK height
+        geometry_3d = polygon_to_polygonz(
+            self.project.foundation.geometry,
+            self.project.fok
+        )
+
         return SurfaceCalculationResult(
             surface_type=SurfaceType.FOUNDATION,
             target_height=self.project.fok,
@@ -1054,6 +1100,7 @@ class MultiSurfaceCalculator:
             terrain_min=terrain_min,
             terrain_max=terrain_max,
             terrain_mean=terrain_mean,
+            geometry_3d=geometry_3d,
             additional_data={
                 'foundation_bottom': round(foundation_bottom, 2),
                 'foundation_depth': round(self.project.foundation_depth, 2),
@@ -1143,6 +1190,27 @@ class MultiSurfaceCalculator:
             f"fill={total_fill:.1f}m³, area={area:.1f}m²"
         )
 
+        # Create 3D geometry at crane height
+        geometry_3d = polygon_to_polygonz(
+            self.project.crane_pad.geometry,
+            crane_height
+        )
+
+        # Create 3D slope geometry (if DEM available)
+        slope_geometry_3d = None
+        if self.dem_layer and slope_only and not slope_only.isEmpty():
+            try:
+                dem_path = self.dem_layer.source()
+                slope_geometry_3d = create_slope_surface_3d(
+                    self.project.crane_pad.geometry,
+                    slope_polygon,
+                    crane_height,
+                    dem_path,
+                    self.project.slope_angle
+                )
+            except Exception as e:
+                self.logger.warning(f"Could not create 3D slope geometry: {e}")
+
         return SurfaceCalculationResult(
             surface_type=SurfaceType.CRANE_PAD,
             target_height=crane_height,
@@ -1154,6 +1222,8 @@ class MultiSurfaceCalculator:
             terrain_min=terrain_min,
             terrain_max=terrain_max,
             terrain_mean=terrain_mean,
+            geometry_3d=geometry_3d,
+            slope_geometry_3d=slope_geometry_3d,
             additional_data={
                 'planum_height': round(planum_height, 2),
                 'gravel_thickness': round(self.project.gravel_thickness, 2),
@@ -1225,11 +1295,15 @@ class MultiSurfaceCalculator:
 
             if len(elevations_for_slope) > 5:
                 terrain_slope = calculate_terrain_slope(elevations_for_slope, distances)
-                # Clamp to allowed range
-                slope_percent = max(
-                    self.project.boom.slope_min,
-                    min(self.project.boom.slope_max, abs(terrain_slope))
-                )
+                # Clamp absolute value to allowed range, but preserve sign
+                # Negative slope = terrain falls away from crane pad
+                # Positive slope = terrain rises away from crane pad
+                abs_slope = min(self.project.boom.slope_max, max(self.project.boom.slope_min, abs(terrain_slope)))
+                # Preserve the sign of the terrain slope
+                if terrain_slope < 0:
+                    slope_percent = -abs_slope  # Terrain falls: negative slope
+                else:
+                    slope_percent = abs_slope   # Terrain rises: positive slope
                 self.logger.info(
                     f"Auto-adjusted boom slope: terrain={terrain_slope:.2f}%, "
                     f"used={slope_percent:.2f}%"
@@ -1239,6 +1313,7 @@ class MultiSurfaceCalculator:
         cut_volume = 0.0
         fill_volume = 0.0
         elevations_only = []
+        max_distance = 0.0  # Track maximum distance from connection edge
 
         for point, terrain_elevation in samples:
             # Calculate distance from connection edge in slope direction
@@ -1248,18 +1323,20 @@ class MultiSurfaceCalculator:
                 self.boom_slope_direction
             )
 
+            # Track maximum distance for planum_height calculation
+            if distance > max_distance:
+                max_distance = distance
+
             # Target height at this distance
             # Note: distance can be negative (wrong side of edge), handle gracefully
+            # Positive slope_percent = terrain rises away from crane pad
+            # Negative slope_percent = terrain falls away from crane pad
             if distance < 0:
                 # Point is on wrong side of connection edge (shouldn't happen if geometries are correct)
                 target_height = crane_height
             else:
-                target_height = calculate_slope_height(
-                    crane_height,
-                    distance,
-                    slope_percent,
-                    'down'
-                )
+                # Direct formula: positive slope = height increases with distance
+                target_height = crane_height + distance * slope_percent / 100.0
 
             elevations_only.append(terrain_elevation)
 
@@ -1274,11 +1351,15 @@ class MultiSurfaceCalculator:
         terrain_max = float(np.max(elevations_only)) if elevations_only else 0.0
         terrain_mean = float(np.mean(elevations_only)) if elevations_only else 0.0
 
+        # Calculate far end height based on actual maximum distance
+        # Positive slope = far end is higher than crane pad
+        far_end_height = crane_height + max_distance * slope_percent / 100.0
+
         # Calculate slope area (embankment around boom surface)
         # Similar to crane pad but potentially more complex due to sloped target
         max_height_diff = max(
             abs(terrain_max - crane_height),
-            abs(terrain_min - (crane_height - 50 * slope_percent / 100))  # Estimate far end
+            abs(terrain_min - far_end_height)
         )
         slope_width = self.calculate_slope_width(max_height_diff)
 
@@ -1290,8 +1371,8 @@ class MultiSurfaceCalculator:
         slope_fill = 0.0
 
         for elevation in slope_elevations:
-            # Simplified: use average of crane height and estimated far end
-            avg_height = crane_height - 25 * slope_percent / 100
+            # Simplified: use average of crane height and actual far end height
+            avg_height = (crane_height + far_end_height) / 2.0
             diff = elevation - avg_height
 
             if diff > 0:
@@ -1307,8 +1388,32 @@ class MultiSurfaceCalculator:
 
         self.logger.info(
             f"Boom surface @ {crane_height:.2f}m: slope={slope_percent:.2f}%, "
+            f"max_dist={max_distance:.1f}m, far_end={far_end_height:.2f}m, "
             f"cut={total_cut:.1f}m³, fill={total_fill:.1f}m³"
         )
+
+        # Create 3D sloped geometry
+        geometry_3d = polygon_to_sloped_polygonz(
+            self.project.boom.geometry,
+            crane_height,
+            slope_percent,
+            self.boom_slope_direction
+        )
+
+        # Create 3D slope geometry (embankment)
+        slope_geometry_3d = None
+        if self.dem_layer and slope_only and not slope_only.isEmpty():
+            try:
+                dem_path = self.dem_layer.source()
+                slope_geometry_3d = create_slope_surface_3d(
+                    self.project.boom.geometry,
+                    slope_polygon,
+                    crane_height,
+                    dem_path,
+                    self.project.slope_angle
+                )
+            except Exception as e:
+                self.logger.warning(f"Could not create 3D boom slope geometry: {e}")
 
         return SurfaceCalculationResult(
             surface_type=SurfaceType.BOOM,
@@ -1321,12 +1426,15 @@ class MultiSurfaceCalculator:
             terrain_min=terrain_min,
             terrain_max=terrain_max,
             terrain_mean=terrain_mean,
+            geometry_3d=geometry_3d,
+            slope_geometry_3d=slope_geometry_3d,
             additional_data={
                 'slope_percent': round(slope_percent, 2),
                 'slope_direction': round(self.boom_slope_direction, 1),
                 'auto_slope': self.project.boom.auto_slope,
                 'slope_width': round(slope_width, 2),
-                'planum_height': round(crane_height - 50 * slope_percent / 100, 2)  # Estimated far end height
+                'planum_height': round(far_end_height, 2),  # Actual far end height based on max distance
+                'max_distance': round(max_distance, 2)  # Length of boom surface
             }
         )
 
@@ -1437,6 +1545,27 @@ class MultiSurfaceCalculator:
             f"fill={total_fill_with_slope:.1f}m³, area={area:.1f}m²{holm_info}"
         )
 
+        # Create 3D geometry at rotor height
+        geometry_3d = polygon_to_polygonz(
+            self.project.rotor_storage.geometry,
+            rotor_height
+        )
+
+        # Create 3D slope geometry (embankment)
+        slope_geometry_3d = None
+        if self.dem_layer and slope_only and not slope_only.isEmpty():
+            try:
+                dem_path = self.dem_layer.source()
+                slope_geometry_3d = create_slope_surface_3d(
+                    self.project.rotor_storage.geometry,
+                    slope_polygon,
+                    rotor_height,
+                    dem_path,
+                    self.project.slope_angle
+                )
+            except Exception as e:
+                self.logger.warning(f"Could not create 3D rotor slope geometry: {e}")
+
         return SurfaceCalculationResult(
             surface_type=SurfaceType.ROTOR_STORAGE,
             target_height=rotor_height,
@@ -1448,6 +1577,8 @@ class MultiSurfaceCalculator:
             terrain_min=terrain_min,
             terrain_max=terrain_max,
             terrain_mean=terrain_mean,
+            geometry_3d=geometry_3d,
+            slope_geometry_3d=slope_geometry_3d,
             additional_data={
                 'height_offset_from_crane': round(rotor_height_offset if rotor_height_offset is not None else self.project.rotor_height_offset, 2),
                 'holm_fill_volume': round(holm_fill_volume, 1) if has_holms else 0.0,
@@ -1676,6 +1807,11 @@ class MultiSurfaceCalculator:
         if road_result is not None:
             surface_results[SurfaceType.ROAD_ACCESS] = road_result
 
+        # Get actual boom slope used (may differ from input due to auto_slope)
+        actual_boom_slope = boom_slope_percent
+        if boom_result is not None and 'slope_percent' in boom_result.additional_data:
+            actual_boom_slope = boom_result.additional_data['slope_percent']
+
         result = MultiSurfaceCalculationResult(
             crane_height=crane_height,
             fok=self.project.fok,
@@ -1683,7 +1819,7 @@ class MultiSurfaceCalculator:
             gravel_fill_external=gravel_total,
             gravel_crane_external=gravel_crane,
             gravel_road_external=gravel_road,
-            boom_slope_percent=boom_slope_percent,
+            boom_slope_percent=actual_boom_slope,
             rotor_height_offset_optimized=rotor_height_offset,
             road_slope_percent=road_slope_used
         )
@@ -1691,7 +1827,7 @@ class MultiSurfaceCalculator:
         if feedback:
             road_info = f", road={road_slope_used:+.1f}%" if self.project.road_access else ""
             feedback.pushInfo(
-                f"  h={crane_height:.2f}m, boom={boom_slope_percent:+.1f}%, rotor={rotor_height_offset:+.2f}m{road_info}: "
+                f"  h={crane_height:.2f}m, boom={actual_boom_slope:+.1f}%, rotor={rotor_height_offset:+.2f}m{road_info}: "
                 f"cut={result.total_cut:.0f}m³, fill={result.total_fill:.0f}m³, "
                 f"net={result.net_volume:+.0f}m³, gravel={gravel_total:.0f}m³"
             )
