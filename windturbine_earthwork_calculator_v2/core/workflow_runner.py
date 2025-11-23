@@ -633,6 +633,7 @@ class WorkflowWorker(QObject):
             foundation_layer=surface_layers.get('foundation'),
             boom_layer=surface_layers.get('boom'),
             rotor_layer=surface_layers.get('rotor_storage'),
+            road_access_layer=surface_layers.get('road_access'),
             profile_lines_layer=surface_layers.get('profile_lines'),
             uncertainty_result=uncertainty_result
         )
@@ -790,6 +791,26 @@ class WorkflowWorker(QObject):
             })
             rotor_layer.renderer().setSymbol(rotor_symbol)
             layers['rotor_storage'] = rotor_layer
+
+        # Road access layer (Zufahrtsstraße) - Blue outline
+        if project.road_access and project.road_access.geometry:
+            road_layer = QgsVectorLayer(
+                f"Polygon?crs={crs.authid()}", "Zufahrtsstraße", "memory"
+            )
+            road_prov = road_layer.dataProvider()
+            road_feat = QgsFeature()
+            road_feat.setGeometry(project.road_access.geometry)
+            road_prov.addFeatures([road_feat])
+            road_layer.updateExtents()
+
+            road_symbol = QgsFillSymbol.createSimple({
+                'color': '0,102,204,30',  # Light blue transparent fill
+                'style': 'solid',
+                'outline_color': '0,102,204,255',  # Blue outline
+                'outline_width': '0.3'
+            })
+            road_layer.renderer().setSymbol(road_symbol)
+            layers['road_access'] = road_layer
 
         # Profile lines layer - Thin gray lines with labels
         profile_lines_layer = QgsVectorLayer(
@@ -955,7 +976,30 @@ class WorkflowWorker(QObject):
             writer.addFeature(feat_rotor)
             del writer
 
-        # Layer 5: schnitte (LineString)
+        # Layer 5: zufahrtflaechen (Polygon) - optional
+        if project.road_access:
+            fields_road = QgsFields()
+            fields_road.append(QgsField('id', QVariant.Int))
+            fields_road.append(QgsField('slope_percent', QVariant.Double))
+            fields_road.append(QgsField('gravel_thickness', QVariant.Double))
+            fields_road.append(QgsField('area_m2', QVariant.Double))
+
+            feat_road = QgsFeature(fields_road)
+            feat_road.setGeometry(project.road_access.geometry)
+            feat_road.setAttribute('id', 1)
+            feat_road.setAttribute('slope_percent', float(project.road_slope_percent))
+            feat_road.setAttribute('gravel_thickness', float(project.road_gravel_thickness) if project.road_gravel_enabled else 0.0)
+            feat_road.setAttribute('area_m2', float(project.road_access.geometry.area()))
+
+            options.layerName = 'zufahrtflaechen'
+            writer = QgsVectorFileWriter.create(
+                gpkg_path, fields_road, QgsWkbTypes.Polygon, crs,
+                QgsCoordinateTransformContext(), options
+            )
+            writer.addFeature(feat_road)
+            del writer
+
+        # Layer 6: schnitte (LineString)
         fields_lines = QgsFields()
         fields_lines.append(QgsField('id', QVariant.Int))
         fields_lines.append(QgsField('type', QVariant.String))
@@ -1074,7 +1118,34 @@ class WorkflowWorker(QObject):
                 writer.addFeature(feat_rotor_3d)
                 del writer
 
-        # Layer 10: boeschungen_3d (MultiPolygonZ) - slope surfaces
+        # Layer 10: zufahrtflaechen_3d (PolygonZ) - optional
+        if project.road_access and SurfaceType.ROAD_ACCESS in results.surface_results:
+            road_result = results.surface_results[SurfaceType.ROAD_ACCESS]
+            if road_result.geometry_3d and not road_result.geometry_3d.isEmpty():
+                fields_road_3d = QgsFields()
+                fields_road_3d.append(QgsField('id', QVariant.Int))
+                fields_road_3d.append(QgsField('height', QVariant.Double))
+                fields_road_3d.append(QgsField('slope_percent', QVariant.Double))
+                fields_road_3d.append(QgsField('gravel_thickness', QVariant.Double))
+                fields_road_3d.append(QgsField('surface_type', QVariant.String))
+
+                feat_road_3d = QgsFeature(fields_road_3d)
+                feat_road_3d.setGeometry(road_result.geometry_3d)
+                feat_road_3d.setAttribute('id', 1)
+                feat_road_3d.setAttribute('height', float(road_result.target_height))
+                feat_road_3d.setAttribute('slope_percent', float(results.road_slope_percent))
+                feat_road_3d.setAttribute('gravel_thickness', float(project.road_gravel_thickness) if project.road_gravel_enabled else 0.0)
+                feat_road_3d.setAttribute('surface_type', 'zufahrtflaeche')
+
+                options.layerName = 'zufahrtflaechen_3d'
+                writer = QgsVectorFileWriter.create(
+                    gpkg_path, fields_road_3d, QgsWkbTypes.PolygonZ, crs,
+                    QgsCoordinateTransformContext(), options
+                )
+                writer.addFeature(feat_road_3d)
+                del writer
+
+        # Layer 11: boeschungen_3d (MultiPolygonZ) - slope surfaces
         # Collect all slope geometries
         slope_geometries = []
         for surface_type, surface_result in results.surface_results.items():
@@ -1148,7 +1219,8 @@ class WorkflowWorker(QObject):
                 'crane': 'DXF Kranstellfläche',
                 'foundation': 'DXF Fundament',
                 'boom': 'DXF Ausleger',
-                'rotor': 'DXF Blattlager'
+                'rotor': 'DXF Blattlager',
+                'road': 'DXF Zufahrtsstraße'
             }
 
             for dxf_type, dxf_path in dxf_paths.items():
@@ -1177,6 +1249,7 @@ class WorkflowWorker(QObject):
             ('kranstellflaechen', 'Kranstellflächen'),
             ('auslegerflaechen', 'Auslegerflächen'),
             ('rotorflaechen', 'Blattlagerflächen'),
+            ('zufahrtflaechen', 'Zufahrtsflächen'),
         ]
 
         for layer_name, display_name in gpkg_polygon_layers:

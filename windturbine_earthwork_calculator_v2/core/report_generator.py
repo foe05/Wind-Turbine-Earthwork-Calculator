@@ -49,6 +49,7 @@ class ReportGenerator:
                  foundation_layer: Optional[QgsVectorLayer] = None,
                  boom_layer: Optional[QgsVectorLayer] = None,
                  rotor_layer: Optional[QgsVectorLayer] = None,
+                 road_access_layer: Optional[QgsVectorLayer] = None,
                  profile_lines_layer: Optional[QgsVectorLayer] = None,
                  dxf_layer: Optional[QgsVectorLayer] = None,
                  uncertainty_result: Optional[UncertaintyAnalysisResult] = None):
@@ -63,6 +64,7 @@ class ReportGenerator:
             foundation_layer (QgsVectorLayer): Foundation polygon layer (optional)
             boom_layer (QgsVectorLayer): Boom surface polygon layer (optional)
             rotor_layer (QgsVectorLayer): Rotor storage polygon layer (optional)
+            road_access_layer (QgsVectorLayer): Road access polygon layer (optional)
             profile_lines_layer (QgsVectorLayer): Profile lines layer (optional)
             dxf_layer (QgsVectorLayer): DXF import layer (optional)
             uncertainty_result (UncertaintyAnalysisResult): Monte Carlo uncertainty results (optional)
@@ -74,6 +76,7 @@ class ReportGenerator:
         self.foundation_layer = foundation_layer
         self.boom_layer = boom_layer
         self.rotor_layer = rotor_layer
+        self.road_access_layer = road_access_layer
         self.profile_lines_layer = profile_lines_layer
         self.dxf_layer = dxf_layer
         self.uncertainty_result = uncertainty_result
@@ -1045,6 +1048,11 @@ class ReportGenerator:
         if self.rotor_layer:
             layers.append(self.rotor_layer)
             self.logger.info("Using memory layer for rotor storage")
+
+        # Road access layer
+        if self.road_access_layer:
+            layers.append(self.road_access_layer)
+            self.logger.info("Using memory layer for road access")
 
         # === BOTTOM: Background/DEM layers (add last, rendered at bottom) ===
         if dgm_layer_project:
