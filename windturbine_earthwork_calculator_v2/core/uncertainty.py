@@ -82,6 +82,10 @@ class UncertaintyConfig:
     boom_slope_std: float = 0.5  # percent
     rotor_offset_std: float = 0.05  # meters
 
+    # Road access parameters
+    road_slope_std: float = 0.5  # percent
+    road_gravel_std: float = 0.05  # meters
+
     # Geometry uncertainty (CAD accuracy)
     polygon_position_std: float = 0.0  # meters, usually very accurate
 
@@ -139,6 +143,8 @@ class UncertaintyConfig:
             'slope_angle_std': self.slope_angle_std,
             'boom_slope_std': self.boom_slope_std,
             'rotor_offset_std': self.rotor_offset_std,
+            'road_slope_std': self.road_slope_std,
+            'road_gravel_std': self.road_gravel_std,
             'polygon_position_std': self.polygon_position_std,
             'num_samples': self.num_samples,
             'use_latin_hypercube': self.use_latin_hypercube,

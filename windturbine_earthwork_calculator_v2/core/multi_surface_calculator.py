@@ -450,6 +450,10 @@ class MultiSurfaceCalculator:
         self.boom_slope_direction = None
         self.rotor_connection_edge = None
 
+        # Pre-calculate connection edges (for road access)
+        self.road_connection_edge = None
+        self.road_slope_direction = None
+
         self._prepare_surface_relationships()
 
     def _prepare_surface_relationships(self):
@@ -525,6 +529,28 @@ class MultiSurfaceCalculator:
                 self.logger.warning("No connection edge found between crane pad and rotor storage")
         else:
             self.logger.info("No rotor storage surface configured (optional)")
+
+        # Find connection edge between crane pad and road access (if road exists)
+        if self.project.road_access is not None:
+            road_edge, road_length = find_connection_edge(
+                self.project.crane_pad.geometry,
+                self.project.road_access.geometry
+            )
+
+            if road_length > 0:
+                self.road_connection_edge = road_edge
+                # Determine slope direction (perpendicular to edge, pointing into road)
+                edge_angle = get_edge_direction(road_edge)
+                self.road_slope_direction = perpendicular_direction(edge_angle)
+
+                self.logger.info(
+                    f"Road access connection edge: {road_length:.1f}m, "
+                    f"slope direction: {self.road_slope_direction:.1f}°"
+                )
+            else:
+                self.logger.warning("No connection edge found between crane pad and road access")
+        else:
+            self.logger.info("No road access surface configured (optional)")
 
     def detect_boom_slope_direction(self) -> tuple[float, float]:
         """
@@ -607,6 +633,81 @@ class MultiSurfaceCalculator:
 
         return slope_range
 
+    def detect_road_slope_direction(self, crane_height: float) -> float:
+        """
+        Detect optimal road slope direction based on terrain.
+
+        The road follows the terrain, so it can slope either uphill or downhill
+        from the crane pad connection point.
+
+        Args:
+            crane_height: Crane pad height at connection point
+
+        Returns:
+            Signed slope in percent (positive = terrain rises away from crane,
+                                     negative = terrain falls away from crane)
+        """
+        max_slope = self.project.road_slope_max
+
+        # Check if road access exists
+        if self.project.road_access is None:
+            self.logger.warning("No road access configured, returning zero slope")
+            return 0.0
+
+        if self.road_connection_edge is None or self.road_connection_edge.isEmpty():
+            self.logger.warning("No road connection edge for slope direction detection")
+            return self.project.road_slope_percent
+
+        if self.road_slope_direction is None:
+            self.logger.warning("No road slope direction calculated")
+            return self.project.road_slope_percent
+
+        # Sample terrain in road area
+        samples = self.sample_dem_with_positions(self.project.road_access.geometry)
+
+        if len(samples) < 5:
+            self.logger.warning("Insufficient samples for road slope direction detection")
+            return self.project.road_slope_percent
+
+        # Calculate terrain slope in road direction
+        distances = []
+        elevations = []
+
+        for point, elevation in samples:
+            distance = calculate_distance_from_edge(
+                point,
+                self.road_connection_edge,
+                self.road_slope_direction
+            )
+            if distance > 0:  # Only points in slope direction
+                distances.append(distance)
+                elevations.append(elevation)
+
+        if len(elevations) < 5:
+            self.logger.warning("Insufficient valid samples for road slope direction detection")
+            return self.project.road_slope_percent
+
+        # Calculate average terrain slope
+        terrain_slope = calculate_terrain_slope(elevations, distances)
+
+        # Clamp to allowed range but preserve sign
+        if terrain_slope < 0:
+            # Terrain slopes down: road falls away from crane
+            slope = -min(max_slope, abs(terrain_slope))
+            self.logger.info(
+                f"Road terrain slopes DOWN ({terrain_slope:.1f}%), "
+                f"using road slope: {slope:.1f}%"
+            )
+        else:
+            # Terrain slopes up: road rises away from crane
+            slope = min(max_slope, abs(terrain_slope))
+            self.logger.info(
+                f"Road terrain slopes UP ({terrain_slope:.1f}%), "
+                f"using road slope: {slope:.1f}%"
+            )
+
+        return slope
+
     def _create_project_dict(self) -> dict:
         """
         Create serializable dictionary from project configuration.
@@ -621,6 +722,7 @@ class MultiSurfaceCalculator:
             'foundation_wkt': self.project.foundation.geometry.asWkt(),
             'boom_wkt': self.project.boom.geometry.asWkt() if self.project.boom else None,
             'rotor_wkt': self.project.rotor_storage.geometry.asWkt() if self.project.rotor_storage else None,
+            'road_wkt': self.project.road_access.geometry.asWkt() if self.project.road_access else None,
             'dxf_path': getattr(self.project.crane_pad, 'dxf_path', ''),
             'fok': self.project.fok,
             'foundation_depth': self.project.foundation_depth,
@@ -631,10 +733,14 @@ class MultiSurfaceCalculator:
             'boom_auto_slope': self.project.boom.auto_slope if self.project.boom else False,
             'boom_slope_min': getattr(self.project.boom, 'slope_min', 2.0) if self.project.boom else 2.0,
             'boom_slope_max': getattr(self.project.boom, 'slope_max', 8.0) if self.project.boom else 8.0,
+            'road_slope_percent': self.project.road_slope_percent,
+            'road_gravel_enabled': self.project.road_gravel_enabled,
+            'road_gravel_thickness': self.project.road_gravel_thickness,
             'crane_metadata': self.project.crane_pad.metadata,
             'foundation_metadata': self.project.foundation.metadata,
             'boom_metadata': self.project.boom.metadata if self.project.boom else {},
             'rotor_metadata': self.project.rotor_storage.metadata if self.project.rotor_storage else {},
+            'road_metadata': self.project.road_access.metadata if self.project.road_access else {},
         }
 
     def sample_dem_in_polygon(self, geometry: QgsGeometry, use_vectorized: bool = None) -> np.ndarray:
@@ -1482,6 +1588,163 @@ class MultiSurfaceCalculator:
             }
         )
 
+    def _calculate_road_access(self, crane_height: float,
+                               road_slope_percent: Optional[float] = None) -> SurfaceCalculationResult:
+        """
+        Calculate road access earthwork.
+
+        The road access has a longitudinal slope that follows the terrain,
+        connecting to crane pad at crane_height. The slope can be positive
+        (terrain rises away from crane) or negative (terrain falls away).
+
+        Args:
+            crane_height: Crane pad height (connection edge is at this height)
+            road_slope_percent: Optional slope override (if None, auto-detects from terrain)
+
+        Returns:
+            Calculation result for road access
+        """
+        if self.road_connection_edge is None or self.road_connection_edge.isEmpty():
+            self.logger.warning("No road connection edge available")
+            return SurfaceCalculationResult(
+                surface_type=SurfaceType.ROAD_ACCESS,
+                target_height=crane_height,
+                cut_volume=0.0,
+                fill_volume=0.0,
+                platform_area=0.0
+            )
+
+        # Sample terrain with positions
+        samples = self.sample_dem_with_positions(self.project.road_access.geometry)
+
+        if len(samples) == 0:
+            self.logger.warning("No DEM data in road access area")
+            return SurfaceCalculationResult(
+                surface_type=SurfaceType.ROAD_ACCESS,
+                target_height=crane_height,
+                cut_volume=0.0,
+                fill_volume=0.0,
+                platform_area=0.0
+            )
+
+        # Determine slope percentage (auto-detect from terrain if not provided)
+        if road_slope_percent is not None:
+            slope_percent = road_slope_percent
+        else:
+            # Auto-detect slope direction from terrain
+            slope_percent = self.detect_road_slope_direction(crane_height)
+
+        # Calculate cut/fill
+        cut_volume = 0.0
+        fill_volume = 0.0
+        elevations_only = []
+
+        for point, terrain_elevation in samples:
+            # Calculate distance from connection edge in slope direction
+            distance = calculate_distance_from_edge(
+                point,
+                self.road_connection_edge,
+                self.road_slope_direction
+            )
+
+            # Target height at this distance
+            # Note: slope_percent can be positive (uphill) or negative (downhill)
+            if distance < 0:
+                # Point is on wrong side of connection edge
+                road_surface_height = crane_height
+            else:
+                # Calculate road surface height based on slope direction
+                # Positive slope = terrain/road rises away from crane
+                # Negative slope = terrain/road falls away from crane
+                road_surface_height = crane_height + (distance * slope_percent / 100)
+
+            # Calculate planum height (accounting for gravel if enabled)
+            if self.project.road_gravel_enabled:
+                planum_height = road_surface_height - self.project.road_gravel_thickness
+            else:
+                planum_height = road_surface_height
+
+            elevations_only.append(terrain_elevation)
+
+            # Cut/fill calculation against planum
+            diff = terrain_elevation - planum_height
+            if diff > 0:
+                cut_volume += diff * self.pixel_area
+            else:
+                fill_volume += abs(diff) * self.pixel_area
+
+        terrain_min = float(np.min(elevations_only)) if elevations_only else 0.0
+        terrain_max = float(np.max(elevations_only)) if elevations_only else 0.0
+        terrain_mean = float(np.mean(elevations_only)) if elevations_only else 0.0
+
+        # Calculate slope area (embankment around road surface)
+        max_height_diff = max(
+            abs(terrain_max - crane_height),
+            abs(terrain_min - (crane_height + 50 * slope_percent / 100))  # Estimate far end
+        )
+        slope_width = self.calculate_slope_width(max_height_diff)
+
+        slope_polygon = self.project.road_access.geometry.buffer(slope_width, 16)
+        slope_only = slope_polygon.difference(self.project.road_access.geometry)
+        slope_elevations = self.sample_dem_in_polygon(slope_only)
+
+        slope_cut = 0.0
+        slope_fill = 0.0
+
+        for elevation in slope_elevations:
+            # Use average height for slope calculation
+            avg_height = crane_height + 25 * slope_percent / 100
+            if self.project.road_gravel_enabled:
+                avg_height -= self.project.road_gravel_thickness
+            diff = elevation - avg_height
+
+            if diff > 0:
+                slope_cut += diff * self.pixel_area
+            else:
+                slope_fill += abs(diff) * self.pixel_area
+
+        total_cut = cut_volume + slope_cut
+        total_fill = fill_volume + slope_fill
+
+        area = self.project.road_access.geometry.area()
+        total_area = slope_polygon.area()
+
+        # Calculate gravel volume (external material) if enabled
+        if self.project.road_gravel_enabled:
+            gravel_volume = area * self.project.road_gravel_thickness
+        else:
+            gravel_volume = 0.0
+
+        gravel_info = f", gravel={gravel_volume:.1f}m³" if self.project.road_gravel_enabled else ""
+
+        self.logger.info(
+            f"Road access @ {crane_height:.2f}m: slope={slope_percent:+.2f}%, "
+            f"cut={total_cut:.1f}m³, fill={total_fill:.1f}m³{gravel_info}"
+        )
+
+        return SurfaceCalculationResult(
+            surface_type=SurfaceType.ROAD_ACCESS,
+            target_height=crane_height,  # At connection edge
+            cut_volume=total_cut,
+            fill_volume=total_fill,
+            platform_area=area,
+            slope_area=total_area - area,
+            total_area=total_area,
+            terrain_min=terrain_min,
+            terrain_max=terrain_max,
+            terrain_mean=terrain_mean,
+            additional_data={
+                'slope_percent': round(slope_percent, 2),
+                'slope_direction': round(self.road_slope_direction, 1) if self.road_slope_direction else 0.0,
+                'gravel_enabled': self.project.road_gravel_enabled,
+                'gravel_thickness': self.project.road_gravel_thickness if self.project.road_gravel_enabled else 0.0,
+                'gravel_volume': round(gravel_volume, 1),
+                'slope_width': round(slope_width, 2),
+                'planum_height_start': round(crane_height - (self.project.road_gravel_thickness if self.project.road_gravel_enabled else 0), 2),
+                'planum_height_end': round(crane_height + 50 * slope_percent / 100 - (self.project.road_gravel_thickness if self.project.road_gravel_enabled else 0), 2)
+            }
+        )
+
     def calculate_scenario(self, crane_height: float,
                           feedback: Optional[QgsProcessingFeedback] = None,
                           boom_slope_percent: Optional[float] = None,
@@ -1517,8 +1780,19 @@ class MultiSurfaceCalculator:
         if self.project.rotor_storage is not None:
             rotor_result = self._calculate_rotor_storage(crane_height, rotor_height_offset)
 
+        # Calculate road access
+        road_result = None
+        road_slope_used = 0.0
+        if self.project.road_access is not None:
+            road_result = self._calculate_road_access(crane_height)
+            road_slope_used = road_result.additional_data.get('slope_percent', 0.0)
+
         # Calculate gravel fill (external material)
-        gravel_volume = self.project.crane_pad.geometry.area() * self.project.gravel_thickness
+        gravel_crane = self.project.crane_pad.geometry.area() * self.project.gravel_thickness
+        gravel_road = 0.0
+        if self.project.road_access is not None and self.project.road_gravel_enabled:
+            gravel_road = self.project.road_access.geometry.area() * self.project.road_gravel_thickness
+        gravel_total = gravel_crane + gravel_road
 
         # Compile results
         surface_results = {
@@ -1530,6 +1804,8 @@ class MultiSurfaceCalculator:
             surface_results[SurfaceType.BOOM] = boom_result
         if rotor_result is not None:
             surface_results[SurfaceType.ROTOR_STORAGE] = rotor_result
+        if road_result is not None:
+            surface_results[SurfaceType.ROAD_ACCESS] = road_result
 
         # Get actual boom slope used (may differ from input due to auto_slope)
         actual_boom_slope = boom_slope_percent
@@ -1540,16 +1816,20 @@ class MultiSurfaceCalculator:
             crane_height=crane_height,
             fok=self.project.fok,
             surface_results=surface_results,
-            gravel_fill_external=gravel_volume,
+            gravel_fill_external=gravel_total,
+            gravel_crane_external=gravel_crane,
+            gravel_road_external=gravel_road,
             boom_slope_percent=actual_boom_slope,
-            rotor_height_offset_optimized=rotor_height_offset
+            rotor_height_offset_optimized=rotor_height_offset,
+            road_slope_percent=road_slope_used
         )
 
         if feedback:
+            road_info = f", road={road_slope_used:+.1f}%" if self.project.road_access else ""
             feedback.pushInfo(
-                f"  h={crane_height:.2f}m, boom={actual_boom_slope:+.1f}%, rotor={rotor_height_offset:+.2f}m: "
+                f"  h={crane_height:.2f}m, boom={actual_boom_slope:+.1f}%, rotor={rotor_height_offset:+.2f}m{road_info}: "
                 f"cut={result.total_cut:.0f}m³, fill={result.total_fill:.0f}m³, "
-                f"net={result.net_volume:+.0f}m³, gravel={gravel_volume:.0f}m³"
+                f"net={result.net_volume:+.0f}m³, gravel={gravel_total:.0f}m³"
             )
 
         return result
