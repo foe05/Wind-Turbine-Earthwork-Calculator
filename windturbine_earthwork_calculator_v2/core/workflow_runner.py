@@ -468,6 +468,17 @@ class WorkflowWorker(QObject):
                 boom_slope_direction = calculator.boom_slope_direction
 
             # Create ProfileGenerator with all surface information
+            # Use the optimized boom slope from results, not the project default
+            optimized_boom_slope = results.boom_slope_percent if hasattr(results, 'boom_slope_percent') else (
+                project.boom.slope_longitudinal if project.boom else 0.0
+            )
+
+            # Debug logging for boom parameters passed to ProfileGenerator
+            self.logger.info(f"Creating ProfileGenerator with boom parameters:")
+            self.logger.info(f"  optimized_boom_slope: {optimized_boom_slope}")
+            self.logger.info(f"  boom_connection_edge: {boom_connection_edge is not None}")
+            self.logger.info(f"  boom_slope_direction: {boom_slope_direction}")
+
             profile_gen = ProfileGenerator(
                 dem_layer,
                 project.crane_pad.geometry,
@@ -480,9 +491,9 @@ class WorkflowWorker(QObject):
                 boom_geometry=project.boom.geometry if project.boom else None,
                 boom_connection_edge=boom_connection_edge,
                 boom_slope_direction=boom_slope_direction,
-                boom_slope_percent=project.boom.slope_longitudinal if project.boom else 0.0,
+                boom_slope_percent=optimized_boom_slope,
                 rotor_geometry=project.rotor_storage.geometry if project.rotor_storage else None,
-                rotor_height=optimal_crane_height + project.rotor_height_offset,
+                rotor_height=optimal_crane_height + results.rotor_height_offset_optimized if hasattr(results, 'rotor_height_offset_optimized') else optimal_crane_height + project.rotor_height_offset,
                 rotor_holms=project.rotor_holms if project.rotor_holms else None
             )
 

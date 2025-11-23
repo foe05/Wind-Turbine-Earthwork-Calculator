@@ -561,6 +561,31 @@ class ReportGenerator:
             gravel_thickness = surface_data.get('gravel_thickness', 0)
             slope_width = surface_data.get('slope_width', 0)
 
+            # Build additional row for surface-specific info
+            additional_row = ""
+            if surface_key == 'auslegerflaeche':
+                # Boom surface specific: slope percent and max distance
+                boom_slope_pct = surface_data.get('slope_percent', 0)
+                boom_max_dist = surface_data.get('max_distance', 0)
+                additional_row = f"""
+            <tr>
+                <td></td>
+                <td>Längsneigung</td>
+                <td>{boom_slope_pct:.1f} %</td>
+                <td>Länge</td>
+                <td>{boom_max_dist:.1f} m</td>
+            </tr>"""
+            elif surface_key == 'kranstellflaeche':
+                # Crane pad specific: gravel thickness
+                additional_row = f"""
+            <tr>
+                <td></td>
+                <td>Schotterdicke</td>
+                <td>{gravel_thickness:.2f} m</td>
+                <td></td>
+                <td></td>
+            </tr>"""
+
             surface_rows.append(f"""
             <tr>
                 <td rowspan="2" style="vertical-align: middle; font-weight: bold; background-color: #f5f5f5;">{display_name}</td>
@@ -588,7 +613,7 @@ class ReportGenerator:
                 <td>{terrain_min:.2f} m ü.NN</td>
                 <td>Gelände max</td>
                 <td>{terrain_max:.2f} m ü.NN</td>
-            </tr>
+            </tr>{additional_row}
             <tr>
                 <td></td>
                 <td>Abtrag</td>
