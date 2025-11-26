@@ -505,10 +505,23 @@ class WorkflowWorker(QObject):
             if hasattr(calculator, 'boom_slope_direction'):
                 boom_slope_direction = calculator.boom_slope_direction
 
+            # Get road connection info from calculator
+            road_connection_edge = None
+            road_slope_direction = None
+            if hasattr(calculator, 'road_connection_edge'):
+                road_connection_edge = calculator.road_connection_edge
+            if hasattr(calculator, 'road_slope_direction'):
+                road_slope_direction = calculator.road_slope_direction
+
             # Create ProfileGenerator with all surface information
             # Use the optimized boom slope from results, not the project default
             optimized_boom_slope = results.boom_slope_percent if hasattr(results, 'boom_slope_percent') else (
                 project.boom.slope_longitudinal if project.boom else 0.0
+            )
+
+            # Get optimized road slope from results, or use project default
+            optimized_road_slope = results.road_slope_percent if hasattr(results, 'road_slope_percent') else (
+                project.road_slope_percent if project.road_access else 0.0
             )
 
             # Debug logging for boom parameters passed to ProfileGenerator
@@ -516,6 +529,13 @@ class WorkflowWorker(QObject):
             self.logger.info(f"  optimized_boom_slope: {optimized_boom_slope}")
             self.logger.info(f"  boom_connection_edge: {boom_connection_edge is not None}")
             self.logger.info(f"  boom_slope_direction: {boom_slope_direction}")
+
+            # Debug logging for road parameters
+            if project.road_access:
+                self.logger.info(f"Creating ProfileGenerator with road parameters:")
+                self.logger.info(f"  optimized_road_slope: {optimized_road_slope}")
+                self.logger.info(f"  road_connection_edge: {road_connection_edge is not None}")
+                self.logger.info(f"  road_slope_direction: {road_slope_direction}")
 
             profile_gen = ProfileGenerator(
                 dem_layer,
@@ -532,7 +552,13 @@ class WorkflowWorker(QObject):
                 boom_slope_percent=optimized_boom_slope,
                 rotor_geometry=project.rotor_storage.geometry if project.rotor_storage else None,
                 rotor_height=optimal_crane_height + results.rotor_height_offset_optimized if hasattr(results, 'rotor_height_offset_optimized') else optimal_crane_height + project.rotor_height_offset,
-                rotor_holms=project.rotor_holms if project.rotor_holms else None
+                rotor_holms=project.rotor_holms if project.rotor_holms else None,
+                road_geometry=project.road_access.geometry if project.road_access else None,
+                road_connection_edge=road_connection_edge,
+                road_slope_direction=road_slope_direction,
+                road_slope_percent=optimized_road_slope,
+                road_gravel_enabled=project.road_gravel_enabled if project.road_access else True,
+                road_gravel_thickness=project.road_gravel_thickness if project.road_access else 0.3
             )
 
             # Collect all surface geometries for bounding box
@@ -544,6 +570,8 @@ class WorkflowWorker(QObject):
                 all_geometries.append(project.boom.geometry)
             if project.rotor_storage:
                 all_geometries.append(project.rotor_storage.geometry)
+            if project.road_access:
+                all_geometries.append(project.road_access.geometry)
 
             # Get buffer parameter
             bbox_buffer = self.params.get('bbox_buffer', 10.0)
