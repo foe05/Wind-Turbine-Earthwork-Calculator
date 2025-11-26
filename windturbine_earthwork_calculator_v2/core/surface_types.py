@@ -293,6 +293,11 @@ class SurfaceCalculationResult:
     slope_geometry_3d: Optional[QgsGeometry] = None
     additional_data: Dict[str, Any] = field(default_factory=dict)
 
+    # Geländeschnittkanten (NEU)
+    terrain_intersection_2d: Optional[QgsGeometry] = None
+    terrain_intersection_3d: Optional[QgsGeometry] = None
+    terrain_intersection_raster_path: Optional[str] = None
+
     @property
     def net_volume(self) -> float:
         """Net volume (cut - fill)."""
@@ -332,6 +337,24 @@ class MultiSurfaceCalculationResult:
     rotor_height_offset_optimized: float = 0.0  # Optimized rotor height offset (m)
     road_slope_percent: float = 0.0  # Road slope in percent (positive = uphill from crane, negative = downhill)
     profile_geometries_3d: List[Dict[str, Any]] = field(default_factory=list)  # 3D profile data
+
+    # Kranstellfläche Schnittkanten (NEU)
+    crane_terrain_intersection_base_2d: Optional[QgsGeometry] = None
+    crane_terrain_intersection_base_3d: Optional[QgsGeometry] = None
+    crane_terrain_intersection_base_raster_path: Optional[str] = None
+
+    crane_terrain_intersection_surface_2d: Optional[QgsGeometry] = None
+    crane_terrain_intersection_surface_3d: Optional[QgsGeometry] = None
+    crane_terrain_intersection_surface_raster_path: Optional[str] = None
+
+    # Zufahrt Schnittkanten (NEU)
+    road_terrain_intersection_base_2d: Optional[QgsGeometry] = None
+    road_terrain_intersection_base_3d: Optional[QgsGeometry] = None
+    road_terrain_intersection_base_raster_path: Optional[str] = None
+
+    road_terrain_intersection_surface_2d: Optional[QgsGeometry] = None
+    road_terrain_intersection_surface_3d: Optional[QgsGeometry] = None
+    road_terrain_intersection_surface_raster_path: Optional[str] = None
 
     @property
     def total_cut(self) -> float:

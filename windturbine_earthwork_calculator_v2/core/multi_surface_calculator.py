@@ -14,6 +14,8 @@ Version: 2.0.0 - Multi-Surface Extension
 import math
 import time
 import copy
+import os
+import platform
 from typing import Optional, Tuple, Dict, List
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -65,6 +67,39 @@ from ..utils.geometry_3d import (
     create_slope_surface_3d
 )
 from ..utils.logging_utils import get_plugin_logger
+
+
+# ============================================================================
+# MULTIPROCESSING HELPERS
+# ============================================================================
+
+def _get_safe_max_workers(requested_workers: Optional[int] = None) -> int:
+    """
+    Get safe number of workers for multiprocessing in QGIS context.
+
+    On Windows, multiprocessing with QGIS causes issues (spawns multiple QGIS instances).
+    This function returns 1 worker on Windows to disable multiprocessing.
+
+    Args:
+        requested_workers: Requested number of workers (None = auto-detect)
+
+    Returns:
+        Safe number of workers (1 on Windows, cpu_count-1 on Linux/Mac)
+    """
+    if platform.system() == 'Windows':
+        # Disable multiprocessing on Windows (QGIS compatibility issue)
+        logger = get_plugin_logger()
+        logger.warning(
+            "Multiprocessing disabled on Windows due to QGIS compatibility. "
+            "Calculations will run sequentially (slower but stable)."
+        )
+        return 1
+    else:
+        # On Linux/Mac: Use multiprocessing
+        if requested_workers is None:
+            return max(1, mp.cpu_count() - 1)
+        else:
+            return max(1, requested_workers)
 
 
 # ============================================================================
@@ -1964,8 +1999,7 @@ class MultiSurfaceCalculator:
             project_dict = self._create_project_dict()
             dem_path = self.dem_layer.source()
 
-            if max_workers is None:
-                max_workers = max(1, mp.cpu_count() - 1)
+            max_workers = _get_safe_max_workers(max_workers)
 
             completed = 0
             failed = 0
@@ -2171,8 +2205,7 @@ class MultiSurfaceCalculator:
             project_dict = self._create_project_dict()
             dem_path = self.dem_layer.source()
 
-            if max_workers is None:
-                max_workers = max(1, mp.cpu_count() - 1)
+            max_workers = _get_safe_max_workers(max_workers)
 
             completed = 0
             failed = 0
@@ -2434,12 +2467,11 @@ class MultiSurfaceCalculator:
         """Parallel optimization using ProcessPoolExecutor."""
         num_scenarios = len(heights)
 
-        if max_workers is None:
-            max_workers = max(1, mp.cpu_count() - 1)  # Leave one CPU free
+        max_workers = _get_safe_max_workers(max_workers)
 
         self.logger.info(
-            f"Testing {num_scenarios} height scenarios in parallel "
-            f"(using {max_workers} workers)"
+            f"Testing {num_scenarios} height scenarios "
+            f"(using {max_workers} worker{'s' if max_workers > 1 else ''})"
         )
 
         if feedback:
@@ -2647,8 +2679,13 @@ class MultiSurfaceCalculator:
         samples = generate_parameter_samples(uncertainty_config, base_values)
 
         # 3. Run Monte Carlo simulation
+        # On Windows: Disable parallel processing to avoid QGIS issues
+        use_parallel_mc = platform.system() != 'Windows'
+        if not use_parallel_mc:
+            self.logger.info("Monte Carlo running sequentially (Windows compatibility mode)")
+
         mc_results = self._run_monte_carlo_samples(
-            samples, uncertainty_config, feedback
+            samples, uncertainty_config, feedback, use_parallel=use_parallel_mc
         )
 
         # 4. Analyze results
@@ -2708,13 +2745,13 @@ class MultiSurfaceCalculator:
         results = []
 
         # Determine number of workers
-        max_workers = max(1, mp.cpu_count() - 1)
+        max_workers = _get_safe_max_workers(None)
 
         if feedback:
             if use_parallel:
+                mode = "sequentially" if max_workers == 1 else f"in parallel ({max_workers} CPU cores)"
                 feedback.pushInfo(
-                    f"Running {n_samples} Monte Carlo samples in parallel "
-                    f"({max_workers} CPU cores)..."
+                    f"Running {n_samples} Monte Carlo samples {mode}..."
                 )
             else:
                 feedback.pushInfo(f"Running {n_samples} Monte Carlo samples...")
@@ -3066,3 +3103,183 @@ class MultiSurfaceCalculator:
             elevations = elevations + noise
 
         return elevations
+
+    def calculate_terrain_intersection_lines(
+        self,
+        results: 'MultiSurfaceCalculationResult',
+        output_dir: str
+    ) -> None:
+        """
+        Berechnet alle Geländeschnittkanten und Differenz-Raster.
+
+        Für jede konstruierte Fläche wird berechnet:
+        - 2D Schnittkante (LineString)
+        - 3D Schnittkante (LineStringZ)
+        - Differenz-Raster (GeoTIFF): DEM - Soll-Oberfläche
+
+        Die Ergebnisse werden direkt im results-Objekt gespeichert.
+
+        Args:
+            results: MultiSurfaceCalculationResult (wird in-place modifiziert)
+            output_dir: Verzeichnis zum Speichern der Differenz-Raster
+        """
+        from ..utils.terrain_intersection import (
+            extract_terrain_intersection_horizontal,
+            extract_terrain_intersection_sloped
+        )
+
+        dem_path = self.dem_layer.source()
+
+        self.logger.info("Calculating terrain intersection lines for all surfaces...")
+
+        # 1. Fundamentsohle (horizontal)
+        if SurfaceType.FOUNDATION in results.surface_results:
+            self.logger.info("Processing foundation terrain intersection...")
+            foundation = results.surface_results[SurfaceType.FOUNDATION]
+            fund_height = self.project.fok - self.project.foundation_depth
+
+            raster_path = os.path.join(output_dir, 'differenz_fundamentsohle.tif')
+
+            try:
+                line_2d, line_3d, raster = extract_terrain_intersection_horizontal(
+                    self.project.foundation.geometry,
+                    fund_height,
+                    dem_path,
+                    raster_path
+                )
+                foundation.terrain_intersection_2d = line_2d
+                foundation.terrain_intersection_3d = line_3d
+                foundation.terrain_intersection_raster_path = raster
+            except Exception as e:
+                self.logger.error(f"Failed to create foundation intersection: {e}")
+
+        # 2. Kranstellfläche Sohle (horizontal, ohne Schotter)
+        if SurfaceType.CRANE_PAD in results.surface_results:
+            self.logger.info("Processing crane pad base terrain intersection...")
+            crane = results.surface_results[SurfaceType.CRANE_PAD]
+
+            raster_path = os.path.join(output_dir, 'differenz_kranstellflaeche_sohle.tif')
+
+            try:
+                line_2d, line_3d, raster = extract_terrain_intersection_horizontal(
+                    self.project.crane_pad.geometry,
+                    crane.target_height,
+                    dem_path,
+                    raster_path
+                )
+                results.crane_terrain_intersection_base_2d = line_2d
+                results.crane_terrain_intersection_base_3d = line_3d
+                results.crane_terrain_intersection_base_raster_path = raster
+            except Exception as e:
+                self.logger.error(f"Failed to create crane base intersection: {e}")
+
+        # 3. Kranstellfläche Oberfläche (horizontal, mit Schotter)
+        if SurfaceType.CRANE_PAD in results.surface_results:
+            self.logger.info("Processing crane pad surface terrain intersection...")
+            crane = results.surface_results[SurfaceType.CRANE_PAD]
+            surface_height = crane.target_height + self.project.gravel_thickness
+
+            raster_path = os.path.join(output_dir, 'differenz_kranstellflaeche_oberflaeche.tif')
+
+            try:
+                line_2d, line_3d, raster = extract_terrain_intersection_horizontal(
+                    self.project.crane_pad.geometry,
+                    surface_height,
+                    dem_path,
+                    raster_path
+                )
+                results.crane_terrain_intersection_surface_2d = line_2d
+                results.crane_terrain_intersection_surface_3d = line_3d
+                results.crane_terrain_intersection_surface_raster_path = raster
+            except Exception as e:
+                self.logger.error(f"Failed to create crane surface intersection: {e}")
+
+        # 4. Auslegerfläche (geneigt)
+        if self.project.boom and SurfaceType.BOOM in results.surface_results:
+            self.logger.info("Processing boom terrain intersection...")
+            boom = results.surface_results[SurfaceType.BOOM]
+
+            raster_path = os.path.join(output_dir, 'differenz_auslegerflaeche.tif')
+
+            try:
+                line_2d, line_3d, raster = extract_terrain_intersection_sloped(
+                    self.project.boom.geometry,
+                    boom.target_height,
+                    results.boom_slope_percent,
+                    self.boom_slope_direction,
+                    dem_path,
+                    raster_path
+                )
+                boom.terrain_intersection_2d = line_2d
+                boom.terrain_intersection_3d = line_3d
+                boom.terrain_intersection_raster_path = raster
+            except Exception as e:
+                self.logger.error(f"Failed to create boom intersection: {e}")
+
+        # 5. Rotorfläche (horizontal, mit 30cm Holmen)
+        if self.project.rotor_storage and SurfaceType.ROTOR_STORAGE in results.surface_results:
+            self.logger.info("Processing rotor storage terrain intersection...")
+            rotor = results.surface_results[SurfaceType.ROTOR_STORAGE]
+            rotor_height = rotor.target_height + 0.3  # 30cm Holme
+
+            raster_path = os.path.join(output_dir, 'differenz_rotorflaeche.tif')
+
+            try:
+                line_2d, line_3d, raster = extract_terrain_intersection_horizontal(
+                    self.project.rotor_storage.geometry,
+                    rotor_height,
+                    dem_path,
+                    raster_path
+                )
+                rotor.terrain_intersection_2d = line_2d
+                rotor.terrain_intersection_3d = line_3d
+                rotor.terrain_intersection_raster_path = raster
+            except Exception as e:
+                self.logger.error(f"Failed to create rotor intersection: {e}")
+
+        # 6. Zufahrt Sohle (geneigt, ohne Schotter)
+        if self.project.road_access and SurfaceType.ROAD_ACCESS in results.surface_results:
+            self.logger.info("Processing road base terrain intersection...")
+            road = results.surface_results[SurfaceType.ROAD_ACCESS]
+
+            raster_path = os.path.join(output_dir, 'differenz_zufahrt_sohle.tif')
+
+            try:
+                line_2d, line_3d, raster = extract_terrain_intersection_sloped(
+                    self.project.road_access.geometry,
+                    road.target_height,
+                    results.road_slope_percent,
+                    self.road_slope_direction,
+                    dem_path,
+                    raster_path
+                )
+                results.road_terrain_intersection_base_2d = line_2d
+                results.road_terrain_intersection_base_3d = line_3d
+                results.road_terrain_intersection_base_raster_path = raster
+            except Exception as e:
+                self.logger.error(f"Failed to create road base intersection: {e}")
+
+        # 7. Zufahrt Oberfläche (geneigt, mit Schotter)
+        if self.project.road_access and SurfaceType.ROAD_ACCESS in results.surface_results:
+            self.logger.info("Processing road surface terrain intersection...")
+            road = results.surface_results[SurfaceType.ROAD_ACCESS]
+            gravel = self.project.road_gravel_thickness if self.project.road_gravel_enabled else 0.0
+
+            raster_path = os.path.join(output_dir, 'differenz_zufahrt_oberflaeche.tif')
+
+            try:
+                line_2d, line_3d, raster = extract_terrain_intersection_sloped(
+                    self.project.road_access.geometry,
+                    road.target_height + gravel,
+                    results.road_slope_percent,
+                    self.road_slope_direction,
+                    dem_path,
+                    raster_path
+                )
+                results.road_terrain_intersection_surface_2d = line_2d
+                results.road_terrain_intersection_surface_3d = line_3d
+                results.road_terrain_intersection_surface_raster_path = raster
+            except Exception as e:
+                self.logger.error(f"Failed to create road surface intersection: {e}")
+
+        self.logger.info("Terrain intersection lines calculation complete")
