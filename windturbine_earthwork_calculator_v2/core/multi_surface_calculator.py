@@ -15,6 +15,7 @@ import math
 import time
 import copy
 import os
+import platform
 from typing import Optional, Tuple, Dict, List
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -66,6 +67,39 @@ from ..utils.geometry_3d import (
     create_slope_surface_3d
 )
 from ..utils.logging_utils import get_plugin_logger
+
+
+# ============================================================================
+# MULTIPROCESSING HELPERS
+# ============================================================================
+
+def _get_safe_max_workers(requested_workers: Optional[int] = None) -> int:
+    """
+    Get safe number of workers for multiprocessing in QGIS context.
+
+    On Windows, multiprocessing with QGIS causes issues (spawns multiple QGIS instances).
+    This function returns 1 worker on Windows to disable multiprocessing.
+
+    Args:
+        requested_workers: Requested number of workers (None = auto-detect)
+
+    Returns:
+        Safe number of workers (1 on Windows, cpu_count-1 on Linux/Mac)
+    """
+    if platform.system() == 'Windows':
+        # Disable multiprocessing on Windows (QGIS compatibility issue)
+        logger = get_plugin_logger()
+        logger.warning(
+            "Multiprocessing disabled on Windows due to QGIS compatibility. "
+            "Calculations will run sequentially (slower but stable)."
+        )
+        return 1
+    else:
+        # On Linux/Mac: Use multiprocessing
+        if requested_workers is None:
+            return max(1, mp.cpu_count() - 1)
+        else:
+            return max(1, requested_workers)
 
 
 # ============================================================================
@@ -1965,8 +1999,7 @@ class MultiSurfaceCalculator:
             project_dict = self._create_project_dict()
             dem_path = self.dem_layer.source()
 
-            if max_workers is None:
-                max_workers = max(1, mp.cpu_count() - 1)
+            max_workers = _get_safe_max_workers(max_workers)
 
             completed = 0
             failed = 0
@@ -2172,8 +2205,7 @@ class MultiSurfaceCalculator:
             project_dict = self._create_project_dict()
             dem_path = self.dem_layer.source()
 
-            if max_workers is None:
-                max_workers = max(1, mp.cpu_count() - 1)
+            max_workers = _get_safe_max_workers(max_workers)
 
             completed = 0
             failed = 0
@@ -2435,12 +2467,11 @@ class MultiSurfaceCalculator:
         """Parallel optimization using ProcessPoolExecutor."""
         num_scenarios = len(heights)
 
-        if max_workers is None:
-            max_workers = max(1, mp.cpu_count() - 1)  # Leave one CPU free
+        max_workers = _get_safe_max_workers(max_workers)
 
         self.logger.info(
-            f"Testing {num_scenarios} height scenarios in parallel "
-            f"(using {max_workers} workers)"
+            f"Testing {num_scenarios} height scenarios "
+            f"(using {max_workers} worker{'s' if max_workers > 1 else ''})"
         )
 
         if feedback:
@@ -2709,13 +2740,13 @@ class MultiSurfaceCalculator:
         results = []
 
         # Determine number of workers
-        max_workers = max(1, mp.cpu_count() - 1)
+        max_workers = _get_safe_max_workers(None)
 
         if feedback:
             if use_parallel:
+                mode = "sequentially" if max_workers == 1 else f"in parallel ({max_workers} CPU cores)"
                 feedback.pushInfo(
-                    f"Running {n_samples} Monte Carlo samples in parallel "
-                    f"({max_workers} CPU cores)..."
+                    f"Running {n_samples} Monte Carlo samples {mode}..."
                 )
             else:
                 feedback.pushInfo(f"Running {n_samples} Monte Carlo samples...")
