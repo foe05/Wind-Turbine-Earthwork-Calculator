@@ -30,7 +30,9 @@ from qgis.core import (
     QgsTextFormat,
     QgsTextBufferSettings,
     QgsVectorLayerSimpleLabeling,
-    QgsLayerTreeGroup
+    QgsLayerTreeGroup,
+    QgsGeometry,
+    QgsMultiLineString
 )
 import shutil
 from qgis.PyQt.QtGui import QColor, QFont
@@ -385,7 +387,6 @@ class WorkflowWorker(QObject):
                 all_geoms.append(surfaces['road']['geometry'])
 
             # Create union of all geometries
-            from qgis.core import QgsGeometry
             combined_geom = all_geoms[0]
             for geom in all_geoms[1:]:
                 combined_geom = combined_geom.combine(geom)
@@ -725,8 +726,7 @@ class WorkflowWorker(QObject):
                 'report_path': str(report_path),
                 'dem_path': str(dem_result_path),
                 'dxf_paths': dxf_paths,
-                'group_name': workspace.name,
-                'best_result': best_result  # Include for layer metadata
+                'group_name': workspace.name
             }
 
             self.logger.info("Emitting layer information to main thread for safe addition to QGIS")
@@ -1226,33 +1226,67 @@ class WorkflowWorker(QObject):
                                    geometry_3d: QgsGeometry, color: str,
                                    description: str):
             """Speichert 2D und 3D Schnittkanten-Layer."""
-            if geometry_2d is None or geometry_2d.isEmpty():
-                return
+            
+            # Helper to process geometry
+            def process_geometry(geom, is_3d=False):
+                if geom is None or geom.isEmpty():
+                    return None
+
+                # Make valid if needed
+                if not geom.isGeosValid():
+                    geom = geom.makeValid()
+
+                # Convert to MultiLineString
+                if not geom.isMultipart():
+                    if is_3d:
+                        # For 3D, we need to be careful. If it's a LineString, convert to MultiLineString
+                        # But QGIS doesn't have a direct "convertToMultiType" that preserves Z always correctly for all versions
+                        # So we construct a new MultiLineString
+                        multi = QgsMultiLineString()
+                        multi.addGeometry(geom.constGet().clone())
+                        return QgsGeometry(multi)
+                    else:
+                        geom.convertToMultiType()
+
+                return geom
 
             # 2D Layer
-            fields_2d = QgsFields()
-            fields_2d.append(QgsField('id', QVariant.Int))
-            fields_2d.append(QgsField('length_m', QVariant.Double))
-            fields_2d.append(QgsField('description', QVariant.String))
-            fields_2d.append(QgsField('color', QVariant.String))
+            processed_2d = process_geometry(geometry_2d, is_3d=False)
+            
+            if processed_2d and not processed_2d.isEmpty():
+                fields_2d = QgsFields()
+                fields_2d.append(QgsField('id', QVariant.Int))
+                fields_2d.append(QgsField('length_m', QVariant.Double))
+                fields_2d.append(QgsField('description', QVariant.String))
+                fields_2d.append(QgsField('color', QVariant.String))
 
-            feat_2d = QgsFeature(fields_2d)
-            feat_2d.setGeometry(geometry_2d)
-            feat_2d.setAttribute('id', 1)
-            feat_2d.setAttribute('length_m', round(geometry_2d.length(), 2))
-            feat_2d.setAttribute('description', description)
-            feat_2d.setAttribute('color', color)
+                feat_2d = QgsFeature(fields_2d)
+                feat_2d.setGeometry(processed_2d)
+                feat_2d.setAttribute('id', 1)
+                feat_2d.setAttribute('length_m', round(processed_2d.length(), 2))
+                feat_2d.setAttribute('description', description)
+                feat_2d.setAttribute('color', color)
 
-            options.layerName = layer_name
-            writer = QgsVectorFileWriter.create(
-                gpkg_path, fields_2d, QgsWkbTypes.LineString, crs,
-                QgsCoordinateTransformContext(), options
-            )
-            writer.addFeature(feat_2d)
-            del writer
+                options.layerName = layer_name
+                # Use MultiLineString for robustness
+                writer = QgsVectorFileWriter.create(
+                    gpkg_path, fields_2d, QgsWkbTypes.MultiLineString, crs,
+                    QgsCoordinateTransformContext(), options
+                )
+                
+                if writer.hasError() != QgsVectorFileWriter.NoError:
+                    self.logger.error(f"Error creating layer {layer_name}: {writer.errorMessage()}")
+                else:
+                    writer.addFeature(feat_2d)
+                    if writer.hasError() != QgsVectorFileWriter.NoError:
+                        self.logger.error(f"Error adding feature to {layer_name}: {writer.errorMessage()}")
+                
+                del writer
 
             # 3D Layer
-            if geometry_3d is not None and not geometry_3d.isEmpty():
+            processed_3d = process_geometry(geometry_3d, is_3d=True)
+            
+            if processed_3d and not processed_3d.isEmpty():
                 fields_3d = QgsFields()
                 fields_3d.append(QgsField('id', QVariant.Int))
                 fields_3d.append(QgsField('length_m', QVariant.Double))
@@ -1260,18 +1294,26 @@ class WorkflowWorker(QObject):
                 fields_3d.append(QgsField('color', QVariant.String))
 
                 feat_3d = QgsFeature(fields_3d)
-                feat_3d.setGeometry(geometry_3d)
+                feat_3d.setGeometry(processed_3d)
                 feat_3d.setAttribute('id', 1)
-                feat_3d.setAttribute('length_m', round(geometry_3d.length(), 2))
+                feat_3d.setAttribute('length_m', round(processed_3d.length(), 2))
                 feat_3d.setAttribute('description', description)
                 feat_3d.setAttribute('color', color)
 
                 options.layerName = f"{layer_name}_3d"
+                # Use MultiLineStringZ for robustness
                 writer = QgsVectorFileWriter.create(
-                    gpkg_path, fields_3d, QgsWkbTypes.LineStringZ, crs,
+                    gpkg_path, fields_3d, QgsWkbTypes.MultiLineStringZ, crs,
                     QgsCoordinateTransformContext(), options
                 )
-                writer.addFeature(feat_3d)
+                
+                if writer.hasError() != QgsVectorFileWriter.NoError:
+                    self.logger.error(f"Error creating layer {layer_name}_3d: {writer.errorMessage()}")
+                else:
+                    writer.addFeature(feat_3d)
+                    if writer.hasError() != QgsVectorFileWriter.NoError:
+                        self.logger.error(f"Error adding feature to {layer_name}_3d: {writer.errorMessage()}")
+                
                 del writer
 
         # Speichere alle Schnittkanten
