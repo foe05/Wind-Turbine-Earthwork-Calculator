@@ -1351,8 +1351,38 @@ class WorkflowWorker(QObject):
             dxf_paths: Dict with DXF file paths {type: path}
             group_name: Name for the layer group (usually workspace folder name)
         """
+        from qgis.PyQt.QtCore import qInstallMessageHandler, QtMsgType
+
         project = QgsProject.instance()
         root = project.layerTreeRoot()
+
+        # Custom message handler to suppress specific QGIS/SQLite warnings
+        def suppress_vw_srs_handler(msg_type, context, message):
+            """
+            Suppress "vw_srs already exists" SQLite warnings.
+
+            This warning appears when loading multiple DXF files in QGIS
+            and is harmless - it's an internal QGIS database issue that
+            doesn't affect functionality.
+            """
+            if "vw_srs already exists" in message or "qgis.db" in message.lower():
+                # Silently ignore this specific warning
+                return
+
+            # For all other messages, use default handling
+            if msg_type == QtMsgType.QtDebugMsg:
+                pass  # Ignore debug messages
+            elif msg_type == QtMsgType.QtWarningMsg:
+                self.logger.warning(f"Qt Warning: {message}")
+            elif msg_type == QtMsgType.QtCriticalMsg:
+                self.logger.error(f"Qt Critical: {message}")
+            elif msg_type == QtMsgType.QtFatalMsg:
+                self.logger.critical(f"Qt Fatal: {message}")
+
+        # Install custom message handler
+        original_handler = qInstallMessageHandler(suppress_vw_srs_handler)
+
+        self.logger.info("Installing temporary Qt message handler to suppress 'vw_srs already exists' warnings")
 
         # Create layer group
         if group_name:
@@ -1603,6 +1633,10 @@ class WorkflowWorker(QObject):
                 self.logger.info(f"Added DEM layer: {dem_path}")
             else:
                 self.logger.warning(f"Could not load DEM layer: {dem_path}")
+
+        # Restore original message handler
+        qInstallMessageHandler(original_handler)
+        self.logger.info("Restored original Qt message handler")
 
         self.logger.info("All layers added to QGIS project")
 

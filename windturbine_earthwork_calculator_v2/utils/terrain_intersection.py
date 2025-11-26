@@ -562,7 +562,9 @@ def extract_contour_at_height(
     if len(all_geoms) == 1:
         result = all_geoms[0]
     else:
-        result = QgsGeometry.unaryUnion(all_geoms)
+        # Combine all geometries using QgsGeometry.collectGeometry
+        # Note: QgsGeometry.unaryUnion does NOT exist! That's a Shapely function.
+        result = QgsGeometry.collectGeometry(all_geoms)
 
     # Clip mit Polygon
     if not polygon.isEmpty():
