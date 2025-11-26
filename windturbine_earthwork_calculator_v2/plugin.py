@@ -77,7 +77,7 @@ class WindTurbineEarthworkCalculatorPlugin:
         self.initProcessing()
         
         # Create action for toolbar/menu
-        icon_path = os.path.join(os.path.dirname(__file__), 'icon.png')
+        icon_path = os.path.join(os.path.dirname(__file__), 'resources', 'icon.png')
         self.action = QAction(
             QIcon(icon_path) if os.path.exists(icon_path) else QIcon(),
             "Erdmassenberechnung WKA",
