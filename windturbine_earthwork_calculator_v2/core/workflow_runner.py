@@ -409,9 +409,12 @@ class WorkflowWorker(QObject):
             calculator = MultiSurfaceCalculator(dem_layer, project)
 
             # Check if uncertainty analysis is enabled
-            if self.params.get('uncertainty_enabled', False):
+            uncertainty_enabled = self.params.get('uncertainty_enabled', False)
+            self.logger.info(f"Uncertainty analysis: {'ENABLED' if uncertainty_enabled else 'DISABLED'}")
+
+            if uncertainty_enabled:
                 self.progress_updated.emit(54, "📊 Unsicherheitsanalyse wird durchgeführt...")
-                self.logger.info("Uncertainty analysis enabled - running Monte Carlo simulation")
+                self.logger.info("Starting Monte Carlo simulation...")
 
                 # Map terrain type index to TerrainType enum
                 terrain_type_map = {
@@ -463,7 +466,16 @@ class WorkflowWorker(QObject):
                 )
             else:
                 # Standard optimization without uncertainty
-                optimal_crane_height, results = calculator.find_optimum()
+                # On Windows: Disable parallel processing to avoid multiple QGIS instances
+                import platform
+                use_parallel = platform.system() != 'Windows'
+
+                if not use_parallel:
+                    self.logger.info("Running optimization sequentially (Windows compatibility mode)")
+
+                optimal_crane_height, results = calculator.find_optimum(
+                    use_parallel=use_parallel
+                )
 
                 self.logger.info(f"Optimization complete: {optimal_crane_height:.2f} m ü.NN")
                 self.logger.info(

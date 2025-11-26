@@ -2679,8 +2679,13 @@ class MultiSurfaceCalculator:
         samples = generate_parameter_samples(uncertainty_config, base_values)
 
         # 3. Run Monte Carlo simulation
+        # On Windows: Disable parallel processing to avoid QGIS issues
+        use_parallel_mc = platform.system() != 'Windows'
+        if not use_parallel_mc:
+            self.logger.info("Monte Carlo running sequentially (Windows compatibility mode)")
+
         mc_results = self._run_monte_carlo_samples(
-            samples, uncertainty_config, feedback
+            samples, uncertainty_config, feedback, use_parallel=use_parallel_mc
         )
 
         # 4. Analyze results
