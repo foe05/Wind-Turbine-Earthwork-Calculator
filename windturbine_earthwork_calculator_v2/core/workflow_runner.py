@@ -644,6 +644,13 @@ class WorkflowWorker(QObject):
             profiles_dir=str(profiles_dir)
         )
 
+        # === STEP 7.5: Calculate Terrain Intersection Lines ===
+        self.progress_updated.emit(88, "🔍 Berechne Geländeschnittkanten...")
+        self.logger.info("Calculating terrain intersection lines and difference rasters")
+
+        output_dir = os.path.dirname(str(gpkg_path))
+        calculator.calculate_terrain_intersection_lines(results, output_dir)
+
         # === STEP 8: Save to GeoPackage ===
         self.progress_updated.emit(90, "💾 Daten werden in GeoPackage gespeichert...")
         self.logger.info(f"Saving to GeoPackage: {gpkg_path}")
@@ -1172,6 +1179,126 @@ class WorkflowWorker(QObject):
 
             del writer
 
+        # === GELÄNDESCHNITTKANTEN (2D und 3D) ===
+        # Helper-Funktion zum Speichern einer Schnittkante
+        def save_intersection_line(layer_name: str, geometry_2d: QgsGeometry,
+                                   geometry_3d: QgsGeometry, color: str,
+                                   description: str):
+            """Speichert 2D und 3D Schnittkanten-Layer."""
+            if geometry_2d is None or geometry_2d.isEmpty():
+                return
+
+            # 2D Layer
+            fields_2d = QgsFields()
+            fields_2d.append(QgsField('id', QVariant.Int))
+            fields_2d.append(QgsField('length_m', QVariant.Double))
+            fields_2d.append(QgsField('description', QVariant.String))
+            fields_2d.append(QgsField('color', QVariant.String))
+
+            feat_2d = QgsFeature(fields_2d)
+            feat_2d.setGeometry(geometry_2d)
+            feat_2d.setAttribute('id', 1)
+            feat_2d.setAttribute('length_m', round(geometry_2d.length(), 2))
+            feat_2d.setAttribute('description', description)
+            feat_2d.setAttribute('color', color)
+
+            options.layerName = layer_name
+            writer = QgsVectorFileWriter.create(
+                gpkg_path, fields_2d, QgsWkbTypes.LineString, crs,
+                QgsCoordinateTransformContext(), options
+            )
+            writer.addFeature(feat_2d)
+            del writer
+
+            # 3D Layer
+            if geometry_3d is not None and not geometry_3d.isEmpty():
+                fields_3d = QgsFields()
+                fields_3d.append(QgsField('id', QVariant.Int))
+                fields_3d.append(QgsField('length_m', QVariant.Double))
+                fields_3d.append(QgsField('description', QVariant.String))
+                fields_3d.append(QgsField('color', QVariant.String))
+
+                feat_3d = QgsFeature(fields_3d)
+                feat_3d.setGeometry(geometry_3d)
+                feat_3d.setAttribute('id', 1)
+                feat_3d.setAttribute('length_m', round(geometry_3d.length(), 2))
+                feat_3d.setAttribute('description', description)
+                feat_3d.setAttribute('color', color)
+
+                options.layerName = f"{layer_name}_3d"
+                writer = QgsVectorFileWriter.create(
+                    gpkg_path, fields_3d, QgsWkbTypes.LineStringZ, crs,
+                    QgsCoordinateTransformContext(), options
+                )
+                writer.addFeature(feat_3d)
+                del writer
+
+        # Speichere alle Schnittkanten
+        if SurfaceType.FOUNDATION in results.surface_results:
+            foundation = results.surface_results[SurfaceType.FOUNDATION]
+            save_intersection_line(
+                'gelaendeschnittkante_fundamentsohle',
+                foundation.terrain_intersection_2d,
+                foundation.terrain_intersection_3d,
+                '#8B4513',
+                'Schnittkante Fundamentsohle mit ursprünglichem Gelände'
+            )
+
+        save_intersection_line(
+            'gelaendeschnittkante_kranstellflaeche_sohle',
+            results.crane_terrain_intersection_base_2d,
+            results.crane_terrain_intersection_base_3d,
+            '#FF0000',
+            'Schnittkante Kranstellfläche Sohle (ohne Schotter)'
+        )
+
+        save_intersection_line(
+            'gelaendeschnittkante_kranstellflaeche_oberflaeche',
+            results.crane_terrain_intersection_surface_2d,
+            results.crane_terrain_intersection_surface_3d,
+            '#FF8C00',
+            'Schnittkante Kranstellfläche Oberfläche (mit Schotter)'
+        )
+
+        if project.boom and SurfaceType.BOOM in results.surface_results:
+            boom = results.surface_results[SurfaceType.BOOM]
+            save_intersection_line(
+                'gelaendeschnittkante_auslegerflaeche',
+                boom.terrain_intersection_2d,
+                boom.terrain_intersection_3d,
+                '#00AA00',
+                'Schnittkante Auslegerfläche'
+            )
+
+        if project.rotor_storage and SurfaceType.ROTOR_STORAGE in results.surface_results:
+            rotor = results.surface_results[SurfaceType.ROTOR_STORAGE]
+            save_intersection_line(
+                'gelaendeschnittkante_rotorflaeche',
+                rotor.terrain_intersection_2d,
+                rotor.terrain_intersection_3d,
+                '#AA00AA',
+                'Schnittkante Rotorfläche'
+            )
+
+        if project.road_access and SurfaceType.ROAD_ACCESS in results.surface_results:
+            save_intersection_line(
+                'gelaendeschnittkante_zufahrt_sohle',
+                results.road_terrain_intersection_base_2d,
+                results.road_terrain_intersection_base_3d,
+                '#0000FF',
+                'Schnittkante Zufahrt Sohle (ohne Schotter)'
+            )
+
+            save_intersection_line(
+                'gelaendeschnittkante_zufahrt_oberflaeche',
+                results.road_terrain_intersection_surface_2d,
+                results.road_terrain_intersection_surface_3d,
+                '#00FFFF',
+                'Schnittkante Zufahrt Oberfläche (mit Schotter)'
+            )
+
+        self.logger.info("Terrain intersection lines saved to GeoPackage")
+
         self.logger.info(f"GeoPackage saved with 2D layers, 3D layers, and profiles: {gpkg_path}")
 
     def _add_to_qgis(self, gpkg_path, report_path, dem_path=None, dxf_paths=None, group_name=None):
@@ -1265,6 +1392,157 @@ class WorkflowWorker(QObject):
                 else:
                     root.addLayer(layer)
                 self.logger.info(f"Added layer: {display_name}")
+
+        # === GELÄNDESCHNITTKANTEN ===
+        from qgis.core import QgsLineSymbol
+
+        if group_name:
+            subgroup_intersections = QgsLayerTreeGroup('Geländeschnittkanten')
+            group.addChildNode(subgroup_intersections)
+        else:
+            subgroup_intersections = root.addGroup('Geländeschnittkanten')
+
+        intersection_layers = [
+            ('gelaendeschnittkante_fundamentsohle', '#8B4513', 0.4),
+            ('gelaendeschnittkante_kranstellflaeche_sohle', '#FF0000', 0.5),
+            ('gelaendeschnittkante_kranstellflaeche_oberflaeche', '#FF8C00', 0.5),
+            ('gelaendeschnittkante_auslegerflaeche', '#00AA00', 0.5),
+            ('gelaendeschnittkante_rotorflaeche', '#AA00AA', 0.5),
+            ('gelaendeschnittkante_zufahrt_sohle', '#0000FF', 0.5),
+            ('gelaendeschnittkante_zufahrt_oberflaeche', '#00FFFF', 0.5),
+        ]
+
+        for layer_name, color, width in intersection_layers:
+            # 2D Layer
+            layer_2d = QgsVectorLayer(f"{gpkg_path}|layername={layer_name}",
+                                      layer_name, "ogr")
+            if layer_2d.isValid():
+                # Style: Gestrichelte Linie
+                symbol = QgsLineSymbol.createSimple({
+                    'line_color': color,
+                    'line_width': str(width),
+                    'line_style': 'dash',
+                    'capstyle': 'round'
+                })
+                layer_2d.renderer().setSymbol(symbol)
+                project.addMapLayer(layer_2d, False)
+                subgroup_intersections.addLayer(layer_2d)
+
+            # 3D Layer
+            layer_3d = QgsVectorLayer(f"{gpkg_path}|layername={layer_name}_3d",
+                                      f"{layer_name}_3d", "ogr")
+            if layer_3d.isValid():
+                # Style: Gleiche Farbe für 3D
+                symbol = QgsLineSymbol.createSimple({
+                    'line_color': color,
+                    'line_width': str(width),
+                    'line_style': 'solid',
+                    'capstyle': 'round'
+                })
+                layer_3d.renderer().setSymbol(symbol)
+                project.addMapLayer(layer_3d, False)
+                subgroup_intersections.addLayer(layer_3d)
+
+
+        # === DIFFERENZ-RASTER (Cut/Fill) ===
+        from qgis.core import (
+            QgsSingleBandPseudoColorRenderer,
+            QgsColorRampShader,
+            QgsRasterShader
+        )
+        from qgis.PyQt.QtGui import QColor
+
+        def apply_cutfill_styling(raster_layer: QgsRasterLayer):
+            """
+            Wendet Cut/Fill-Farbschema auf Differenz-Raster an.
+
+            Farbskala:
+            - Dunkelrot: Starker Abtrag (Cut > 5m)
+            - Rot: Mittlerer Abtrag (0 < Cut < 5m)
+            - Weiß: Schnittkante (≈ 0m)
+            - Grün: Mittlerer Auftrag (0 < Fill < 5m)
+            - Dunkelgrün: Starker Auftrag (Fill > 5m)
+            """
+            # Hole Min/Max-Werte aus Raster
+            provider = raster_layer.dataProvider()
+            stats = provider.bandStatistics(1)
+            min_val = stats.minimumValue
+            max_val = stats.maximumValue
+
+            # Symmetrisch um 0 für bessere Visualisierung
+            abs_max = max(abs(min_val), abs(max_val))
+
+            # Erstelle Farbrampe
+            shader = QgsRasterShader()
+            color_ramp = QgsColorRampShader()
+            color_ramp.setColorRampType(QgsColorRampShader.Interpolated)
+
+            # Farbpunkte definieren
+            items = [
+                # Fill (negativ) = Grün-Töne
+                QgsColorRampShader.ColorRampItem(-abs_max, QColor(0, 100, 0), f'Fill {abs_max:.1f}m'),
+                QgsColorRampShader.ColorRampItem(-2.0, QColor(34, 139, 34), 'Fill 2m'),
+                QgsColorRampShader.ColorRampItem(-0.5, QColor(144, 238, 144), 'Fill 0.5m'),
+                QgsColorRampShader.ColorRampItem(-0.1, QColor(240, 255, 240), 'Fill 0.1m'),
+
+                # Schnittkante = Weiß
+                QgsColorRampShader.ColorRampItem(0.0, QColor(255, 255, 255), '0m (Schnittkante)'),
+
+                # Cut (positiv) = Rot-Töne
+                QgsColorRampShader.ColorRampItem(0.1, QColor(255, 240, 240), 'Cut 0.1m'),
+                QgsColorRampShader.ColorRampItem(0.5, QColor(255, 200, 200), 'Cut 0.5m'),
+                QgsColorRampShader.ColorRampItem(2.0, QColor(255, 100, 100), 'Cut 2m'),
+                QgsColorRampShader.ColorRampItem(abs_max, QColor(139, 0, 0), f'Cut {abs_max:.1f}m'),
+            ]
+
+            color_ramp.setColorRampItemList(items)
+            shader.setRasterShaderFunction(color_ramp)
+
+            # Erstelle Renderer
+            renderer = QgsSingleBandPseudoColorRenderer(provider, 1, shader)
+            raster_layer.setRenderer(renderer)
+
+            # Transparenz für NoData
+            raster_layer.renderer().setNodataColor(QColor(0, 0, 0, 0))
+
+            # Layer-Transparenz für bessere Überlagerung
+            raster_layer.renderer().setOpacity(0.7)  # 70% Deckkraft
+
+            raster_layer.triggerRepaint()
+
+
+        if group_name:
+            subgroup_diff_rasters = QgsLayerTreeGroup('Differenz-Raster (Cut/Fill)')
+            group.addChildNode(subgroup_diff_rasters)
+        else:
+            subgroup_diff_rasters = root.addGroup('Differenz-Raster (Cut/Fill)')
+
+        diff_raster_configs = [
+            ('differenz_fundamentsohle.tif', 'Differenz Fundamentsohle'),
+            ('differenz_kranstellflaeche_sohle.tif', 'Differenz Kranstellfläche Sohle'),
+            ('differenz_kranstellflaeche_oberflaeche.tif', 'Differenz Kranstellfläche Oberfläche'),
+            ('differenz_auslegerflaeche.tif', 'Differenz Auslegerfläche'),
+            ('differenz_rotorflaeche.tif', 'Differenz Rotorfläche'),
+            ('differenz_zufahrt_sohle.tif', 'Differenz Zufahrt Sohle'),
+            ('differenz_zufahrt_oberflaeche.tif', 'Differenz Zufahrt Oberfläche'),
+        ]
+
+        output_dir = os.path.dirname(gpkg_path)
+
+        for raster_file, layer_name in diff_raster_configs:
+            raster_path = os.path.join(output_dir, raster_file)
+
+            if os.path.exists(raster_path):
+                diff_layer = QgsRasterLayer(raster_path, layer_name)
+
+                if diff_layer.isValid():
+                    # Styling: Cut/Fill-Farbschema
+                    apply_cutfill_styling(diff_layer)
+
+                    project.addMapLayer(diff_layer, False)
+                    subgroup_diff_rasters.addLayer(diff_layer)
+
+        self.logger.info("Terrain intersection lines and difference rasters added to QGIS")
 
         # === BOTTOM: Add DEM mosaic layer last (will be at bottom) ===
         if dem_path:
