@@ -589,6 +589,25 @@ class ReportGenerator:
                 <td></td>
                 <td></td>
             </tr>"""
+            elif surface_key == 'zufahrt':
+                # Road access specific: slope percent, length, gravel thickness
+                road_slope_pct = surface_data.get('slope_percent', 0)
+                road_max_dist = surface_data.get('max_distance', 0)
+                additional_row = f"""
+            <tr>
+                <td></td>
+                <td>Längsneigung</td>
+                <td>{road_slope_pct:.1f} %</td>
+                <td>Länge</td>
+                <td>{road_max_dist:.1f} m</td>
+            </tr>
+            <tr>
+                <td></td>
+                <td>Schotterdicke</td>
+                <td>{gravel_thickness:.2f} m</td>
+                <td></td>
+                <td></td>
+            </tr>"""
 
             surface_rows.append(f"""
             <tr>

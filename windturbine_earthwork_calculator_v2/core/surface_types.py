@@ -94,14 +94,17 @@ class SurfaceConfig:
 
     def __post_init__(self):
         """Validate configuration after initialization."""
-        if self.slope_longitudinal < 0 or self.slope_longitudinal > 100:
-            raise ValueError(f"Invalid slope_longitudinal: {self.slope_longitudinal}%")
+        # Allow negative slopes (downhill) - validate absolute value
+        if abs(self.slope_longitudinal) > 100:
+            raise ValueError(f"Invalid slope_longitudinal: {self.slope_longitudinal}% (absolute value must be <= 100%)")
 
         if self.surface_type == SurfaceType.BOOM:
-            if self.slope_longitudinal < self.slope_min or self.slope_longitudinal > self.slope_max:
+            # For boom surface, check against allowed range (can be negative or positive)
+            # The boom can slope uphill (positive) or downhill (negative)
+            if abs(self.slope_longitudinal) < self.slope_min or abs(self.slope_longitudinal) > self.slope_max:
                 raise ValueError(
                     f"Boom slope {self.slope_longitudinal}% outside allowed range "
-                    f"[{self.slope_min}%, {self.slope_max}%]"
+                    f"[±{self.slope_min}%, ±{self.slope_max}%]"
                 )
 
 

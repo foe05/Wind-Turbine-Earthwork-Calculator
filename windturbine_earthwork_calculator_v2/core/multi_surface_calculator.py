@@ -1089,7 +1089,12 @@ class MultiSurfaceCalculator:
                 target_height=self.project.fok,
                 cut_volume=0.0,
                 fill_volume=0.0,
-                platform_area=0.0
+                platform_area=self.project.foundation.geometry.area(),
+                additional_data={
+                    'foundation_bottom': round(self.project.foundation_bottom_elevation, 2),
+                    'foundation_depth': round(self.project.foundation_depth, 2),
+                    'planum_height': round(self.project.foundation_bottom_elevation, 2)
+                }
             )
 
         terrain_min = float(np.min(elevations))
@@ -1160,17 +1165,19 @@ class MultiSurfaceCalculator:
         elevations = self.sample_dem_in_polygon(self.project.crane_pad.geometry)
 
         if len(elevations) == 0:
-            # Add debugging information
-            geom_bbox = self.project.crane_pad.geometry.boundingBox()
-            dem_extent = self.dem_layer.extent()
-            error_msg = (
-                f"No DEM data in crane pad area. "
-                f"Geometry bbox: {geom_bbox.toString()}, "
-                f"DEM extent: {dem_extent.toString()}, "
-                f"DEM valid: {self.dem_layer.isValid()}, "
-                f"DEM source: {self.dem_layer.source()}"
+            self.logger.warning("No DEM data in crane pad area")
+            return SurfaceCalculationResult(
+                surface_type=SurfaceType.CRANE_PAD,
+                target_height=crane_height,
+                cut_volume=0.0,
+                fill_volume=0.0,
+                platform_area=self.project.crane_pad.geometry.area(),
+                additional_data={
+                    'gravel_thickness': self.project.gravel_thickness,
+                    'planum_height': round(crane_height - self.project.gravel_thickness, 2),
+                    'slope_width': 0.0
+                }
             )
-            raise ValueError(error_msg)
 
         terrain_min = float(np.min(elevations))
         terrain_max = float(np.max(elevations))
@@ -1301,7 +1308,15 @@ class MultiSurfaceCalculator:
                 target_height=crane_height,
                 cut_volume=0.0,
                 fill_volume=0.0,
-                platform_area=0.0
+                platform_area=self.project.boom.geometry.area(),
+                additional_data={
+                    'slope_percent': boom_slope_percent if boom_slope_percent is not None else self.project.boom.slope_longitudinal,
+                    'slope_direction': round(self.boom_slope_direction, 1),
+                    'auto_slope': self.project.boom.auto_slope,
+                    'max_distance': 0.0,
+                    'slope_width': 0.0,
+                    'planum_height': round(crane_height, 2)
+                }
             )
 
         # Determine slope percentage
@@ -1505,7 +1520,14 @@ class MultiSurfaceCalculator:
                 target_height=rotor_height,
                 cut_volume=0.0,
                 fill_volume=0.0,
-                platform_area=0.0
+                platform_area=self.project.rotor_storage.geometry.area(),
+                additional_data={
+                    'height_offset_from_crane': round(rotor_height_offset if rotor_height_offset is not None else self.project.rotor_height_offset, 2),
+                    'holm_fill_volume': 0.0,
+                    'has_holms': (self.project.rotor_holms is not None and len(self.project.rotor_holms) > 0),
+                    'slope_width': 0.0,
+                    'planum_height': round(rotor_height, 2)
+                }
             )
 
         elevations_only = [elev for _, elev in samples]
@@ -1659,7 +1681,18 @@ class MultiSurfaceCalculator:
                 target_height=crane_height,
                 cut_volume=0.0,
                 fill_volume=0.0,
-                platform_area=0.0
+                platform_area=self.project.road_access.geometry.area(),
+                additional_data={
+                    'slope_percent': road_slope_percent if road_slope_percent is not None else 0.0, # Default to 0.0 if not provided and no samples
+                    'slope_direction': round(self.road_slope_direction, 1) if self.road_slope_direction else 0.0,
+                    'gravel_enabled': self.project.road_gravel_enabled,
+                    'gravel_thickness': self.project.road_gravel_thickness if self.project.road_gravel_enabled else 0.0,
+                    'gravel_volume': 0.0,
+                    'slope_width': 0.0,
+                    'max_distance': 0.0,
+                    'planum_height_start': round(crane_height - (self.project.road_gravel_thickness if self.project.road_gravel_enabled else 0), 2),
+                    'planum_height_end': round(crane_height - (self.project.road_gravel_thickness if self.project.road_gravel_enabled else 0), 2)
+                }
             )
 
         # Determine slope percentage (auto-detect from terrain if not provided)
@@ -1673,6 +1706,7 @@ class MultiSurfaceCalculator:
         cut_volume = 0.0
         fill_volume = 0.0
         elevations_only = []
+        max_distance = 0.0
 
         for point, terrain_elevation in samples:
             # Calculate distance from connection edge in slope direction
@@ -1681,6 +1715,10 @@ class MultiSurfaceCalculator:
                 self.road_connection_edge,
                 self.road_slope_direction
             )
+
+            # Track maximum distance
+            if distance > max_distance:
+                max_distance = distance
 
             # Target height at this distance
             # Note: slope_percent can be positive (uphill) or negative (downhill)
@@ -1775,6 +1813,7 @@ class MultiSurfaceCalculator:
                 'gravel_thickness': self.project.road_gravel_thickness if self.project.road_gravel_enabled else 0.0,
                 'gravel_volume': round(gravel_volume, 1),
                 'slope_width': round(slope_width, 2),
+                'max_distance': round(max_distance, 1),
                 'planum_height_start': round(crane_height - (self.project.road_gravel_thickness if self.project.road_gravel_enabled else 0), 2),
                 'planum_height_end': round(crane_height + 50 * slope_percent / 100 - (self.project.road_gravel_thickness if self.project.road_gravel_enabled else 0), 2)
             }
@@ -1991,15 +2030,28 @@ class MultiSurfaceCalculator:
         ]
 
         # Decide parallel vs sequential based on scenario count and use_parallel flag
-        if use_parallel and num_coarse >= 20:
+        # Get safe number of workers (1 on Windows, CPU-1 on Linux/Mac)
+        max_workers = _get_safe_max_workers(max_workers)
+
+        # Log system information for debugging
+        self.logger.info(
+            f"System: {platform.system()}, "
+            f"CPUs: {mp.cpu_count()}, "
+            f"Max workers: {max_workers}"
+        )
+
+        use_parallel_coarse = max_workers > 1 and num_coarse >= 20
+
+        if use_parallel_coarse:
             # Parallel execution
-            self.logger.info(f"Running coarse search in parallel ({max_workers} workers)")
+            self.logger.info(
+                f"STAGE 1 (COARSE): Parallel mode with {max_workers} workers "
+                f"({num_coarse} scenarios)"
+            )
 
             # Prepare project dict for serialization
             project_dict = self._create_project_dict()
             dem_path = self.dem_layer.source()
-
-            max_workers = _get_safe_max_workers(max_workers)
 
             completed = 0
             failed = 0
@@ -2058,11 +2110,17 @@ class MultiSurfaceCalculator:
                         failed += 1
                         self.logger.error(f"Error in coarse scenario {scenario}: {e}")
 
-            self.logger.info(f"Coarse search: {completed - failed} successful, {failed} failed")
+            self.logger.info(
+                f"STAGE 1 (COARSE) complete: {completed - failed}/{num_coarse} successful, "
+                f"{failed} failed"
+            )
 
         else:
             # Sequential execution (fallback or small scenario count)
-            self.logger.info("Running coarse search sequentially")
+            reason = "Windows" if platform.system() == 'Windows' else f"< 20 scenarios ({num_coarse})"
+            self.logger.info(
+                f"STAGE 1 (COARSE): Sequential mode ({reason}, {num_coarse} scenarios)"
+            )
             scenario_count = 0
             first_error = None
 
@@ -2197,15 +2255,19 @@ class MultiSurfaceCalculator:
         ]
 
         # Decide parallel vs sequential based on scenario count and use_parallel flag
-        if use_parallel and num_fine >= 20:
+        # max_workers already determined in coarse search
+        use_parallel_fine = max_workers > 1 and num_fine >= 20
+
+        if use_parallel_fine:
             # Parallel execution
-            self.logger.info(f"Running fine search in parallel ({max_workers} workers)")
+            self.logger.info(
+                f"STAGE 2 (FINE): Parallel mode with {max_workers} workers "
+                f"({num_fine} scenarios)"
+            )
 
             # Prepare project dict for serialization
             project_dict = self._create_project_dict()
             dem_path = self.dem_layer.source()
-
-            max_workers = _get_safe_max_workers(max_workers)
 
             completed = 0
             failed = 0
@@ -2264,11 +2326,17 @@ class MultiSurfaceCalculator:
                         failed += 1
                         self.logger.error(f"Error in fine scenario {scenario}: {e}")
 
-            self.logger.info(f"Fine search: {completed - failed} successful, {failed} failed")
+            self.logger.info(
+                f"STAGE 2 (FINE) complete: {completed - failed}/{num_fine} successful, "
+                f"{failed} failed"
+            )
 
         else:
             # Sequential execution (fallback or small scenario count)
-            self.logger.info("Running fine search sequentially")
+            reason = "Windows" if platform.system() == 'Windows' else f"< 20 scenarios ({num_fine})"
+            self.logger.info(
+                f"STAGE 2 (FINE): Sequential mode ({reason}, {num_fine} scenarios)"
+            )
             scenario_count = 0
 
             for crane_h, boom_slope, rotor_offset in fine_scenarios:

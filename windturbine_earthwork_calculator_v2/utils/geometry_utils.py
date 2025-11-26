@@ -1080,17 +1080,18 @@ def get_polygon_boundary(geom: QgsGeometry) -> QgsGeometry:
 
 
 def find_connection_edge(polygon1: QgsGeometry, polygon2: QgsGeometry,
-                        tolerance: float = 0.1) -> tuple[QgsGeometry, float]:
+                        tolerance: float = 0.5) -> tuple[QgsGeometry, float]:
     """
     Find the connection edge between two polygons that share a border.
 
+    Enhanced version with gap tolerance for imperfect DXF geometries.
     This function identifies the shared boundary segment(s) between two adjacent
     polygons. Useful for finding the connection between crane pad and boom surface.
 
     Args:
         polygon1 (QgsGeometry): First polygon
         polygon2 (QgsGeometry): Second polygon
-        tolerance (float): Distance tolerance for edge matching (meters)
+        tolerance (float): Distance tolerance for edge matching (meters). Default 0.5m.
 
     Returns:
         tuple: (connection_geometry, total_length)
@@ -1104,21 +1105,73 @@ def find_connection_edge(polygon1: QgsGeometry, polygon2: QgsGeometry,
     if boundary1 is None or boundary2 is None:
         return QgsGeometry(), 0.0
 
-    # Find intersection of boundaries
+    # Strategy 1: Direct intersection (works for perfectly aligned boundaries)
     connection = boundary1.intersection(boundary2)
 
-    # Calculate total length
-    if connection.isEmpty():
-        length = 0.0
-    elif connection.type() == QgsWkbTypes.LineGeometry:
-        length = connection.length()
-    elif connection.type() == QgsWkbTypes.PointGeometry:
-        # Only touching at points, no real edge
-        length = 0.0
-    else:
-        length = 0.0
+    if not connection.isEmpty() and connection.type() == QgsWkbTypes.LineGeometry:
+        return connection, connection.length()
 
-    return connection, length
+    # Strategy 2: Buffer-based approach for gaps up to tolerance
+    # This handles small gaps in DXF geometries
+    buffered1 = boundary1.buffer(tolerance, 5)  # 5 segments for smooth buffer
+    buffered2 = boundary2.buffer(tolerance, 5)
+
+    overlap = buffered1.intersection(buffered2)
+
+    if not overlap.isEmpty():
+        # Find the centerline of the overlap area
+        # Use the medial axis approximation: buffer the boundary intersection
+        if overlap.type() == QgsWkbTypes.PolygonGeometry:
+            # Get centroid line by finding closest points between original boundaries
+            # Use simplified approach: take intersection with one of the original boundaries
+            connection_approx = boundary1.intersection(overlap)
+
+            if not connection_approx.isEmpty() and connection_approx.type() == QgsWkbTypes.LineGeometry:
+                return connection_approx, connection_approx.length()
+
+    # Strategy 3: Nearest-vertex approach for larger gaps
+    # Find pairs of vertices from both boundaries that are within tolerance
+    vertices1 = list(boundary1.vertices())
+    vertices2 = list(boundary2.vertices())
+
+    if not vertices1 or not vertices2:
+        return QgsGeometry(), 0.0
+
+    # Find closest vertex pairs
+    close_pairs = []
+    for v1 in vertices1:
+        for v2 in vertices2:
+            dist = math.sqrt((v1.x() - v2.x())**2 + (v1.y() - v2.y())**2)
+            if dist <= tolerance:
+                close_pairs.append((v1, v2, dist))
+
+    if close_pairs:
+        # Sort by distance and take the best matches
+        close_pairs.sort(key=lambda x: x[2])
+
+        # Group consecutive vertices to form line segments
+        # For simplicity, connect the two closest points
+        from qgis.core import QgsLineString
+        v1, v2, _ = close_pairs[0]
+        midpoint_x = (v1.x() + v2.x()) / 2
+        midpoint_y = (v1.y() + v2.y()) / 2
+
+        # Create a small line at the midpoint representing the connection
+        line_points = [
+            QgsPoint(midpoint_x - 0.1, midpoint_y),
+            QgsPoint(midpoint_x + 0.1, midpoint_y)
+        ]
+        line = QgsLineString(line_points)
+        connection = QgsGeometry(line)
+
+        # Estimate length based on all close pairs
+        total_estimated_length = sum(math.sqrt((p[0].x() - p[1].x())**2 + (p[0].y() - p[1].y())**2)
+                                      for p in close_pairs[:min(10, len(close_pairs))])
+
+        return connection, max(connection.length(), total_estimated_length / max(1, len(close_pairs[:10])))
+
+    # No connection found
+    return QgsGeometry(), 0.0
 
 
 def get_connection_edge_center(edge_geometry: QgsGeometry) -> QgsPointXY:

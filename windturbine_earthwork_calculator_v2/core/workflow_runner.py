@@ -56,9 +56,15 @@ from ..utils.logging_utils import get_plugin_logger
 class WorkflowWorker(QObject):
     """
     Worker class that runs the multi-surface workflow in a separate thread.
+
+    Signals:
+        progress_updated: Emitted during workflow execution (progress_percent, status_message)
+        layers_ready: Emitted when layers are ready to be added to QGIS (layer_info dict)
+        finished: Emitted when workflow completes (success, message)
     """
 
     progress_updated = pyqtSignal(int, str)
+    layers_ready = pyqtSignal(dict)  # NEW: Signal for thread-safe layer addition
     finished = pyqtSignal(bool, str)
 
     def __init__(self, iface, params):
@@ -71,13 +77,34 @@ class WorkflowWorker(QObject):
 
     def run(self):
         """Run the workflow (called in thread)."""
+        import time
+        workflow_start = time.time()
+
         try:
             self.logger.info("=" * 60)
             self.logger.info("MULTI-SURFACE WORKFLOW GESTARTET")
+            self.logger.info(f"Startzeit: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             self.logger.info("=" * 60)
             self._run_workflow()
+
+            # Success - calculate duration
+            elapsed = time.time() - workflow_start
+            self.logger.info("=" * 60)
+            self.logger.info("✅ WORKFLOW ERFOLGREICH ABGESCHLOSSEN")
+            self.logger.info(f"Gesamtdauer: {elapsed/60:.1f} Minuten ({elapsed:.1f} Sekunden)")
+            self.logger.info(f"Endzeit: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            self.logger.info("=" * 60)
+
         except Exception as e:
-            self.logger.error(f"Workflow failed: {e}", exc_info=True)
+            # Failure - log error with duration
+            elapsed = time.time() - workflow_start
+            self.logger.error("=" * 60)
+            self.logger.error("❌ WORKFLOW FEHLGESCHLAGEN")
+            self.logger.error(f"Fehler nach {elapsed/60:.1f} Minuten ({elapsed:.1f} Sekunden)")
+            self.logger.error(f"Fehlertyp: {type(e).__name__}")
+            self.logger.error(f"Fehlermeldung: {str(e)}")
+            self.logger.error("=" * 60, exc_info=True)
+
             self.finished.emit(False, f"Fehler: {str(e)}")
 
     def cancel(self):
@@ -691,21 +718,23 @@ class WorkflowWorker(QObject):
             if surfaces.get('rotor'):
                 dxf_paths['rotor'] = surfaces['rotor']['dxf_path']
 
-            self._add_to_qgis(
-                str(gpkg_path),
-                str(report_path),
-                str(dem_result_path),
-                dxf_paths,
-                workspace.name  # Use workspace folder name for layer group
-            )
+            # Instead of adding layers directly (not thread-safe),
+            # emit signal to main thread with layer information
+            layer_info = {
+                'gpkg_path': str(gpkg_path),
+                'report_path': str(report_path),
+                'dem_path': str(dem_result_path),
+                'dxf_paths': dxf_paths,
+                'group_name': workspace.name,
+                'best_result': best_result  # Include for layer metadata
+            }
+
+            self.logger.info("Emitting layer information to main thread for safe addition to QGIS")
+            self.layers_ready.emit(layer_info)
         except Exception as e:
             self.logger.warning(f"Could not add layers to QGIS: {e}")
 
-        # Finished
-        self.logger.info("=" * 60)
-        self.logger.info("MULTI-SURFACE WORKFLOW ABGESCHLOSSEN")
-        self.logger.info("=" * 60)
-
+        # Finished - emit success message
         self.progress_updated.emit(100, "✅ Fertig!")
         self.finished.emit(
             True,
@@ -1313,8 +1342,13 @@ class WorkflowWorker(QObject):
 
         self.logger.info(f"GeoPackage saved with 2D layers, 3D layers, and profiles: {gpkg_path}")
 
-    def _add_to_qgis(self, gpkg_path, report_path, dem_path=None, dxf_paths=None, group_name=None):
-        """Add all result layers to QGIS project in a layer group.
+    @staticmethod
+    def _add_layers_to_qgis_main_thread(gpkg_path, report_path, dem_path=None, dxf_paths=None, group_name=None):
+        """
+        Add all result layers to QGIS project in a layer group.
+
+        IMPORTANT: This method MUST be called from the MAIN THREAD only!
+        Use the layers_ready signal to call this safely from worker threads.
 
         Args:
             gpkg_path: Path to the GeoPackage with result layers
@@ -1323,13 +1357,14 @@ class WorkflowWorker(QObject):
             dxf_paths: Dict with DXF file paths {type: path}
             group_name: Name for the layer group (usually workspace folder name)
         """
+        logger = get_plugin_logger()
         project = QgsProject.instance()
         root = project.layerTreeRoot()
 
         # Create layer group
         if group_name:
             group = root.insertGroup(0, group_name)
-            self.logger.info(f"Created layer group: {group_name}")
+            logger.info(f"Created layer group: {group_name}")
         else:
             group = root
 
@@ -1350,7 +1385,7 @@ class WorkflowWorker(QObject):
                 group.addLayer(profile_layer)
             else:
                 root.addLayer(profile_layer)
-            self.logger.info("Added layer: Geländeschnitte")
+            logger.info("Added layer: Geländeschnitte")
 
         # Add DXF layers
         if dxf_paths:
@@ -1380,12 +1415,12 @@ class WorkflowWorker(QObject):
                                 group.addLayer(dxf_layer)
                             else:
                                 root.addLayer(dxf_layer)
-                            self.logger.info(f"Added DXF layer: {display_name}")
+                            logger.info(f"Added DXF layer: {display_name}")
                         else:
-                            self.logger.warning(f"Could not load DXF layer: {dxf_path}")
+                            logger.warning(f"Could not load DXF layer: {dxf_path}")
                     except Exception as e:
                         # Catch QGIS internal DB errors (e.g., "view vw_srs already exists")
-                        self.logger.warning(f"Error loading DXF layer {display_name}: {e}")
+                        logger.warning(f"Error loading DXF layer {display_name}: {e}")
                         # Continue with next DXF - this is not critical
 
         # === MIDDLE: Add polygon layers ===
@@ -1410,7 +1445,7 @@ class WorkflowWorker(QObject):
                     group.addLayer(layer)
                 else:
                     root.addLayer(layer)
-                self.logger.info(f"Added layer: {display_name}")
+                logger.info(f"Added layer: {display_name}")
 
         # === GELÄNDESCHNITTKANTEN ===
         from qgis.core import QgsLineSymbol
@@ -1561,7 +1596,7 @@ class WorkflowWorker(QObject):
                     project.addMapLayer(diff_layer, False)
                     subgroup_diff_rasters.addLayer(diff_layer)
 
-        self.logger.info("Terrain intersection lines and difference rasters added to QGIS")
+        logger.info("Terrain intersection lines and difference rasters added to QGIS")
 
         # === BOTTOM: Add DEM mosaic layer last (will be at bottom) ===
         if dem_path:
@@ -1572,11 +1607,11 @@ class WorkflowWorker(QObject):
                     group.addLayer(dem_layer)
                 else:
                     root.addLayer(dem_layer)
-                self.logger.info(f"Added DEM layer: {dem_path}")
+                logger.info(f"Added DEM layer: {dem_path}")
             else:
-                self.logger.warning(f"Could not load DEM layer: {dem_path}")
+                logger.warning(f"Could not load DEM layer: {dem_path}")
 
-        self.logger.info("All layers added to QGIS project")
+        logger.info("All layers added to QGIS project")
 
 
 class WorkflowRunner(QObject):
@@ -1613,11 +1648,36 @@ class WorkflowRunner(QObject):
 
         # Connect signals
         self.worker.progress_updated.connect(self.dialog.update_progress)
+        self.worker.layers_ready.connect(self._on_layers_ready)  # NEW: Thread-safe layer addition
         self.worker.finished.connect(self._on_finished)
         self.thread.started.connect(self.worker.run)
 
         # Start thread
         self.thread.start()
+
+    def _on_layers_ready(self, layer_info):
+        """
+        Handle layers_ready signal from worker thread.
+
+        This slot runs in the MAIN THREAD, making it safe to call QgsProject.instance().addMapLayer().
+
+        Args:
+            layer_info (dict): Dictionary with layer paths and metadata
+        """
+        self.logger.info("Received layer information from worker thread - adding to QGIS (main thread)")
+
+        try:
+            # Call the static method to add layers (runs in main thread - SAFE!)
+            WorkflowWorker._add_layers_to_qgis_main_thread(
+                layer_info['gpkg_path'],
+                layer_info.get('report_path'),
+                layer_info.get('dem_path'),
+                layer_info.get('dxf_paths'),
+                layer_info.get('group_name')
+            )
+            self.logger.info("✅ All layers successfully added to QGIS project (thread-safe)")
+        except Exception as e:
+            self.logger.error(f"❌ Failed to add layers to QGIS: {e}", exc_info=True)
 
     def _on_finished(self, success, message):
         """Handle workflow finished."""
