@@ -530,7 +530,7 @@ class ProfileGenerator:
         return profiles
 
     def extract_profile_data(self, line_geom: QgsGeometry,
-                            step_size: float = 0.5,
+                            step_size: float = 1.0,
                             max_samples: int = 3000) -> Dict:
         """
         Extract elevation data along a profile line.
@@ -565,6 +565,9 @@ class ProfileGenerator:
         num_samples = int(line_length / step_size) + 1
         distances = np.linspace(0, line_length, num_samples)
 
+        # Log sampling info for performance monitoring
+        self.logger.debug(f"Sampling profile: {line_length:.1f}m line, {num_samples} samples @ {step_size:.2f}m steps")
+
         existing_z = []
         bottom_z = []  # Unified bottom line for Cut/Fill
         crane_top_z = []  # Crane pad top (gravel surface)
@@ -584,6 +587,18 @@ class ProfileGenerator:
         foundation_bottom_height = None
         if self.foundation_height is not None:
             foundation_bottom_height = self.foundation_height - self.foundation_depth
+
+        # PERFORMANCE OPTIMIZATION: Pre-compute bounding boxes for fast filtering
+        crane_bbox = self.polygon.boundingBox()
+        foundation_bbox = self.foundation_geometry.boundingBox() if self.foundation_geometry else None
+        boom_bbox = self.boom_geometry.boundingBox() if self.boom_geometry else None
+        rotor_bbox = self.rotor_geometry.boundingBox() if self.rotor_geometry else None
+        road_bbox = self.road_geometry.boundingBox() if self.road_geometry else None
+
+        # Pre-compute holm bounding boxes
+        holm_bboxes = []
+        if self.rotor_holms:
+            holm_bboxes = [(holm, holm.boundingBox()) for holm in self.rotor_holms]
 
         for dist in distances:
             # Interpolate point on line at distance
@@ -606,16 +621,26 @@ class ProfileGenerator:
             is_in_holm = False
 
             # Check which surface contains the point (priority order matters)
-            in_foundation = self.foundation_geometry and self.foundation_geometry.contains(point_geom)
-            in_crane_pad = self.polygon.contains(point_geom)
-            in_boom = self.boom_geometry and self.boom_geometry.contains(point_geom)
-            in_rotor = self.rotor_geometry and self.rotor_geometry.contains(point_geom)
-            in_road = self.road_geometry and self.road_geometry.contains(point_geom)
+            # PERFORMANCE OPTIMIZATION: Use bounding box pre-check before expensive .contains()
+            in_foundation = (self.foundation_geometry and
+                           foundation_bbox.contains(point) and
+                           self.foundation_geometry.contains(point_geom))
+            in_crane_pad = crane_bbox.contains(point) and self.polygon.contains(point_geom)
+            in_boom = (self.boom_geometry and
+                      boom_bbox.contains(point) and
+                      self.boom_geometry.contains(point_geom))
+            in_rotor = (self.rotor_geometry and
+                       rotor_bbox.contains(point) and
+                       self.rotor_geometry.contains(point_geom))
+            in_road = (self.road_geometry and
+                      road_bbox.contains(point) and
+                      self.road_geometry.contains(point_geom))
 
             # Check if point is in any holm (support beam)
-            if self.rotor_holms:
-                for holm_geom in self.rotor_holms:
-                    if holm_geom and holm_geom.contains(point_geom):
+            # PERFORMANCE OPTIMIZATION: Use pre-computed holm bounding boxes
+            if holm_bboxes:
+                for holm_geom, holm_bbox in holm_bboxes:
+                    if holm_bbox.contains(point) and holm_geom.contains(point_geom):
                         is_in_holm = True
                         break
 
