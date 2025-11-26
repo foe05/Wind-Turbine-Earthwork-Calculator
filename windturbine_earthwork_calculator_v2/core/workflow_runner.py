@@ -1353,21 +1353,28 @@ class WorkflowWorker(QObject):
             for dxf_type, dxf_path in dxf_paths.items():
                 if dxf_path and os.path.exists(dxf_path):
                     display_name = dxf_display_names.get(dxf_type, f'DXF {dxf_type}')
-                    # Load DXF as vector layer (entities sublayer)
-                    dxf_layer = QgsVectorLayer(
-                        f"{dxf_path}|layername=entities",
-                        display_name,
-                        "ogr"
-                    )
-                    if dxf_layer.isValid():
-                        project.addMapLayer(dxf_layer, False)
-                        if group_name:
-                            group.addLayer(dxf_layer)
+                    try:
+                        # Load DXF as vector layer (entities sublayer)
+                        # Note: Multiple DXF loads may trigger "view vw_srs already exists" warnings
+                        # in QGIS internal DB - these can be safely ignored
+                        dxf_layer = QgsVectorLayer(
+                            f"{dxf_path}|layername=entities",
+                            display_name,
+                            "ogr"
+                        )
+                        if dxf_layer.isValid():
+                            project.addMapLayer(dxf_layer, False)
+                            if group_name:
+                                group.addLayer(dxf_layer)
+                            else:
+                                root.addLayer(dxf_layer)
+                            self.logger.info(f"Added DXF layer: {display_name}")
                         else:
-                            root.addLayer(dxf_layer)
-                        self.logger.info(f"Added DXF layer: {display_name}")
-                    else:
-                        self.logger.warning(f"Could not load DXF layer: {dxf_path}")
+                            self.logger.warning(f"Could not load DXF layer: {dxf_path}")
+                    except Exception as e:
+                        # Catch QGIS internal DB errors (e.g., "view vw_srs already exists")
+                        self.logger.warning(f"Error loading DXF layer {display_name}: {e}")
+                        # Continue with next DXF - this is not critical
 
         # === MIDDLE: Add polygon layers ===
         # GeoPackage polygon layer names (order: top to bottom within polygons)
