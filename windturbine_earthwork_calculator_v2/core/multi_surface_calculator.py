@@ -261,32 +261,54 @@ def _calculate_multi_param_scenario(scenario: tuple, dem_path: str, project_dict
             metadata=project_dict.get('foundation_metadata', {})
         )
 
-        boom_config = SurfaceConfig(
-            surface_type=SurfaceType.BOOM,
-            geometry=QgsGeometry.fromWkt(project_dict['boom_wkt']),
-            dxf_path=project_dict.get('dxf_path', ''),
-            height_mode=HeightMode.SLOPED,
-            slope_longitudinal=boom_slope,  # Use scenario slope
-            auto_slope=False,  # Disable auto-slope for optimization
-            slope_min=project_dict.get('boom_slope_min', 2.0),
-            slope_max=project_dict.get('boom_slope_max', 8.0),
-            metadata=project_dict.get('boom_metadata', {})
-        )
+        # Optional boom surface (only if boom_wkt exists)
+        boom_config = None
+        if project_dict.get('boom_wkt'):
+            boom_config = SurfaceConfig(
+                surface_type=SurfaceType.BOOM,
+                geometry=QgsGeometry.fromWkt(project_dict['boom_wkt']),
+                dxf_path=project_dict.get('dxf_path', ''),
+                height_mode=HeightMode.SLOPED,
+                slope_longitudinal=boom_slope,  # Use scenario slope
+                auto_slope=False,  # Disable auto-slope for optimization
+                slope_min=project_dict.get('boom_slope_min', 2.0),
+                slope_max=project_dict.get('boom_slope_max', 8.0),
+                metadata=project_dict.get('boom_metadata', {})
+            )
 
-        rotor_config = SurfaceConfig(
-            surface_type=SurfaceType.ROTOR_STORAGE,
-            geometry=QgsGeometry.fromWkt(project_dict['rotor_wkt']),
-            dxf_path=project_dict.get('dxf_path', ''),
-            height_mode=HeightMode.RELATIVE,
-            height_reference='crane',
-            metadata=project_dict.get('rotor_metadata', {})
-        )
+        # Optional rotor surface (only if rotor_wkt exists)
+        rotor_config = None
+        if project_dict.get('rotor_wkt'):
+            rotor_config = SurfaceConfig(
+                surface_type=SurfaceType.ROTOR_STORAGE,
+                geometry=QgsGeometry.fromWkt(project_dict['rotor_wkt']),
+                dxf_path=project_dict.get('dxf_path', ''),
+                height_mode=HeightMode.RELATIVE,
+                height_reference='crane',
+                metadata=project_dict.get('rotor_metadata', {})
+            )
+
+        # Optional road access (only if road_wkt exists)
+        road_config = None
+        if project_dict.get('road_wkt'):
+            road_config = SurfaceConfig(
+                surface_type=SurfaceType.ROAD_ACCESS,
+                geometry=QgsGeometry.fromWkt(project_dict['road_wkt']),
+                dxf_path=project_dict.get('dxf_path', ''),
+                height_mode=HeightMode.SLOPED,
+                slope_longitudinal=project_dict.get('road_slope_percent', 8.0),
+                auto_slope=True,
+                slope_min=1.0,
+                slope_max=15.0,
+                metadata=project_dict.get('road_metadata', {})
+            )
 
         project = MultiSurfaceProject(
             crane_pad=crane_config,
             foundation=foundation_config,
             boom=boom_config,
             rotor_storage=rotor_config,
+            road_access=road_config,
             fok=project_dict['fok'],
             foundation_depth=project_dict['foundation_depth'],
             gravel_thickness=project_dict['gravel_thickness'],
@@ -294,7 +316,10 @@ def _calculate_multi_param_scenario(scenario: tuple, dem_path: str, project_dict
             slope_angle=project_dict['slope_angle'],
             search_range_below_fok=0,
             search_range_above_fok=0,
-            search_step=0.1
+            search_step=0.1,
+            road_slope_percent=project_dict.get('road_slope_percent', 8.0),
+            road_gravel_enabled=project_dict.get('road_gravel_enabled', True),
+            road_gravel_thickness=project_dict.get('road_gravel_thickness', 0.3)
         )
 
         # Load DEM
@@ -2055,6 +2080,7 @@ class MultiSurfaceCalculator:
 
             completed = 0
             failed = 0
+            first_error = None
 
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 worker_func = partial(
@@ -2108,6 +2134,8 @@ class MultiSurfaceCalculator:
 
                     except Exception as e:
                         failed += 1
+                        if first_error is None:
+                            first_error = e
                         self.logger.error(f"Error in coarse scenario {scenario}: {e}")
 
             self.logger.info(
@@ -2163,7 +2191,28 @@ class MultiSurfaceCalculator:
                         first_error = e
 
         if best_coarse_params is None:
-            error_msg = "No valid scenarios found in coarse search"
+            # Provide detailed error message in German
+            error_details = []
+            error_details.append("Keine gültigen Szenarien in der groben Suche gefunden!")
+            error_details.append(f"\nGetestete Parameter:")
+            error_details.append(f"  - Höhenbereich: {height_min:.2f} - {height_max:.2f} m ü.NN")
+            error_details.append(f"  - Anzahl Höhen: {len(heights_coarse)}")
+            error_details.append(f"  - Boom-Neigungen: {len(boom_slopes_coarse)}")
+            error_details.append(f"  - Rotor-Offsets: {len(rotor_offsets_coarse)}")
+            error_details.append(f"  - Gesamt Szenarien: {num_coarse}")
+
+            if first_error is not None:
+                error_details.append(f"\nErster aufgetretener Fehler:")
+                error_details.append(f"  {type(first_error).__name__}: {str(first_error)}")
+
+            error_details.append(f"\nMögliche Ursachen:")
+            error_details.append(f"  - Suchbereich zu klein (erhöhen Sie den Suchbereich um FOK)")
+            error_details.append(f"  - DGM-Daten außerhalb des gültigen Bereichs")
+            error_details.append(f"  - Geometrien überlappen sich nicht korrekt")
+            error_details.append(f"  - Fundament-/Kranstellflächenhöhe passt nicht zum Gelände")
+
+            error_msg = "\n".join(error_details)
+            self.logger.error(error_msg)
             raise ValueError(error_msg)
 
         crane_h_coarse, boom_slope_coarse, rotor_offset_coarse = best_coarse_params
@@ -2510,7 +2559,17 @@ class MultiSurfaceCalculator:
                     feedback.reportError(f"Error at height {height:.2f}m: {e}", fatalError=False)
 
         if best_result is None:
-            raise ValueError("No valid scenarios found during optimization")
+            error_msg = (
+                f"Keine gültigen Szenarien bei der Optimierung gefunden!\n"
+                f"Höhenbereich: {min_height:.2f} - {max_height:.2f} m ü.NN\n"
+                f"Getestete Höhen: {num_scenarios}\n"
+                f"Mögliche Ursachen:\n"
+                f"  - Suchbereich zu klein\n"
+                f"  - DGM-Daten außerhalb des gültigen Bereichs\n"
+                f"  - Geometrien überlappen sich nicht korrekt"
+            )
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
 
         self.logger.info(
             f"Optimization complete: optimal crane height = {best_height:.2f}m, "
@@ -2660,9 +2719,9 @@ class MultiSurfaceCalculator:
 
         if best_result is None:
             error_summary = (
-                f"No valid scenarios found during optimization. "
-                f"All {num_scenarios} scenarios failed.\n"
-                f"Sample errors:\n" + "\n".join(error_messages[:3])
+                f"Keine gültigen Szenarien bei der Optimierung gefunden. "
+                f"Alle {num_scenarios} Szenarien sind fehlgeschlagen.\n"
+                f"Beispiel-Fehler:\n" + "\n".join(error_messages[:3])
             )
             self.logger.error(error_summary)
 

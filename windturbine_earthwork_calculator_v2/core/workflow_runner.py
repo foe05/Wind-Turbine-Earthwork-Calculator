@@ -32,7 +32,8 @@ from qgis.core import (
     QgsVectorLayerSimpleLabeling,
     QgsLayerTreeGroup,
     QgsGeometry,
-    QgsMultiLineString
+    QgsMultiLineString,
+    QgsProcessingFeedback
 )
 import shutil
 from qgis.PyQt.QtGui import QColor, QFont
@@ -53,6 +54,61 @@ from .surface_validators import validate_project
 from .uncertainty import UncertaintyConfig, TerrainType
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
+
+
+class WorkflowProgressFeedback(QgsProcessingFeedback):
+    """
+    Custom feedback class that forwards progress updates to the workflow worker.
+
+    This allows the optimization to report granular progress during the lengthy
+    coarse and fine search phases.
+    """
+
+    def __init__(self, worker, progress_start: int, progress_end: int, base_message: str = ""):
+        """
+        Initialize feedback.
+
+        Args:
+            worker: WorkflowWorker instance to emit signals to
+            progress_start: Starting progress percentage (e.g., 52)
+            progress_end: Ending progress percentage (e.g., 70)
+            base_message: Base status message to show
+        """
+        super().__init__()
+        self.worker = worker
+        self.progress_start = progress_start
+        self.progress_end = progress_end
+        self.progress_range = progress_end - progress_start
+        self.base_message = base_message
+        self._last_progress = progress_start
+
+    def setProgress(self, progress: float):
+        """
+        Map internal progress (0-100) to workflow progress range.
+
+        Args:
+            progress: Progress from calculator (0-100)
+        """
+        # Map 0-100 to our range (e.g., 52-70)
+        mapped_progress = self.progress_start + int((progress / 100.0) * self.progress_range)
+        # Don't emit if we haven't changed by at least 1%
+        if abs(mapped_progress - self._last_progress) >= 1:
+            self._last_progress = mapped_progress
+            # Emit with base message to show progress
+            status = f"{self.base_message} ({mapped_progress - self.progress_start}/{self.progress_range}%)"
+            self.worker.progress_updated.emit(mapped_progress, status)
+
+    def pushInfo(self, info: str):
+        """
+        Forward info messages to worker as status updates.
+
+        Args:
+            info: Info message from calculator
+        """
+        # Only forward important messages (not every single scenario)
+        if any(keyword in info for keyword in ['STAGE', 'Best', 'complete', 'Optimal']):
+            current_progress = getattr(self, '_last_progress', self.progress_start)
+            self.worker.progress_updated.emit(current_progress, info)
 
 
 class WorkflowWorker(QObject):
@@ -469,8 +525,19 @@ class WorkflowWorker(QObject):
                     f"terrain={terrain_type.value}, DEM σ={uncertainty_config.dem_vertical_std*100:.1f}cm"
                 )
 
+                # Create feedback object to report detailed progress (54% -> 70%)
+                feedback = WorkflowProgressFeedback(
+                    self,
+                    progress_start=54,
+                    progress_end=70,
+                    base_message="📊 Unsicherheitsanalyse"
+                )
+
                 # Run optimization with uncertainty analysis
-                uncertainty_result = calculator.find_optimum_with_uncertainty(uncertainty_config)
+                uncertainty_result = calculator.find_optimum_with_uncertainty(
+                    uncertainty_config,
+                    feedback=feedback
+                )
 
                 # Extract optimal height and results from uncertainty analysis
                 optimal_crane_height = uncertainty_result.crane_height.mean
@@ -501,7 +568,16 @@ class WorkflowWorker(QObject):
                 if not use_parallel:
                     self.logger.info("Running optimization sequentially (Windows compatibility mode)")
 
+                # Create feedback object to report detailed progress (52% -> 70%)
+                feedback = WorkflowProgressFeedback(
+                    self,
+                    progress_start=52,
+                    progress_end=70,
+                    base_message="⚙️ Optimiere Kranstellflächen-Höhe"
+                )
+
                 optimal_crane_height, results = calculator.find_optimum(
+                    feedback=feedback,
                     use_parallel=use_parallel
                 )
 

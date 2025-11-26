@@ -395,7 +395,17 @@ class EarthworkCalculator:
                     feedback.reportError(f"Error at height {height:.1f}m: {e}", fatalError=False)
 
         if best_results is None:
-            raise ValueError("No valid scenarios found")
+            error_msg = (
+                f"Keine gültigen Szenarien gefunden!\n"
+                f"Höhenbereich: {min_height:.2f} - {max_height:.2f} m ü.NN\n"
+                f"Getestete Höhen: {num_scenarios}\n"
+                f"Mögliche Ursachen:\n"
+                f"  - Suchbereich zu klein\n"
+                f"  - DGM-Daten außerhalb des gültigen Bereichs\n"
+                f"  - Geometrien nicht korrekt"
+            )
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
 
         self.logger.info(
             f"Optimization complete: optimal height = {best_height:.2f}m, "
