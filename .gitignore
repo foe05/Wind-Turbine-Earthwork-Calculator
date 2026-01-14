@@ -180,3 +180,6 @@ Thumbs.db
 # Project specific
 prototype/backup/
 prototype/old_versions/
+
+# Auto Claude data directory
+.auto-claude/

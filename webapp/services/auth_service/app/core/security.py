@@ -7,6 +7,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from app.core.config import get_settings
+from app.core.token_blacklist import TokenBlacklist
 
 settings = get_settings()
 
@@ -15,6 +16,13 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Magic link serializer
 magic_link_serializer = URLSafeTimedSerializer(settings.MAGIC_LINK_SECRET)
+
+# Token blacklist
+token_blacklist = TokenBlacklist(
+    redis_url=settings.REDIS_URL,
+    jwt_secret=settings.JWT_SECRET,
+    jwt_algorithm=settings.JWT_ALGORITHM
+)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -50,12 +58,19 @@ def verify_token(token: str) -> Optional[dict]:
     """
     Verify JWT token and return payload
 
+    Checks token blacklist before validating JWT signature.
+    Tokens are blacklisted on logout to prevent reuse.
+
     Args:
         token: JWT token string
 
     Returns:
-        Payload dict or None if invalid
+        Payload dict or None if invalid/blacklisted
     """
+    # Check if token is blacklisted (revoked)
+    if token_blacklist.is_blacklisted(token):
+        return None
+
     try:
         payload = jwt.decode(
             token,
