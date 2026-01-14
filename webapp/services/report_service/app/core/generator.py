@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import uuid
+import time
 
 from .chart_generator import (
     generate_volume_chart,
@@ -130,6 +131,7 @@ class ReportGenerator:
             return
 
         logger.info("Generating charts for report")
+        start_time = time.time()
 
         try:
             if template == 'wka':
@@ -140,6 +142,9 @@ class ReportGenerator:
                 self._generate_solar_charts(data)
             elif template == 'terrain':
                 self._generate_terrain_charts(data)
+
+            elapsed = time.time() - start_time
+            logger.info(f"  ✓ All charts generated in {elapsed:.2f}s")
         except Exception as e:
             logger.error(f"Error generating charts: {e}", exc_info=True)
             # Continue without charts rather than failing the entire report
@@ -166,7 +171,7 @@ class ReportGenerator:
                     cut_volume=total_cut,
                     fill_volume=total_fill,
                     title=f"Erdarbeiten - WKA {site_id}",
-                    dpi=150  # Lower DPI for performance
+                    dpi=100  # Optimized DPI for performance
                 )
 
                 if chart_data:
@@ -187,7 +192,7 @@ class ReportGenerator:
 
             comparison_chart = generate_multi_site_comparison_chart(
                 sites_data=sites_data,
-                dpi=150
+                dpi=100
             )
 
             if comparison_chart:
@@ -203,7 +208,7 @@ class ReportGenerator:
                     }
                     for site in sites
                 ],
-                dpi=150
+                dpi=100
             )
 
             if cost_comparison_chart:
@@ -229,7 +234,7 @@ class ReportGenerator:
                 cut_volume=total_cut,
                 fill_volume=total_fill,
                 title="Straßenbau - Erdarbeiten",
-                dpi=150
+                dpi=100
             )
 
             if chart_data:
@@ -255,7 +260,7 @@ class ReportGenerator:
                 cut_volume=total_cut,
                 fill_volume=total_fill,
                 title="Solarpark - Erdarbeiten",
-                dpi=150
+                dpi=100
             )
 
             if chart_data:
@@ -281,7 +286,7 @@ class ReportGenerator:
                 cut_volume=cut_volume,
                 fill_volume=fill_volume,
                 title="Geländeanalyse - Erdarbeiten",
-                dpi=150
+                dpi=100
             )
 
             if chart_data:
@@ -351,6 +356,9 @@ class ReportGenerator:
         Returns:
             Tuple of (file_path, report_id)
         """
+        start_time = time.time()
+        logger.info(f"Starting {output_format.upper()} report generation")
+
         # Generate unique ID
         report_id = str(uuid.uuid4())
 
@@ -365,7 +373,9 @@ class ReportGenerator:
         template_file = template_files.get(template, 'wka_report.html')
 
         # Process branding options before rendering template
+        branding_start = time.time()
         self._process_branding(data)
+        logger.info(f"  ✓ Branding processed in {time.time() - branding_start:.2f}s")
 
         # Generate charts before rendering template
         self._generate_charts(template, data)
@@ -382,6 +392,12 @@ class ReportGenerator:
             # Optionally delete HTML
             # html_path.unlink()
 
+            total_time = time.time() - start_time
+            logger.info(f"✓ PDF report completed in {total_time:.2f}s")
+
             return pdf_path, report_id
         else:
+            total_time = time.time() - start_time
+            logger.info(f"✓ HTML report completed in {total_time:.2f}s")
+
             return html_path, report_id

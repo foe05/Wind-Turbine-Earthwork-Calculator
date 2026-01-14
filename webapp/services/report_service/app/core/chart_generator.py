@@ -17,6 +17,13 @@ try:
     matplotlib.use('Agg')  # Non-interactive backend
     import matplotlib.pyplot as plt
     import numpy as np
+
+    # Performance optimizations for faster chart generation
+    matplotlib.rcParams['path.simplify'] = True
+    matplotlib.rcParams['path.simplify_threshold'] = 1.0
+    matplotlib.rcParams['agg.path.chunksize'] = 10000
+    matplotlib.rcParams['figure.max_open_warning'] = 0
+
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
@@ -28,7 +35,7 @@ def generate_volume_chart(
     output_format: str = "base64",
     title: str = "Erdarbeiten",
     figsize: Tuple[int, int] = (10, 6),
-    dpi: int = 150
+    dpi: int = 100
 ) -> Optional[str]:
     """
     Generate a bar chart comparing cut and fill volumes.
@@ -39,7 +46,7 @@ def generate_volume_chart(
         output_format: Output format - "base64" or "file"
         title: Chart title
         figsize: Figure size (width, height) in inches
-        dpi: Resolution in dots per inch
+        dpi: Resolution in dots per inch (default 100 for performance)
 
     Returns:
         Base64 encoded PNG image string or None if matplotlib unavailable
@@ -47,13 +54,13 @@ def generate_volume_chart(
     if not MATPLOTLIB_AVAILABLE:
         return None
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
     categories = ['Abtrag', 'Auftrag']
     volumes = [cut_volume, fill_volume]
     colors = ['indianred', 'forestgreen']
 
-    bars = ax.bar(categories, volumes, color=colors, alpha=0.8, edgecolor='black', linewidth=1.5)
+    bars = ax.bar(categories, volumes, color=colors, alpha=0.8, edgecolor='black', linewidth=1.2)
 
     # Add value labels on bars
     for bar, volume in zip(bars, volumes):
@@ -64,23 +71,24 @@ def generate_volume_chart(
             f'{volume:,.0f} m³',
             ha='center',
             va='bottom',
-            fontsize=11,
+            fontsize=10,
             fontweight='bold'
         )
 
-    ax.set_ylabel('Volumen (m³)', fontsize=11)
-    ax.set_title(title, fontsize=13, fontweight='bold')
-    ax.grid(True, alpha=0.3, axis='y')
+    ax.set_ylabel('Volumen (m³)', fontsize=10)
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.25, axis='y', linewidth=0.5)
 
     # Format y-axis with thousands separator
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):,}'))
 
-    plt.tight_layout()
+    # Use tight layout with padding instead of bbox_inches='tight' for performance
+    plt.tight_layout(pad=0.5)
 
     # Convert to base64
     if output_format == "base64":
         buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', dpi=dpi, bbox_inches='tight')
+        plt.savefig(buffer, format='png', dpi=dpi)
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
         plt.close(fig)
@@ -96,7 +104,7 @@ def generate_volume_pie_chart(
     output_format: str = "base64",
     title: str = "Volumenverteilung",
     figsize: Tuple[int, int] = (8, 8),
-    dpi: int = 150
+    dpi: int = 100
 ) -> Optional[str]:
     """
     Generate a pie chart showing cut/fill volume distribution.
@@ -107,7 +115,7 @@ def generate_volume_pie_chart(
         output_format: Output format - "base64" or "file"
         title: Chart title
         figsize: Figure size (width, height) in inches
-        dpi: Resolution in dots per inch
+        dpi: Resolution in dots per inch (default 100 for performance)
 
     Returns:
         Base64 encoded PNG image string or None if matplotlib unavailable
@@ -115,7 +123,7 @@ def generate_volume_pie_chart(
     if not MATPLOTLIB_AVAILABLE:
         return None
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
     sizes = [cut_volume, fill_volume]
     labels = ['Abtrag', 'Auftrag']
@@ -129,8 +137,8 @@ def generate_volume_pie_chart(
         autopct=lambda pct: f'{pct:.1f}%\n({pct*sum(sizes)/100:,.0f} m³)',
         startangle=90,
         explode=explode,
-        shadow=True,
-        textprops={'fontsize': 11}
+        shadow=False,  # Disable shadow for performance
+        textprops={'fontsize': 10}
     )
 
     # Make percentage text bold
@@ -138,14 +146,14 @@ def generate_volume_pie_chart(
         autotext.set_color('white')
         autotext.set_fontweight('bold')
 
-    ax.set_title(title, fontsize=13, fontweight='bold')
+    ax.set_title(title, fontsize=12, fontweight='bold')
 
-    plt.tight_layout()
+    plt.tight_layout(pad=0.5)
 
     # Convert to base64
     if output_format == "base64":
         buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', dpi=dpi, bbox_inches='tight')
+        plt.savefig(buffer, format='png', dpi=dpi)
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
         plt.close(fig)
@@ -164,7 +172,7 @@ def generate_volume_breakdown_chart(
     output_format: str = "base64",
     title: str = "Volumenaufschlüsselung",
     figsize: Tuple[int, int] = (12, 6),
-    dpi: int = 150
+    dpi: int = 100
 ) -> Optional[str]:
     """
     Generate a stacked bar chart showing detailed volume breakdown.
@@ -178,7 +186,7 @@ def generate_volume_breakdown_chart(
         output_format: Output format - "base64" or "file"
         title: Chart title
         figsize: Figure size (width, height) in inches
-        dpi: Resolution in dots per inch
+        dpi: Resolution in dots per inch (default 100 for performance)
 
     Returns:
         Base64 encoded PNG image string or None if matplotlib unavailable
@@ -186,7 +194,7 @@ def generate_volume_breakdown_chart(
     if not MATPLOTLIB_AVAILABLE:
         return None
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
     categories = ['Abtrag', 'Auftrag', 'Fundament']
 
@@ -199,9 +207,9 @@ def generate_volume_breakdown_chart(
     width = 0.6
 
     # Create stacked bars
-    p1 = ax.bar(x, platform_volumes, width, label='Plattform', color='steelblue', edgecolor='black')
-    p2 = ax.bar(x, slope_volumes, width, bottom=platform_volumes, label='Böschung', color='orange', edgecolor='black')
-    p3 = ax.bar(x, foundation_volumes, width, label='Fundament', color='gray', edgecolor='black')
+    p1 = ax.bar(x, platform_volumes, width, label='Plattform', color='steelblue', edgecolor='black', linewidth=1.0)
+    p2 = ax.bar(x, slope_volumes, width, bottom=platform_volumes, label='Böschung', color='orange', edgecolor='black', linewidth=1.0)
+    p3 = ax.bar(x, foundation_volumes, width, label='Fundament', color='gray', edgecolor='black', linewidth=1.0)
 
     # Add value labels
     for i, (pv, sv, fv) in enumerate(zip(platform_volumes, slope_volumes, foundation_volumes)):
@@ -213,26 +221,26 @@ def generate_volume_breakdown_chart(
                 f'{total:,.0f} m³',
                 ha='center',
                 va='bottom',
-                fontsize=11,
+                fontsize=10,
                 fontweight='bold'
             )
 
-    ax.set_ylabel('Volumen (m³)', fontsize=11)
-    ax.set_title(title, fontsize=13, fontweight='bold')
+    ax.set_ylabel('Volumen (m³)', fontsize=10)
+    ax.set_title(title, fontsize=12, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels(categories)
-    ax.legend(loc='upper left', fontsize=10)
-    ax.grid(True, alpha=0.3, axis='y')
+    ax.legend(loc='upper left', fontsize=9)
+    ax.grid(True, alpha=0.25, axis='y', linewidth=0.5)
 
     # Format y-axis with thousands separator
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):,}'))
 
-    plt.tight_layout()
+    plt.tight_layout(pad=0.5)
 
     # Convert to base64
     if output_format == "base64":
         buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', dpi=dpi, bbox_inches='tight')
+        plt.savefig(buffer, format='png', dpi=dpi)
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
         plt.close(fig)
@@ -247,7 +255,7 @@ def generate_multi_site_comparison_chart(
     output_format: str = "base64",
     title: str = "Standortvergleich - Erdarbeiten",
     figsize: Tuple[int, int] = (14, 7),
-    dpi: int = 150
+    dpi: int = 100
 ) -> Optional[str]:
     """
     Generate a grouped bar chart comparing volumes across multiple sites.
@@ -257,7 +265,7 @@ def generate_multi_site_comparison_chart(
         output_format: Output format - "base64" or "file"
         title: Chart title
         figsize: Figure size (width, height) in inches
-        dpi: Resolution in dots per inch
+        dpi: Resolution in dots per inch (default 100 for performance)
 
     Returns:
         Base64 encoded PNG image string or None if matplotlib unavailable
@@ -265,7 +273,7 @@ def generate_multi_site_comparison_chart(
     if not MATPLOTLIB_AVAILABLE or not sites_data:
         return None
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
     site_ids = [site['id'] for site in sites_data]
     cut_volumes = [site['total_cut'] for site in sites_data]
@@ -274,10 +282,10 @@ def generate_multi_site_comparison_chart(
     x = np.arange(len(site_ids))
     width = 0.35
 
-    bars1 = ax.bar(x - width/2, cut_volumes, width, label='Abtrag', color='indianred', alpha=0.8, edgecolor='black')
-    bars2 = ax.bar(x + width/2, fill_volumes, width, label='Auftrag', color='forestgreen', alpha=0.8, edgecolor='black')
+    bars1 = ax.bar(x - width/2, cut_volumes, width, label='Abtrag', color='indianred', alpha=0.8, edgecolor='black', linewidth=1.0)
+    bars2 = ax.bar(x + width/2, fill_volumes, width, label='Auftrag', color='forestgreen', alpha=0.8, edgecolor='black', linewidth=1.0)
 
-    # Add value labels on bars
+    # Add value labels on bars (simplified for performance)
     for bars in [bars1, bars2]:
         for bar in bars:
             height = bar.get_height()
@@ -288,26 +296,26 @@ def generate_multi_site_comparison_chart(
                     f'{height:,.0f}',
                     ha='center',
                     va='bottom',
-                    fontsize=9
+                    fontsize=8
                 )
 
-    ax.set_xlabel('Standort ID', fontsize=11)
-    ax.set_ylabel('Volumen (m³)', fontsize=11)
-    ax.set_title(title, fontsize=13, fontweight='bold')
+    ax.set_xlabel('Standort ID', fontsize=10)
+    ax.set_ylabel('Volumen (m³)', fontsize=10)
+    ax.set_title(title, fontsize=12, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels([f'WKA {site_id}' for site_id in site_ids])
-    ax.legend(loc='upper left', fontsize=10)
-    ax.grid(True, alpha=0.3, axis='y')
+    ax.legend(loc='upper left', fontsize=9)
+    ax.grid(True, alpha=0.25, axis='y', linewidth=0.5)
 
     # Format y-axis with thousands separator
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):,}'))
 
-    plt.tight_layout()
+    plt.tight_layout(pad=0.5)
 
     # Convert to base64
     if output_format == "base64":
         buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', dpi=dpi, bbox_inches='tight')
+        plt.savefig(buffer, format='png', dpi=dpi)
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
         plt.close(fig)
@@ -322,7 +330,7 @@ def generate_cost_comparison_chart(
     output_format: str = "base64",
     title: str = "Standortvergleich - Kosten",
     figsize: Tuple[int, int] = (12, 6),
-    dpi: int = 150
+    dpi: int = 100
 ) -> Optional[str]:
     """
     Generate a bar chart comparing costs across multiple sites.
@@ -332,7 +340,7 @@ def generate_cost_comparison_chart(
         output_format: Output format - "base64" or "file"
         title: Chart title
         figsize: Figure size (width, height) in inches
-        dpi: Resolution in dots per inch
+        dpi: Resolution in dots per inch (default 100 for performance)
 
     Returns:
         Base64 encoded PNG image string or None if matplotlib unavailable
@@ -340,7 +348,7 @@ def generate_cost_comparison_chart(
     if not MATPLOTLIB_AVAILABLE or not sites_data:
         return None
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
     site_ids = [site['id'] for site in sites_data]
     costs = [site['cost_total'] for site in sites_data]
@@ -351,7 +359,7 @@ def generate_cost_comparison_chart(
         color='steelblue',
         alpha=0.8,
         edgecolor='black',
-        linewidth=1.5
+        linewidth=1.2
     )
 
     # Add value labels on bars
@@ -363,26 +371,26 @@ def generate_cost_comparison_chart(
             f'€{cost:,.0f}',
             ha='center',
             va='bottom',
-            fontsize=10,
+            fontsize=9,
             fontweight='bold'
         )
 
-    ax.set_xlabel('Standort ID', fontsize=11)
-    ax.set_ylabel('Gesamtkosten (€)', fontsize=11)
-    ax.set_title(title, fontsize=13, fontweight='bold')
+    ax.set_xlabel('Standort ID', fontsize=10)
+    ax.set_ylabel('Gesamtkosten (€)', fontsize=10)
+    ax.set_title(title, fontsize=12, fontweight='bold')
     ax.set_xticks(range(len(site_ids)))
     ax.set_xticklabels([f'WKA {site_id}' for site_id in site_ids])
-    ax.grid(True, alpha=0.3, axis='y')
+    ax.grid(True, alpha=0.25, axis='y', linewidth=0.5)
 
     # Format y-axis with thousands separator
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'€{int(x):,}'))
 
-    plt.tight_layout()
+    plt.tight_layout(pad=0.5)
 
     # Convert to base64
     if output_format == "base64":
         buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', dpi=dpi, bbox_inches='tight')
+        plt.savefig(buffer, format='png', dpi=dpi)
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
         plt.close(fig)
