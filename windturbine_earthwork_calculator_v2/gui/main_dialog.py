@@ -35,6 +35,7 @@ class MainDialog(QDialog):
     2. Optimierung (Optimization) - Height range and slope parameters
     3. Geländeschnitte (Profiles) - Profile generation settings
     4. Ausgabe (Output) - Workspace and export settings
+    5. Standortvergleich (Multi-Site Report) - Comparison report across multiple sites
     """
 
     # Signal emitted when user clicks "Start"
@@ -67,11 +68,13 @@ class MainDialog(QDialog):
         self.tab_optimization = self._create_optimization_tab()
         self.tab_profiles = self._create_profiles_tab()
         self.tab_output = self._create_output_tab()
+        self.tab_multisite = self._create_multisite_report_tab()
 
         self.tabs.addTab(self.tab_input, "📂 Eingabe")
         self.tabs.addTab(self.tab_optimization, "⚙️ Optimierung")
         self.tabs.addTab(self.tab_profiles, "📊 Geländeschnitte")
         self.tabs.addTab(self.tab_output, "💾 Ausgabe")
+        self.tabs.addTab(self.tab_multisite, "📈 Standortvergleich")
 
         layout.addWidget(self.tabs)
 
@@ -643,6 +646,112 @@ class MainDialog(QDialog):
 
         group_options.setLayout(form_options)
         layout.addWidget(group_options)
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        scroll.setWidget(widget)
+        return scroll
+
+    def _create_multisite_report_tab(self):
+        """Create multi-site comparison report tab."""
+        # Create scrollable container
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        # Info section
+        info_group = QGroupBox("Standortvergleich")
+        info_layout = QVBoxLayout()
+
+        info_label = QLabel(
+            "<b>Multi-Standort-Vergleichsbericht</b><br><br>"
+            "<i>Generieren Sie umfassende Vergleichsberichte für mehrere Windenergieanlagen-Standorte.</i><br><br>"
+            "Der Bericht enthält:<br>"
+            "• Gesamte Erdmassen und Kosten für alle Standorte<br>"
+            "• Ranking der Standorte nach Komplexität<br>"
+            "• Detaillierte Aufschlüsselung pro Standort<br>"
+            "• Export als HTML, PDF oder Excel"
+        )
+        info_label.setWordWrap(True)
+        info_layout.addWidget(info_label)
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+
+        # Site Selection Group (placeholder for subtask-4-2)
+        group_sites = QGroupBox("Standortauswahl")
+        form_sites = QFormLayout()
+
+        sites_info = QLabel(
+            "<i>Wählen Sie die Standorte aus, die in den Vergleichsbericht aufgenommen werden sollen.</i>"
+        )
+        sites_info.setWordWrap(True)
+        sites_info.setStyleSheet("color: gray; font-size: 10px;")
+        form_sites.addRow("", sites_info)
+
+        # Placeholder label - will be replaced with checkbox list in subtask-4-2
+        self.label_site_selection = QLabel("<i>Verarbeitete Standorte werden hier angezeigt...</i>")
+        self.label_site_selection.setStyleSheet("color: gray;")
+        form_sites.addRow("Verfügbare Standorte:", self.label_site_selection)
+
+        group_sites.setLayout(form_sites)
+        layout.addWidget(group_sites)
+
+        # Cost Parameters Group
+        group_costs = QGroupBox("Kostenparameter")
+        form_costs = QFormLayout()
+
+        # Cost per m³ for cut
+        self.input_cost_cut = QDoubleSpinBox()
+        self.input_cost_cut.setRange(0, 100)
+        self.input_cost_cut.setValue(8.0)
+        self.input_cost_cut.setDecimals(2)
+        self.input_cost_cut.setSuffix(" €/m³")
+        self.input_cost_cut.setToolTip("Kosten pro Kubikmeter Abtrag")
+        form_costs.addRow("Abtrag-Kosten:", self.input_cost_cut)
+
+        # Cost per m³ for fill
+        self.input_cost_fill = QDoubleSpinBox()
+        self.input_cost_fill.setRange(0, 100)
+        self.input_cost_fill.setValue(12.0)
+        self.input_cost_fill.setDecimals(2)
+        self.input_cost_fill.setSuffix(" €/m³")
+        self.input_cost_fill.setToolTip("Kosten pro Kubikmeter Auftrag")
+        form_costs.addRow("Auftrag-Kosten:", self.input_cost_fill)
+
+        # Cost per m³ for gravel
+        self.input_cost_gravel = QDoubleSpinBox()
+        self.input_cost_gravel.setRange(0, 200)
+        self.input_cost_gravel.setValue(45.0)
+        self.input_cost_gravel.setDecimals(2)
+        self.input_cost_gravel.setSuffix(" €/m³")
+        self.input_cost_gravel.setToolTip("Kosten pro Kubikmeter Schotter")
+        form_costs.addRow("Schotter-Kosten:", self.input_cost_gravel)
+
+        group_costs.setLayout(form_costs)
+        layout.addWidget(group_costs)
+
+        # Export Options Group (placeholder for subtask-4-3)
+        group_export = QGroupBox("Export-Optionen")
+        form_export = QFormLayout()
+
+        export_info = QLabel(
+            "<i>Wählen Sie das gewünschte Export-Format für den Vergleichsbericht.</i>"
+        )
+        export_info.setWordWrap(True)
+        export_info.setStyleSheet("color: gray; font-size: 10px;")
+        form_export.addRow("", export_info)
+
+        # Placeholder for format selection - will be enhanced in subtask-4-3
+        self.label_export_format = QLabel("<i>Export-Format-Auswahl wird hier hinzugefügt...</i>")
+        self.label_export_format.setStyleSheet("color: gray;")
+        form_export.addRow("Format:", self.label_export_format)
+
+        group_export.setLayout(form_export)
+        layout.addWidget(group_export)
 
         layout.addStretch()
         widget.setLayout(layout)
