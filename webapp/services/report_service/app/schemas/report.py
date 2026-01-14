@@ -6,6 +6,15 @@ from typing import List, Optional, Literal, Dict, Any
 from datetime import datetime
 
 
+class HeightScenario(BaseModel):
+    """Data for a single height scenario in comparison table"""
+    height: float = Field(..., description="Platform height in meters")
+    cut_volume: float = Field(..., description="Cut volume in m³")
+    fill_volume: float = Field(..., description="Fill volume in m³")
+    total_cost: float = Field(..., description="Total construction cost")
+    is_optimal: bool = Field(False, description="Whether this is the optimal height scenario")
+
+
 class SiteData(BaseModel):
     """Data for a single WKA site"""
     id: int = Field(..., description="Site ID")
