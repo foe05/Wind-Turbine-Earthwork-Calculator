@@ -10,7 +10,8 @@ from qgis.core import (
     QgsCoordinateReferenceSystem,
     QgsRasterLayer,
     QgsGeometry,
-    QgsProcessingException
+    QgsProcessingException,
+    QgsWkbTypes
 )
 
 from .i18n import get_message, get_language
@@ -182,6 +183,106 @@ def validate_polygon(geometry):
     area = geometry.area()
     if area <= 0:
         raise ValidationError(_format_error('geometry_invalid_area', area=area))
+
+
+def validate_polygon_topology(geometry):
+    """
+    Validate polygon topology including orientation and vertex checks.
+
+    This function performs comprehensive topology validation:
+    - Checks for empty geometry
+    - Validates GEOS topology
+    - Verifies geometry type is polygon
+    - Checks for minimum vertices (4 including closing vertex)
+    - Validates area is positive
+    - Checks polygon orientation (exterior rings must be counter-clockwise)
+    - Ensures single-part geometry
+
+    Args:
+        geometry (QgsGeometry): Polygon geometry to validate
+
+    Raises:
+        ValidationError: If topology is invalid with detailed error message
+    """
+    # Check for empty geometry
+    if geometry.isEmpty():
+        raise ValidationError(_format_error('geometry_empty'))
+
+    # Validate GEOS topology
+    if not geometry.isGeosValid():
+        errors = geometry.validateGeometry()
+        if errors:
+            first_error = errors[0]
+            error_text = first_error.what if hasattr(first_error, 'what') else str(first_error)
+
+            if hasattr(first_error, 'hasWhere') and first_error.hasWhere():
+                error_location = first_error.where()
+                x = error_location.x()
+                y = error_location.y()
+                error_lower = error_text.lower()
+
+                if 'self' in error_lower and 'intersect' in error_lower:
+                    raise ValidationError(_format_error('geometry_self_intersection', x=x, y=y))
+                elif 'spike' in error_lower or 'duplicat' in error_lower:
+                    raise ValidationError(_format_error('geometry_spike_vertex', x=x, y=y))
+                else:
+                    raise ValidationError(_format_error('geometry_invalid', error=f"{error_text} at ({x:.2f}, {y:.2f})"))
+            else:
+                error_msgs = [e.what if hasattr(e, 'what') else str(e) for e in errors]
+                combined_error = "; ".join(error_msgs)
+                raise ValidationError(_format_error('geometry_invalid', error=combined_error))
+        else:
+            raise ValidationError(_format_error('geometry_invalid', error='Unknown validation error'))
+
+    # Check geometry type
+    if geometry.type() != QgsWkbTypes.PolygonGeometry:
+        geom_type_names = {
+            QgsWkbTypes.PointGeometry: 'Point',
+            QgsWkbTypes.LineGeometry: 'Line',
+            QgsWkbTypes.PolygonGeometry: 'Polygon',
+            QgsWkbTypes.UnknownGeometry: 'Unknown',
+            QgsWkbTypes.NullGeometry: 'Null'
+        }
+        geom_type_name = geom_type_names.get(geometry.type(), f'Type {geometry.type()}')
+        raise ValidationError(_format_error('geometry_wrong_type', geom_type=geom_type_name))
+
+    # Check if simple (no self-intersections)
+    if not geometry.isSimple():
+        raise ValidationError(_format_error('geometry_not_simple'))
+
+    # Validate area
+    area = geometry.area()
+    if area <= 0:
+        raise ValidationError(_format_error('geometry_invalid_area', area=area))
+
+    # Check for multipart geometries
+    if geometry.isMultipart():
+        raise ValidationError(_format_error('geometry_multipart'))
+
+    # Get polygon and check minimum vertices
+    polygon = geometry.asPolygon()
+    if not polygon or not polygon[0]:
+        raise ValidationError(_format_error('geometry_empty'))
+
+    exterior_ring = polygon[0]
+    num_vertices = len(exterior_ring)
+
+    if num_vertices < 4:  # Minimum 3 vertices + closing vertex
+        raise ValidationError(_format_error('geometry_too_few_vertices', vertices=num_vertices))
+
+    # Check polygon orientation (exterior ring should be counter-clockwise)
+    # Calculate signed area to determine orientation
+    # Positive area = counter-clockwise (correct for exterior rings)
+    # Negative area = clockwise (incorrect for exterior rings)
+    signed_area = 0.0
+    for i in range(num_vertices - 1):
+        p1 = exterior_ring[i]
+        p2 = exterior_ring[i + 1]
+        signed_area += (p2.x() - p1.x()) * (p2.y() + p1.y())
+
+    # If signed area is positive, the ring is clockwise (incorrect)
+    if signed_area > 0:
+        raise ValidationError(_format_error('geometry_clockwise_orientation'))
 
 
 def validate_raster_layer(raster_layer, required_crs_epsg=25832, max_resolution=5.0):

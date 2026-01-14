@@ -206,6 +206,38 @@ ERROR_MESSAGES = {
             'en': 'Decrease the area or check input data.'
         }
     },
+    'geometry_wrong_type': {
+        'de': 'Falscher Geometrie-Typ: {geom_type}, erwartet Polygon',
+        'en': 'Wrong geometry type: {geom_type}, expected Polygon',
+        'fix': {
+            'de': 'Konvertieren Sie die Geometrie in ein Polygon.',
+            'en': 'Convert the geometry to a polygon.'
+        }
+    },
+    'geometry_too_few_vertices': {
+        'de': 'Zu wenige Stützpunkte: {vertices}, Minimum ist 4 (inklusive Schlusspunkt)',
+        'en': 'Too few vertices: {vertices}, minimum is 4 (including closing vertex)',
+        'fix': {
+            'de': 'Polygon muss mindestens 3 Eckpunkte haben (4 mit Schlusspunkt).',
+            'en': 'Polygon must have at least 3 corners (4 with closing vertex).'
+        }
+    },
+    'geometry_multipart': {
+        'de': 'Mehrteilige Geometrien werden nicht unterstützt',
+        'en': 'Multipart geometries are not supported',
+        'fix': {
+            'de': 'Konvertieren Sie die Multipolygon-Geometrie in einzelne Polygone.',
+            'en': 'Convert multipolygon geometry to single polygons.'
+        }
+    },
+    'geometry_clockwise_orientation': {
+        'de': 'Polygon hat falsche Orientierung (im Uhrzeigersinn)',
+        'en': 'Polygon has wrong orientation (clockwise)',
+        'fix': {
+            'de': 'Externe Ringe müssen gegen den Uhrzeigersinn verlaufen. Kehren Sie die Punkt-Reihenfolge um.',
+            'en': 'Exterior rings must be counter-clockwise. Reverse the vertex order.'
+        }
+    },
 
     # ========================================================================
     # Surface Relationship Errors
