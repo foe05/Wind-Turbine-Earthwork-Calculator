@@ -44,6 +44,8 @@ from ..utils.geometry_utils import (
     validate_polygon_topology
 )
 from ..utils.logging_utils import get_plugin_logger
+from ..utils.i18n import get_message
+from ..utils.error_messages import ERROR_MESSAGES
 
 
 class DXFImporter:
@@ -113,6 +115,180 @@ class DXFImporter:
         except Exception as e:
             self.logger.error(f"Failed to load DXF file: {e}")
             raise
+
+    def get_available_layers(self) -> List[str]:
+        """
+        Get list of available layer names in DXF file.
+
+        Returns:
+            List[str]: List of layer names found in the DXF file
+
+        Raises:
+            Exception: If DXF file is not loaded
+        """
+        if self.doc is None:
+            self.load_dxf()
+
+        layers = []
+        modelspace = self.doc.modelspace()
+
+        # Collect unique layer names from all entities
+        for entity in modelspace:
+            layer_name = entity.dxf.layer
+            if layer_name and layer_name not in layers:
+                layers.append(layer_name)
+
+        # Sort layers alphabetically for consistent output
+        layers.sort()
+
+        self.logger.info(f"Found {len(layers)} layers in DXF: {', '.join(layers)}")
+        return layers
+
+    def validate_layer_exists(self, layer_name: str) -> None:
+        """
+        Validate that a specified layer exists in the DXF file.
+
+        Args:
+            layer_name (str): Layer name to check
+
+        Raises:
+            ValueError: If layer does not exist (with bilingual error message)
+        """
+        available_layers = self.get_available_layers()
+
+        if layer_name not in available_layers:
+            # Build bilingual error message
+            error_msg = get_message(
+                'dxf_layer_not_found',
+                ERROR_MESSAGES,
+                layer_name=layer_name
+            )
+            fix_msg = get_message(
+                'dxf_layer_not_found',
+                {k: v['fix'] for k, v in ERROR_MESSAGES.items()},
+                available_layers=', '.join(available_layers) if available_layers else '(none)'
+            )
+
+            full_msg = f"{error_msg}\n{fix_msg}"
+            self.logger.error(full_msg)
+            raise ValueError(full_msg)
+
+        self.logger.info(f"Layer '{layer_name}' found in DXF file")
+
+    def validate_entity_types(self, layer_name: Optional[str] = None) -> dict:
+        """
+        Validate entity types in DXF file and check for supported types.
+
+        Checks for LWPOLYLINE entities (supported) and warns about other types
+        (LINE, POLYLINE, CIRCLE, etc.) that may need conversion.
+
+        Args:
+            layer_name (str): Layer name to filter (None = all layers)
+
+        Returns:
+            dict: Dictionary with entity type counts:
+                  {
+                      'LWPOLYLINE': count,
+                      'POLYLINE': count,
+                      'LINE': count,
+                      'CIRCLE': count,
+                      'ARC': count,
+                      'warnings': [list of warning messages]
+                  }
+
+        Raises:
+            ValueError: If no supported entities are found (with bilingual error)
+        """
+        if self.doc is None:
+            self.load_dxf()
+
+        modelspace = self.doc.modelspace()
+        entity_counts = {
+            'LWPOLYLINE': 0,
+            'POLYLINE': 0,
+            'LINE': 0,
+            'CIRCLE': 0,
+            'ARC': 0,
+            'warnings': []
+        }
+
+        # Count entities by type
+        for entity in modelspace:
+            # Filter by layer if specified
+            if layer_name and entity.dxf.layer != layer_name:
+                continue
+
+            entity_type = entity.dxftype()
+            if entity_type in entity_counts:
+                entity_counts[entity_type] += 1
+
+        # Log entity counts
+        self.logger.info(
+            f"Entity types found (layer: {layer_name or 'all'}): "
+            f"LWPOLYLINE={entity_counts['LWPOLYLINE']}, "
+            f"POLYLINE={entity_counts['POLYLINE']}, "
+            f"LINE={entity_counts['LINE']}, "
+            f"CIRCLE={entity_counts['CIRCLE']}, "
+            f"ARC={entity_counts['ARC']}"
+        )
+
+        # Check if we have any supported entities
+        total_supported = (
+            entity_counts['LWPOLYLINE'] +
+            entity_counts['POLYLINE'] +
+            entity_counts['LINE']
+        )
+
+        if total_supported == 0:
+            # No supported entities - this is an error
+            error_msg = get_message('dxf_no_entities', ERROR_MESSAGES)
+            fix_msg = get_message(
+                'dxf_no_entities',
+                {k: v['fix'] for k, v in ERROR_MESSAGES.items()}
+            )
+            full_msg = f"{error_msg}\n{fix_msg}"
+            self.logger.error(full_msg)
+            raise ValueError(full_msg)
+
+        # Warn about non-LWPOLYLINE entities
+        if entity_counts['POLYLINE'] > 0:
+            warning_msg = (
+                f"Found {entity_counts['POLYLINE']} POLYLINE entities. "
+                f"These will be converted, but LWPOLYLINE is preferred."
+            )
+            entity_counts['warnings'].append(warning_msg)
+            self.logger.warning(warning_msg)
+
+        if entity_counts['LINE'] > 0:
+            warning_msg = (
+                f"Found {entity_counts['LINE']} LINE entities. "
+                f"These will be connected to form polygons, but LWPOLYLINE is preferred."
+            )
+            entity_counts['warnings'].append(warning_msg)
+            self.logger.warning(warning_msg)
+
+        if entity_counts['CIRCLE'] > 0 or entity_counts['ARC'] > 0:
+            # These are not currently supported
+            unsupported_types = []
+            if entity_counts['CIRCLE'] > 0:
+                unsupported_types.append(f"CIRCLE ({entity_counts['CIRCLE']})")
+            if entity_counts['ARC'] > 0:
+                unsupported_types.append(f"ARC ({entity_counts['ARC']})")
+
+            error_msg = get_message(
+                'dxf_wrong_entity_type',
+                ERROR_MESSAGES,
+                entity_types=', '.join(unsupported_types)
+            )
+            fix_msg = get_message(
+                'dxf_wrong_entity_type',
+                {k: v['fix'] for k, v in ERROR_MESSAGES.items()}
+            )
+            warning_msg = f"{error_msg}\n{fix_msg}"
+            entity_counts['warnings'].append(warning_msg)
+            self.logger.warning(warning_msg)
+
+        return entity_counts
 
     def extract_polylines(self, layer_name: Optional[str] = None) -> List[List[Tuple[float, float]]]:
         """
