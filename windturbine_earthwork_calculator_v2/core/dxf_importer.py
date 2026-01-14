@@ -592,7 +592,7 @@ class DXFImporter:
         """
         Validate entity types in DXF file and check for supported types.
 
-        Checks for LWPOLYLINE entities (supported) and warns about other types
+        Checks for LWPOLYLINE entities (preferred) and warns about other types
         (LINE, POLYLINE, CIRCLE, etc.) that may need conversion.
 
         Args:
@@ -606,7 +606,12 @@ class DXFImporter:
                       'LINE': count,
                       'CIRCLE': count,
                       'ARC': count,
-                      'warnings': [list of warning messages]
+                      'other': {entity_type: count},
+                      'total_entities': count,
+                      'supported_entities': count,
+                      'unsupported_entities': count,
+                      'warnings': [list of warning messages],
+                      'preferred_type': 'LWPOLYLINE'
                   }
 
         Raises:
@@ -616,14 +621,28 @@ class DXFImporter:
             self.load_dxf()
 
         modelspace = self.doc.modelspace()
+
+        # Track all entity types
         entity_counts = {
             'LWPOLYLINE': 0,
             'POLYLINE': 0,
             'LINE': 0,
             'CIRCLE': 0,
             'ARC': 0,
-            'warnings': []
+            'other': {},  # Track all other entity types
+            'total_entities': 0,
+            'supported_entities': 0,
+            'unsupported_entities': 0,
+            'warnings': [],
+            'preferred_type': 'LWPOLYLINE'
         }
+
+        # Supported geometry types for polygon creation
+        supported_types = {'LWPOLYLINE', 'POLYLINE', 'LINE'}
+        # Known unsupported types
+        known_unsupported = {'CIRCLE', 'ARC', 'POINT', 'TEXT', 'MTEXT',
+                            'DIMENSION', 'HATCH', 'SPLINE', 'ELLIPSE',
+                            'INSERT', 'BLOCK', 'ATTRIB', 'ATTDEF'}
 
         # Count entities by type
         for entity in modelspace:
@@ -632,18 +651,40 @@ class DXFImporter:
                 continue
 
             entity_type = entity.dxftype()
-            if entity_type in entity_counts:
+            entity_counts['total_entities'] += 1
+
+            # Count specific known types
+            if entity_type in ['LWPOLYLINE', 'POLYLINE', 'LINE', 'CIRCLE', 'ARC']:
                 entity_counts[entity_type] += 1
+            else:
+                # Track other types in 'other' dict
+                if entity_type not in entity_counts['other']:
+                    entity_counts['other'][entity_type] = 0
+                entity_counts['other'][entity_type] += 1
+
+            # Count supported vs unsupported
+            if entity_type in supported_types:
+                entity_counts['supported_entities'] += 1
+            else:
+                entity_counts['unsupported_entities'] += 1
 
         # Log entity counts
-        self.logger.info(
-            f"Entity types found (layer: {layer_name or 'all'}): "
-            f"LWPOLYLINE={entity_counts['LWPOLYLINE']}, "
-            f"POLYLINE={entity_counts['POLYLINE']}, "
-            f"LINE={entity_counts['LINE']}, "
-            f"CIRCLE={entity_counts['CIRCLE']}, "
-            f"ARC={entity_counts['ARC']}"
-        )
+        log_msg = f"Entity types found (layer: {layer_name or 'all'}): "
+        log_msg += f"LWPOLYLINE={entity_counts['LWPOLYLINE']}, "
+        log_msg += f"POLYLINE={entity_counts['POLYLINE']}, "
+        log_msg += f"LINE={entity_counts['LINE']}, "
+        log_msg += f"CIRCLE={entity_counts['CIRCLE']}, "
+        log_msg += f"ARC={entity_counts['ARC']}"
+
+        if entity_counts['other']:
+            other_summary = ', '.join([f"{k}={v}" for k, v in entity_counts['other'].items()])
+            log_msg += f", Other=[{other_summary}]"
+
+        log_msg += f" | Total={entity_counts['total_entities']}, "
+        log_msg += f"Supported={entity_counts['supported_entities']}, "
+        log_msg += f"Unsupported={entity_counts['unsupported_entities']}"
+
+        self.logger.info(log_msg)
 
         # Check if we have any supported entities
         total_supported = (
@@ -659,15 +700,30 @@ class DXFImporter:
                 'dxf_no_entities',
                 {k: v['fix'] for k, v in ERROR_MESSAGES.items()}
             )
-            full_msg = f"{error_msg}\n{fix_msg}"
+
+            # List what was found instead
+            found_types = []
+            if entity_counts['CIRCLE'] > 0:
+                found_types.append(f"CIRCLE ({entity_counts['CIRCLE']})")
+            if entity_counts['ARC'] > 0:
+                found_types.append(f"ARC ({entity_counts['ARC']})")
+            for etype, count in entity_counts['other'].items():
+                found_types.append(f"{etype} ({count})")
+
+            if found_types:
+                found_msg = f"\nFound entity types: {', '.join(found_types)}"
+            else:
+                found_msg = "\nNo entities found in the specified layer/file."
+
+            full_msg = f"{error_msg}{found_msg}\n{fix_msg}"
             self.logger.error(full_msg)
             raise ValueError(full_msg)
 
-        # Warn about non-LWPOLYLINE entities
+        # Warn about non-LWPOLYLINE entities (which is the preferred type)
         if entity_counts['POLYLINE'] > 0:
             warning_msg = (
                 f"Found {entity_counts['POLYLINE']} POLYLINE entities. "
-                f"These will be converted, but LWPOLYLINE is preferred."
+                f"These will be converted, but LWPOLYLINE is preferred for better compatibility."
             )
             entity_counts['warnings'].append(warning_msg)
             self.logger.warning(warning_msg)
@@ -675,13 +731,14 @@ class DXFImporter:
         if entity_counts['LINE'] > 0:
             warning_msg = (
                 f"Found {entity_counts['LINE']} LINE entities. "
-                f"These will be connected to form polygons, but LWPOLYLINE is preferred."
+                f"These will be connected to form polygons, but LWPOLYLINE is preferred. "
+                f"Consider converting LINE entities to LWPOLYLINE in your CAD software."
             )
             entity_counts['warnings'].append(warning_msg)
             self.logger.warning(warning_msg)
 
+        # Warn about unsupported curved entities
         if entity_counts['CIRCLE'] > 0 or entity_counts['ARC'] > 0:
-            # These are not currently supported
             unsupported_types = []
             if entity_counts['CIRCLE'] > 0:
                 unsupported_types.append(f"CIRCLE ({entity_counts['CIRCLE']})")
@@ -700,6 +757,35 @@ class DXFImporter:
             warning_msg = f"{error_msg}\n{fix_msg}"
             entity_counts['warnings'].append(warning_msg)
             self.logger.warning(warning_msg)
+
+        # Warn about other unsupported entity types
+        unsupported_other = []
+        for etype, count in entity_counts['other'].items():
+            if etype in known_unsupported:
+                unsupported_other.append(f"{etype} ({count})")
+
+        if unsupported_other:
+            warning_msg = (
+                f"Found unsupported entity types that will be ignored: {', '.join(unsupported_other)}. "
+                f"Only LWPOLYLINE, POLYLINE, and LINE entities can be used for polygon import."
+            )
+            entity_counts['warnings'].append(warning_msg)
+            self.logger.warning(warning_msg)
+
+        # Info message about LWPOLYLINE preference
+        if entity_counts['LWPOLYLINE'] == 0 and total_supported > 0:
+            info_msg = (
+                f"Note: No LWPOLYLINE entities found. LWPOLYLINE is the preferred geometry type "
+                f"for crane pad outlines. Current file uses {entity_counts['POLYLINE']} POLYLINE "
+                f"and {entity_counts['LINE']} LINE entities."
+            )
+            entity_counts['warnings'].append(info_msg)
+            self.logger.info(info_msg)
+        elif entity_counts['LWPOLYLINE'] > 0:
+            self.logger.info(
+                f"✓ Good: Found {entity_counts['LWPOLYLINE']} LWPOLYLINE entities "
+                f"(preferred type for crane pad geometry)."
+            )
 
         return entity_counts
 
