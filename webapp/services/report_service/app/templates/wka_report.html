@@ -355,48 +355,260 @@
 
         /* Print Styles */
         @media print {
+            /* General print settings */
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+
             body {
-                font-size: 12px;
+                font-size: 11pt;
+                line-height: 1.4;
+                background: white;
+                color: black;
             }
 
             .container {
                 max-width: 100%;
-                padding: 20px;
+                padding: 15mm;
+                margin: 0;
             }
 
+            /* Page break control - Headers */
             .report-header {
+                page-break-after: avoid;
+                page-break-inside: avoid;
+                margin-bottom: 30px;
+            }
+
+            .report-header h1 {
                 page-break-after: avoid;
             }
 
             .report-header .logo {
-                max-height: 60px;
-            }
-
-            .site-card {
+                max-height: 50px;
                 page-break-inside: avoid;
-                margin-bottom: 20px;
             }
 
+            /* Summary cards - keep together */
             .summary {
+                page-break-inside: avoid;
+                page-break-after: avoid;
+                margin-bottom: 25px;
+            }
+
+            .summary-card {
+                page-break-inside: avoid;
+                box-shadow: none;
+                border: 1px solid var(--border);
+            }
+
+            /* Charts section - prevent breaks inside */
+            .charts-section {
+                page-break-inside: avoid;
+                page-break-before: auto;
+                margin-bottom: 25px;
+                box-shadow: none;
+                border: 1px solid var(--border);
+            }
+
+            .charts-header {
                 page-break-after: avoid;
             }
 
-            .charts-section {
+            .charts-body {
+                page-break-before: avoid;
+            }
+
+            .charts-grid {
                 page-break-inside: avoid;
-                margin-bottom: 20px;
             }
 
             .chart-item {
                 page-break-inside: avoid;
+                page-break-before: auto;
+                page-break-after: auto;
+                margin-bottom: 15px;
             }
 
+            .chart-item h3 {
+                page-break-after: avoid;
+            }
+
+            .chart-item img {
+                page-break-inside: avoid;
+                max-width: 100%;
+                height: auto;
+                box-shadow: none;
+            }
+
+            /* Site cards - keep each site together */
+            .sites-grid {
+                page-break-inside: auto;
+            }
+
+            .site-card {
+                page-break-inside: avoid;
+                page-break-before: auto;
+                margin-bottom: 25px;
+                box-shadow: none;
+                border: 1px solid var(--border);
+            }
+
+            .site-header {
+                page-break-after: avoid;
+                page-break-inside: avoid;
+            }
+
+            .site-header h2 {
+                page-break-after: avoid;
+            }
+
+            .site-body {
+                page-break-before: avoid;
+            }
+
+            /* Tables - prevent breaks inside */
+            table {
+                page-break-inside: avoid;
+                page-break-before: auto;
+                page-break-after: auto;
+                margin-bottom: 15px;
+            }
+
+            table thead {
+                display: table-header-group;
+                page-break-inside: avoid;
+                page-break-after: avoid;
+            }
+
+            table tbody {
+                page-break-inside: avoid;
+            }
+
+            table tr {
+                page-break-inside: avoid;
+                page-break-after: auto;
+            }
+
+            table th {
+                page-break-after: avoid;
+                page-break-inside: avoid;
+                background: var(--bg-light) !important;
+            }
+
+            table td {
+                page-break-inside: avoid;
+            }
+
+            /* Comparison section - keep together */
             .comparison-section {
                 page-break-inside: avoid;
-                margin-bottom: 20px;
+                page-break-before: auto;
+                page-break-after: auto;
+                margin-top: 15px;
+                margin-bottom: 15px;
             }
 
+            .comparison-section h3 {
+                page-break-after: avoid;
+            }
+
+            .comparison-table {
+                page-break-inside: avoid;
+            }
+
+            .comparison-table thead {
+                display: table-header-group;
+            }
+
+            .comparison-table tr {
+                page-break-inside: avoid;
+            }
+
+            /* Material balance - keep together */
+            .material-balance {
+                page-break-inside: avoid;
+                page-break-before: avoid;
+                page-break-after: auto;
+                margin-top: 15px;
+            }
+
+            .material-balance h3 {
+                page-break-after: avoid;
+            }
+
+            .balance-grid {
+                page-break-inside: avoid;
+            }
+
+            .balance-item {
+                page-break-inside: avoid;
+            }
+
+            /* Footer */
             .report-footer {
                 page-break-before: avoid;
+                page-break-inside: avoid;
+                margin-top: 30px;
+            }
+
+            /* Typography - prevent orphans and widows */
+            p, h1, h2, h3, h4, h5, h6 {
+                orphans: 3;
+                widows: 3;
+            }
+
+            h1, h2, h3, h4, h5, h6 {
+                page-break-after: avoid;
+                page-break-inside: avoid;
+            }
+
+            /* Remove unnecessary spacing for print */
+            .summary-card {
+                padding: 15px;
+            }
+
+            .site-body {
+                padding: 20px;
+            }
+
+            .charts-body {
+                padding: 20px;
+            }
+
+            /* Ensure colors print correctly */
+            .cut-value {
+                color: var(--accent) !important;
+            }
+
+            .fill-value {
+                color: var(--success) !important;
+            }
+
+            .cost-value {
+                color: var(--warning) !important;
+            }
+
+            /* Optimal row highlighting */
+            .comparison-table tr.optimal-row {
+                background: #E8F5E9 !important;
+            }
+
+            .optimal-badge {
+                background: var(--success) !important;
+                color: white !important;
+            }
+
+            /* Site header colors */
+            .site-header {
+                background: var(--primary) !important;
+                color: white !important;
+            }
+
+            .charts-header {
+                background: var(--primary) !important;
+                color: white !important;
             }
         }
 
