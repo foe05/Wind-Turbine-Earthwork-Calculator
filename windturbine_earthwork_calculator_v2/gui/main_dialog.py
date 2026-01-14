@@ -771,7 +771,7 @@ class MainDialog(QDialog):
         group_costs.setLayout(form_costs)
         layout.addWidget(group_costs)
 
-        # Export Options Group (placeholder for subtask-4-3)
+        # Export Options Group
         group_export = QGroupBox("Export-Optionen")
         form_export = QFormLayout()
 
@@ -782,10 +782,50 @@ class MainDialog(QDialog):
         export_info.setStyleSheet("color: gray; font-size: 10px;")
         form_export.addRow("", export_info)
 
-        # Placeholder for format selection - will be enhanced in subtask-4-3
-        self.label_export_format = QLabel("<i>Export-Format-Auswahl wird hier hinzugefügt...</i>")
-        self.label_export_format.setStyleSheet("color: gray;")
-        form_export.addRow("Format:", self.label_export_format)
+        # Format selection
+        from qgis.PyQt.QtWidgets import QComboBox
+        self.input_multisite_report_format = QComboBox()
+        self.input_multisite_report_format.addItems([
+            "HTML (Webseite)",
+            "PDF (Dokument)",
+            "Excel (Tabelle)"
+        ])
+        self.input_multisite_report_format.setCurrentIndex(0)  # Default to HTML
+        self.input_multisite_report_format.setToolTip(
+            "Wählen Sie das Format für den Standortvergleichsbericht:\n"
+            "- HTML: Interaktiver Bericht im Browser\n"
+            "- PDF: Druckbares Dokument\n"
+            "- Excel: Tabellenkalkulationsdatei mit mehreren Arbeitsblättern"
+        )
+        form_export.addRow("Format:", self.input_multisite_report_format)
+
+        # Output path
+        self.input_multisite_report_output = QLineEdit()
+        self.input_multisite_report_output.setPlaceholderText("Pfad wird automatisch generiert...")
+        self.input_multisite_report_output.setReadOnly(True)
+        self.input_multisite_report_output.setToolTip("Ausgabepfad für den Bericht (wird automatisch basierend auf Workspace erstellt)")
+
+        btn_browse_multisite_output = QPushButton("Durchsuchen...")
+        btn_browse_multisite_output.clicked.connect(self._browse_multisite_report_output)
+
+        output_layout = QHBoxLayout()
+        output_layout.addWidget(self.input_multisite_report_output)
+        output_layout.addWidget(btn_browse_multisite_output)
+        form_export.addRow("Ausgabepfad:", output_layout)
+
+        # Generate button
+        self.btn_generate_multisite_report = QPushButton("Bericht generieren")
+        self.btn_generate_multisite_report.setToolTip(
+            "Generiert einen Vergleichsbericht für alle ausgewählten Standorte"
+        )
+        self.btn_generate_multisite_report.setEnabled(False)  # Disabled until sites are selected
+        # Signal connection will be added in subtask-4-4
+
+        generate_layout = QHBoxLayout()
+        generate_layout.addStretch()
+        generate_layout.addWidget(self.btn_generate_multisite_report)
+
+        form_export.addRow("", generate_layout)
 
         group_export.setLayout(form_export)
         layout.addWidget(group_export)
@@ -847,6 +887,39 @@ class MainDialog(QDialog):
         )
         if directory:
             self.input_workspace.setText(directory)
+
+    def _browse_multisite_report_output(self):
+        """Browse for multi-site report output file."""
+        # Get current format selection to determine file extension
+        format_index = self.input_multisite_report_format.currentIndex()
+        file_filter = ""
+        default_ext = ""
+
+        if format_index == 0:  # HTML
+            file_filter = "HTML-Dateien (*.html)"
+            default_ext = ".html"
+        elif format_index == 1:  # PDF
+            file_filter = "PDF-Dateien (*.pdf)"
+            default_ext = ".pdf"
+        elif format_index == 2:  # Excel
+            file_filter = "Excel-Dateien (*.xlsx)"
+            default_ext = ".xlsx"
+
+        # Get default directory from workspace if set
+        default_dir = self.input_workspace.text().strip()
+        if default_dir:
+            default_dir = os.path.join(default_dir, f"standortvergleich{default_ext}")
+        else:
+            default_dir = f"standortvergleich{default_ext}"
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Ausgabepfad für Standortvergleichsbericht",
+            default_dir,
+            file_filter
+        )
+        if filename:
+            self.input_multisite_report_output.setText(filename)
 
     def _update_search_range_display(self):
         """Update the search range display label."""
@@ -1121,6 +1194,9 @@ class MainDialog(QDialog):
         self.btn_select_all_sites.setEnabled(has_sites)
         self.btn_deselect_all_sites.setEnabled(has_sites)
 
+        # Enable/disable generate button
+        self.btn_generate_multisite_report.setEnabled(has_sites)
+
     def _select_all_sites(self):
         """Select all site checkboxes."""
         for checkbox in self.site_checkboxes.values():
@@ -1161,3 +1237,41 @@ class MainDialog(QDialog):
         self._update_site_selection_ui()
 
         self.logger.info("Cleared all processed sites from multi-site report list")
+
+    def get_multisite_report_format(self):
+        """
+        Get the selected export format for the multi-site report.
+
+        Returns:
+            str: Format string - 'html', 'pdf', or 'excel'
+        """
+        format_index = self.input_multisite_report_format.currentIndex()
+        format_map = {
+            0: 'html',
+            1: 'pdf',
+            2: 'excel'
+        }
+        return format_map.get(format_index, 'html')
+
+    def get_multisite_report_output_path(self):
+        """
+        Get the output path for the multi-site report.
+
+        Returns:
+            str: Output file path, or None if not set
+        """
+        path = self.input_multisite_report_output.text().strip()
+        return path if path else None
+
+    def get_multisite_cost_parameters(self):
+        """
+        Get the cost parameters for multi-site report.
+
+        Returns:
+            dict: Cost parameters (cut, fill, gravel costs per m³)
+        """
+        return {
+            'cost_cut': self.input_cost_cut.value(),
+            'cost_fill': self.input_cost_fill.value(),
+            'cost_gravel': self.input_cost_gravel.value()
+        }
