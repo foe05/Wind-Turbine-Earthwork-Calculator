@@ -1,0 +1,39 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
+  },
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read(./**)",
+      "Write(./**)",
+      "Edit(./**)",
+      "Glob(./**)",
+      "Grep(./**)",
+      "Read(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/worktrees/tasks/003-multi-site-comparison-report/**)",
+      "Write(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/worktrees/tasks/003-multi-site-comparison-report/**)",
+      "Edit(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/worktrees/tasks/003-multi-site-comparison-report/**)",
+      "Glob(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/worktrees/tasks/003-multi-site-comparison-report/**)",
+      "Grep(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/worktrees/tasks/003-multi-site-comparison-report/**)",
+      "Read(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/worktrees/tasks/003-multi-site-comparison-report/.auto-claude/specs/003-multi-site-comparison-report/**)",
+      "Write(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/worktrees/tasks/003-multi-site-comparison-report/.auto-claude/specs/003-multi-site-comparison-report/**)",
+      "Edit(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/worktrees/tasks/003-multi-site-comparison-report/.auto-claude/specs/003-multi-site-comparison-report/**)",
+      "Read(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/**)",
+      "Write(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/**)",
+      "Edit(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/**)",
+      "Glob(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/**)",
+      "Grep(/home/foe/9_sideprojects/GITHUB/Wind-Turbine-Earthwork-Calculator/Wind-Turbine-Earthwork-Calculator/.auto-claude/**)",
+      "Bash(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "mcp__context7__resolve-library-id(*)",
+      "mcp__context7__get-library-docs(*)",
+      "mcp__graphiti-memory__search_nodes(*)",
+      "mcp__graphiti-memory__search_facts(*)",
+      "mcp__graphiti-memory__add_episode(*)",
+      "mcp__graphiti-memory__get_episodes(*)",
+      "mcp__graphiti-memory__get_entity_edge(*)"
+    ]
+  }
+}
