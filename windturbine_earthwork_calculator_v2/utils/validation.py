@@ -127,25 +127,58 @@ def validate_crs(crs, expected_epsg=25832):
 
 def validate_polygon(geometry):
     """
-    Validate polygon geometry.
+    Validate polygon geometry with detailed error reporting and location.
 
     Args:
         geometry (QgsGeometry): Polygon to validate
 
     Raises:
-        ValidationError: If polygon is invalid
+        ValidationError: If polygon is invalid, with detailed location info when available
     """
     if geometry.isEmpty():
         raise ValidationError(_format_error('geometry_empty'))
 
+    # Check if geometry is simple (no self-intersections)
+    if not geometry.isSimple():
+        raise ValidationError(_format_error('geometry_not_simple'))
+
+    # Detailed geometry validation
     if not geometry.isGeosValid():
         errors = geometry.validateGeometry()
         if errors:
-            # what is a property/string, not a method
-            error_msg = "; ".join([e.what if hasattr(e, 'what') else str(e) for e in errors])
-            raise ValidationError(_format_error('geometry_invalid', error=error_msg))
-        raise ValidationError(_format_error('geometry_invalid', error='Unknown'))
+            # Extract first error with location details
+            first_error = errors[0]
+            error_text = first_error.what if hasattr(first_error, 'what') else str(first_error)
 
+            # Try to extract location if available
+            if hasattr(first_error, 'hasWhere') and first_error.hasWhere():
+                error_location = first_error.where()
+                x = error_location.x()
+                y = error_location.y()
+
+                # Categorize error type based on message
+                error_lower = error_text.lower()
+                if 'self' in error_lower and 'intersect' in error_lower:
+                    raise ValidationError(_format_error('geometry_self_intersection', x=x, y=y))
+                elif 'spike' in error_lower or 'duplicat' in error_lower:
+                    raise ValidationError(_format_error('geometry_spike_vertex', x=x, y=y))
+                else:
+                    # Generic error with location
+                    raise ValidationError(_format_error('geometry_invalid', error=f"{error_text} at ({x:.2f}, {y:.2f})"))
+            else:
+                # No location available, use generic error
+                # Collect all error messages
+                error_msgs = []
+                for e in errors:
+                    msg = e.what if hasattr(e, 'what') else str(e)
+                    error_msgs.append(msg)
+                combined_error = "; ".join(error_msgs)
+                raise ValidationError(_format_error('geometry_invalid', error=combined_error))
+        else:
+            # No specific errors, but geometry is invalid
+            raise ValidationError(_format_error('geometry_invalid', error='Unknown validation error'))
+
+    # Validate area
     area = geometry.area()
     if area <= 0:
         raise ValidationError(_format_error('geometry_invalid_area', area=area))
