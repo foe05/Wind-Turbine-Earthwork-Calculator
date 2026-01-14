@@ -1,7 +1,7 @@
 """
 Input validation utilities for Wind Turbine Earthwork Calculator V2
 
-Provides validation functions for user inputs and data.
+Provides validation functions for user inputs and data with bilingual error messages.
 """
 
 import os
@@ -13,10 +13,30 @@ from qgis.core import (
     QgsProcessingException
 )
 
+from .i18n import get_message, get_language
+from .error_messages import ERROR_MESSAGES
+
 
 class ValidationError(Exception):
     """Custom exception for validation errors."""
     pass
+
+
+def _format_error(error_key, **params):
+    """
+    Format error message with fix suggestion.
+
+    Args:
+        error_key (str): Error message key
+        **params: Parameters for message formatting
+
+    Returns:
+        str: Formatted error message with fix suggestion
+    """
+    error_msg = get_message(error_key, ERROR_MESSAGES, **params)
+    lang = get_language()
+    fix_msg = ERROR_MESSAGES[error_key]['fix'][lang]
+    return f"{error_msg}\n{fix_msg}"
 
 
 def validate_file_exists(file_path, extension=None):
@@ -36,15 +56,14 @@ def validate_file_exists(file_path, extension=None):
     path = Path(file_path)
 
     if not path.exists():
-        raise ValidationError(f"File does not exist: {file_path}")
+        raise ValidationError(_format_error('file_not_found', file_path=file_path))
 
     if not path.is_file():
-        raise ValidationError(f"Path is not a file: {file_path}")
+        raise ValidationError(_format_error('not_a_file', file_path=file_path))
 
     if extension and path.suffix.lower() != extension.lower():
-        raise ValidationError(
-            f"Wrong file extension: {path.suffix}, expected {extension}"
-        )
+        raise ValidationError(_format_error('wrong_file_extension',
+                                           actual=path.suffix, expected=extension))
 
     return path
 
@@ -62,33 +81,27 @@ def validate_height_range(min_height, max_height, step):
         ValidationError: If parameters are invalid
     """
     if max_height <= min_height:
-        raise ValidationError(
-            f"max_height ({max_height}) must be greater than "
-            f"min_height ({min_height})"
-        )
+        raise ValidationError(_format_error('height_max_less_than_min',
+                                           max_height=max_height,
+                                           min_height=min_height))
 
     if step <= 0:
-        raise ValidationError(f"Height step must be positive, got {step}")
+        raise ValidationError(_format_error('height_step_not_positive', step=step))
 
     if step > (max_height - min_height):
-        raise ValidationError(
-            f"Height step ({step}) is larger than height range "
-            f"({max_height - min_height})"
-        )
+        raise ValidationError(_format_error('height_step_too_large',
+                                           step=step,
+                                           range=(max_height - min_height)))
 
     # Check for reasonable number of scenarios
     num_scenarios = int((max_height - min_height) / step) + 1
     if num_scenarios > 10000:
-        raise ValidationError(
-            f"Too many scenarios ({num_scenarios}). "
-            f"Please increase step size or reduce height range."
-        )
+        raise ValidationError(_format_error('height_too_many_scenarios',
+                                           num_scenarios=num_scenarios))
 
     if num_scenarios < 2:
-        raise ValidationError(
-            f"Not enough scenarios ({num_scenarios}). "
-            f"Please decrease step size or increase height range."
-        )
+        raise ValidationError(_format_error('height_too_few_scenarios',
+                                           num_scenarios=num_scenarios))
 
 
 def validate_crs(crs, expected_epsg=25832):
@@ -103,13 +116,13 @@ def validate_crs(crs, expected_epsg=25832):
         ValidationError: If CRS is not the expected one
     """
     if not crs.isValid():
-        raise ValidationError("Invalid coordinate reference system")
+        raise ValidationError(_format_error('crs_invalid'))
 
     actual_epsg = crs.postgisSrid()
     if actual_epsg != expected_epsg:
-        raise ValidationError(
-            f"Wrong CRS: EPSG:{actual_epsg}, expected EPSG:{expected_epsg}"
-        )
+        raise ValidationError(_format_error('crs_mismatch',
+                                           actual=actual_epsg,
+                                           expected=expected_epsg))
 
 
 def validate_polygon(geometry):
@@ -123,19 +136,19 @@ def validate_polygon(geometry):
         ValidationError: If polygon is invalid
     """
     if geometry.isEmpty():
-        raise ValidationError("Polygon is empty")
+        raise ValidationError(_format_error('geometry_empty'))
 
     if not geometry.isGeosValid():
         errors = geometry.validateGeometry()
         if errors:
             # what is a property/string, not a method
             error_msg = "; ".join([e.what if hasattr(e, 'what') else str(e) for e in errors])
-            raise ValidationError(f"Invalid polygon geometry: {error_msg}")
-        raise ValidationError("Invalid polygon geometry")
+            raise ValidationError(_format_error('geometry_invalid', error=error_msg))
+        raise ValidationError(_format_error('geometry_invalid', error='Unknown'))
 
     area = geometry.area()
     if area <= 0:
-        raise ValidationError(f"Polygon has invalid area: {area}")
+        raise ValidationError(_format_error('geometry_invalid_area', area=area))
 
 
 def validate_raster_layer(raster_layer, required_crs_epsg=25832):
@@ -150,7 +163,7 @@ def validate_raster_layer(raster_layer, required_crs_epsg=25832):
         ValidationError: If raster is invalid
     """
     if not raster_layer.isValid():
-        raise ValidationError("Raster layer is not valid")
+        raise ValidationError(_format_error('raster_invalid'))
 
     # Check CRS
     crs = raster_layer.crs()
@@ -158,9 +171,8 @@ def validate_raster_layer(raster_layer, required_crs_epsg=25832):
 
     # Check that it's a single-band raster
     if raster_layer.bandCount() != 1:
-        raise ValidationError(
-            f"Raster must have exactly 1 band, got {raster_layer.bandCount()}"
-        )
+        raise ValidationError(_format_error('raster_wrong_band_count',
+                                           band_count=raster_layer.bandCount()))
 
 
 def validate_raster_covers_geometry(raster_layer, geometry, buffer_m=0):
@@ -185,11 +197,10 @@ def validate_raster_covers_geometry(raster_layer, geometry, buffer_m=0):
     geom_extent.setYMaximum(geom_extent.yMaximum() + buffer_m)
 
     if not raster_extent.contains(geom_extent):
-        raise ValidationError(
-            f"Raster does not cover geometry extent. "
-            f"Raster: {raster_extent.toString()}, "
-            f"Geometry (with {buffer_m}m buffer): {geom_extent.toString()}"
-        )
+        raise ValidationError(_format_error('raster_does_not_cover_geometry',
+                                           raster_extent=raster_extent.toString(),
+                                           geom_extent=geom_extent.toString(),
+                                           buffer_m=buffer_m))
 
 
 def validate_positive_number(value, name, minimum=0, maximum=None):
@@ -206,14 +217,12 @@ def validate_positive_number(value, name, minimum=0, maximum=None):
         ValidationError: If value is invalid
     """
     if value < minimum:
-        raise ValidationError(
-            f"{name} must be >= {minimum}, got {value}"
-        )
+        raise ValidationError(_format_error('value_below_minimum',
+                                           name=name, minimum=minimum, value=value))
 
     if maximum is not None and value > maximum:
-        raise ValidationError(
-            f"{name} must be <= {maximum}, got {value}"
-        )
+        raise ValidationError(_format_error('value_above_maximum',
+                                           name=name, maximum=maximum, value=value))
 
 
 def validate_output_path(output_path, extension=None):
@@ -234,20 +243,17 @@ def validate_output_path(output_path, extension=None):
 
     # Check if parent directory exists
     if not path.parent.exists():
-        raise ValidationError(
-            f"Output directory does not exist: {path.parent}"
-        )
+        raise ValidationError(_format_error('output_dir_not_found',
+                                           dir_path=str(path.parent)))
 
     # Check if parent directory is writable
     if not os.access(path.parent, os.W_OK):
-        raise ValidationError(
-            f"Output directory is not writable: {path.parent}"
-        )
+        raise ValidationError(_format_error('output_dir_not_writable',
+                                           dir_path=str(path.parent)))
 
     # Check extension
     if extension and path.suffix.lower() != extension.lower():
-        raise ValidationError(
-            f"Wrong output file extension: {path.suffix}, expected {extension}"
-        )
+        raise ValidationError(_format_error('wrong_file_extension',
+                                           actual=path.suffix, expected=extension))
 
     return path
