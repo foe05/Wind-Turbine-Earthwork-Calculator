@@ -49,6 +49,10 @@ class MainDialog(QDialog):
         self.setWindowTitle("Erdmassenberechnung Windenergieanlagen - Multi-Flächen")
         self.setMinimumSize(900, 700)
 
+        # Store processed sites for multi-site report
+        self.processed_sites = []  # List of SiteData objects
+        self.site_checkboxes = {}  # Dict mapping site_id -> QCheckBox
+
         self._init_ui()
         self._connect_signals()
         self._setup_validators()
@@ -681,23 +685,56 @@ class MainDialog(QDialog):
         info_group.setLayout(info_layout)
         layout.addWidget(info_group)
 
-        # Site Selection Group (placeholder for subtask-4-2)
+        # Site Selection Group
         group_sites = QGroupBox("Standortauswahl")
-        form_sites = QFormLayout()
+        sites_layout = QVBoxLayout()
 
         sites_info = QLabel(
             "<i>Wählen Sie die Standorte aus, die in den Vergleichsbericht aufgenommen werden sollen.</i>"
         )
         sites_info.setWordWrap(True)
         sites_info.setStyleSheet("color: gray; font-size: 10px;")
-        form_sites.addRow("", sites_info)
+        sites_layout.addWidget(sites_info)
 
-        # Placeholder label - will be replaced with checkbox list in subtask-4-2
-        self.label_site_selection = QLabel("<i>Verarbeitete Standorte werden hier angezeigt...</i>")
-        self.label_site_selection.setStyleSheet("color: gray;")
-        form_sites.addRow("Verfügbare Standorte:", self.label_site_selection)
+        # Create scrollable container for site checkboxes
+        sites_scroll = QScrollArea()
+        sites_scroll.setWidgetResizable(True)
+        sites_scroll.setMaximumHeight(200)
+        sites_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sites_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
-        group_sites.setLayout(form_sites)
+        # Container widget for checkboxes
+        self.sites_checkbox_container = QWidget()
+        self.sites_checkbox_layout = QVBoxLayout()
+        self.sites_checkbox_layout.setContentsMargins(5, 5, 5, 5)
+
+        # Empty state label (shown when no sites processed)
+        self.label_no_sites = QLabel("<i>Noch keine Standorte verarbeitet. Führen Sie zunächst Berechnungen durch.</i>")
+        self.label_no_sites.setWordWrap(True)
+        self.label_no_sites.setStyleSheet("color: gray; font-size: 10px; padding: 10px;")
+        self.sites_checkbox_layout.addWidget(self.label_no_sites)
+
+        self.sites_checkbox_layout.addStretch()
+        self.sites_checkbox_container.setLayout(self.sites_checkbox_layout)
+        sites_scroll.setWidget(self.sites_checkbox_container)
+        sites_layout.addWidget(sites_scroll)
+
+        # Select All / Deselect All buttons
+        sites_buttons_layout = QHBoxLayout()
+        self.btn_select_all_sites = QPushButton("Alle auswählen")
+        self.btn_select_all_sites.clicked.connect(self._select_all_sites)
+        self.btn_select_all_sites.setEnabled(False)
+
+        self.btn_deselect_all_sites = QPushButton("Alle abwählen")
+        self.btn_deselect_all_sites.clicked.connect(self._deselect_all_sites)
+        self.btn_deselect_all_sites.setEnabled(False)
+
+        sites_buttons_layout.addWidget(self.btn_select_all_sites)
+        sites_buttons_layout.addWidget(self.btn_deselect_all_sites)
+        sites_buttons_layout.addStretch()
+        sites_layout.addLayout(sites_buttons_layout)
+
+        group_sites.setLayout(sites_layout)
         layout.addWidget(group_sites)
 
         # Cost Parameters Group
@@ -989,3 +1026,138 @@ class MainDialog(QDialog):
                 "Fehler",
                 message or "Ein Fehler ist aufgetreten."
             )
+
+    # ========== Multi-Site Report Methods ==========
+
+    def add_processed_site(self, site_data):
+        """
+        Add a processed site to the multi-site report selection list.
+
+        Args:
+            site_data: SiteData object containing site information
+
+        Note:
+            If a site with the same site_id already exists, it will be updated.
+        """
+        from ..core.site_data import SiteData
+
+        # Validate input
+        if not isinstance(site_data, SiteData):
+            self.logger.warning(f"Invalid site_data type: {type(site_data)}")
+            return
+
+        # Check if site already exists (update if so)
+        existing_site = None
+        for i, site in enumerate(self.processed_sites):
+            if site.site_id == site_data.site_id:
+                existing_site = i
+                break
+
+        if existing_site is not None:
+            # Update existing site
+            self.processed_sites[existing_site] = site_data
+            # Update checkbox label if it exists
+            if site_data.site_id in self.site_checkboxes:
+                checkbox = self.site_checkboxes[site_data.site_id]
+                checkbox.setText(self._format_site_checkbox_label(site_data))
+        else:
+            # Add new site
+            self.processed_sites.append(site_data)
+            self._add_site_checkbox(site_data)
+
+        # Update UI state
+        self._update_site_selection_ui()
+
+        self.logger.info(f"Added/updated site '{site_data.site_name}' to multi-site report list")
+
+    def _add_site_checkbox(self, site_data):
+        """
+        Add a checkbox for a site to the UI.
+
+        Args:
+            site_data: SiteData object
+        """
+        # Create checkbox
+        checkbox = QCheckBox(self._format_site_checkbox_label(site_data))
+        checkbox.setChecked(True)  # Default to checked
+        checkbox.setToolTip(
+            f"Standort: {site_data.site_name}\n"
+            f"Position: {site_data.location.x():.2f}, {site_data.location.y():.2f}\n"
+            f"Erdmassen: {site_data.total_volume_moved:.1f} m³\n"
+            f"Kosten: {site_data.total_cost:.2f} €"
+        )
+
+        # Store reference
+        self.site_checkboxes[site_data.site_id] = checkbox
+
+        # Add to layout (before the stretch)
+        insert_index = self.sites_checkbox_layout.count() - 1  # Before stretch
+        self.sites_checkbox_layout.insertWidget(insert_index, checkbox)
+
+    def _format_site_checkbox_label(self, site_data):
+        """
+        Format the label for a site checkbox.
+
+        Args:
+            site_data: SiteData object
+
+        Returns:
+            Formatted label string
+        """
+        return (
+            f"{site_data.site_name} - "
+            f"{site_data.total_volume_moved:.1f} m³, "
+            f"{site_data.total_cost:.2f} €"
+        )
+
+    def _update_site_selection_ui(self):
+        """Update the site selection UI based on current state."""
+        has_sites = len(self.processed_sites) > 0
+
+        # Show/hide empty state label
+        self.label_no_sites.setVisible(not has_sites)
+
+        # Enable/disable select/deselect buttons
+        self.btn_select_all_sites.setEnabled(has_sites)
+        self.btn_deselect_all_sites.setEnabled(has_sites)
+
+    def _select_all_sites(self):
+        """Select all site checkboxes."""
+        for checkbox in self.site_checkboxes.values():
+            checkbox.setChecked(True)
+
+    def _deselect_all_sites(self):
+        """Deselect all site checkboxes."""
+        for checkbox in self.site_checkboxes.values():
+            checkbox.setChecked(False)
+
+    def get_selected_sites(self):
+        """
+        Get list of selected sites for multi-site report.
+
+        Returns:
+            List of SiteData objects for checked sites
+        """
+        selected = []
+        for site in self.processed_sites:
+            if site.site_id in self.site_checkboxes:
+                checkbox = self.site_checkboxes[site.site_id]
+                if checkbox.isChecked():
+                    selected.append(site)
+        return selected
+
+    def clear_processed_sites(self):
+        """Clear all processed sites from the multi-site report list."""
+        # Remove all checkboxes from layout
+        for site_id, checkbox in self.site_checkboxes.items():
+            self.sites_checkbox_layout.removeWidget(checkbox)
+            checkbox.deleteLater()
+
+        # Clear data structures
+        self.site_checkboxes.clear()
+        self.processed_sites.clear()
+
+        # Update UI state
+        self._update_site_selection_ui()
+
+        self.logger.info("Cleared all processed sites from multi-site report list")
