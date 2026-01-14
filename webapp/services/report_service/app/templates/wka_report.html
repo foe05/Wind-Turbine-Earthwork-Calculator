@@ -207,6 +207,65 @@
             font-weight: 700;
         }
 
+        /* Charts Section */
+        .charts-section {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            margin-bottom: 40px;
+        }
+
+        .charts-header {
+            background: var(--primary);
+            color: white;
+            padding: 20px;
+        }
+
+        .charts-header h2 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .charts-body {
+            padding: 25px;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+        }
+
+        .chart-item {
+            background: var(--bg-light);
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .chart-item h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 15px;
+        }
+
+        .chart-item img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .chart-item .chart-description {
+            font-size: 13px;
+            color: var(--text-medium);
+            margin-top: 10px;
+            line-height: 1.5;
+        }
+
         /* Footer */
         .report-footer {
             margin-top: 60px;
@@ -236,6 +295,15 @@
             .summary {
                 page-break-after: avoid;
             }
+
+            .charts-section {
+                page-break-inside: avoid;
+                margin-bottom: 20px;
+            }
+
+            .chart-item {
+                page-break-inside: avoid;
+            }
         }
 
         /* Responsive */
@@ -246,6 +314,10 @@
 
             .balance-grid {
                 grid-template-columns: 1fr 1fr;
+            }
+
+            .charts-grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -285,6 +357,28 @@
                 <div class="unit">€</div>
             </div>
         </div>
+
+        <!-- Charts Section -->
+        {% if charts %}
+        <div class="charts-section">
+            <div class="charts-header">
+                <h2>📊 Diagramme & Visualisierungen</h2>
+            </div>
+            <div class="charts-body">
+                <div class="charts-grid">
+                    {% for chart in charts %}
+                    <div class="chart-item">
+                        <h3>{{ chart.title }}</h3>
+                        <img src="data:image/png;base64,{{ chart.data }}" alt="{{ chart.title }}">
+                        {% if chart.description %}
+                        <div class="chart-description">{{ chart.description }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
 
         <!-- Sites Detail -->
         <div class="sites-grid">
