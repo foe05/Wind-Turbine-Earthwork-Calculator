@@ -170,6 +170,7 @@ class MultiSiteReportGenerator:
         html_statistics = self._generate_statistics()
         html_site_ranking = self._generate_site_ranking()
         html_site_comparison = self._generate_site_comparison()
+        html_site_details = self._generate_site_details()
         html_cost_breakdown = self._generate_cost_breakdown()
         html_footer = self._generate_footer()
 
@@ -189,6 +190,7 @@ class MultiSiteReportGenerator:
         {html_statistics}
         {html_site_ranking}
         {html_site_comparison}
+        {html_site_details}
         {html_cost_breakdown}
     </div>
     {html_footer}
@@ -590,6 +592,256 @@ class MultiSiteReportGenerator:
         </table>
     </div>
 """
+
+    def _generate_site_details(self) -> str:
+        """Generate detailed breakdown for each individual site."""
+        site_sections = []
+
+        for i, site in enumerate(self.site_results, 1):
+            site_name = site.get('site_name', site.get('site_id', f'Site {i}'))
+            results = site.get('results', {})
+            coords = site.get('coordinates', (0, 0))
+            config = site.get('config', {})
+
+            # Extract volume data
+            cut = results.get('total_cut', 0)
+            fill = results.get('total_fill', 0)
+            net = results.get('net_volume', 0)
+            gravel = results.get('gravel_fill_external', 0)
+            total_moved = cut + fill
+
+            # Extract terrain data
+            terrain_min = results.get('terrain_min', 0)
+            terrain_max = results.get('terrain_max', 0)
+            terrain_mean = results.get('terrain_mean', 0)
+            terrain_range = terrain_max - terrain_min
+
+            # Extract platform data
+            crane_height = results.get('crane_height', results.get('platform_height', 0))
+            platform_area = results.get('total_platform_area', results.get('platform_area', 0))
+            total_area = results.get('total_area', platform_area)
+            slope_width = results.get('slope_width', 0)
+            slope_angle = config.get('slope_angle', 45.0)
+
+            # Calculate cost components
+            cut_cost = cut * self.cost_config['cut_cost_per_m3']
+            fill_cost = fill * self.cost_config['fill_cost_per_m3']
+            gravel_cost = gravel * self.cost_config['gravel_cost_per_m3']
+
+            # Simplified transport cost
+            avg_transport_distance = 5.0
+            transport_cost = (cut + fill) * self.cost_config['transport_cost_per_m3_km'] * avg_transport_distance
+
+            total_cost = site.get('calculated_cost', cut_cost + fill_cost + gravel_cost + transport_cost)
+
+            # Extract volume breakdown by component if available
+            surfaces = results.get('surfaces', {})
+            crane_pad = surfaces.get('kranstellflaeche', {})
+            foundation = surfaces.get('fundamentflaeche', {})
+            boom = surfaces.get('auslegerflaeche', {})
+            rotor = surfaces.get('rotorflaeche', {})
+
+            is_new_structure = bool(surfaces)
+
+            if is_new_structure:
+                # New multi-surface structure
+                platform_cut = crane_pad.get('cut', 0)
+                platform_fill = crane_pad.get('fill', 0)
+
+                # Calculate slope volumes from other surfaces
+                slope_cut = (foundation.get('cut', 0) + boom.get('cut', 0) +
+                            rotor.get('cut', 0))
+                slope_fill = (foundation.get('fill', 0) + boom.get('fill', 0) +
+                             rotor.get('fill', 0))
+
+                primary_label = "Kranstellfläche"
+                secondary_label = "Weitere Flächen"
+            else:
+                # Old single-surface structure
+                platform_cut = results.get('platform_cut', cut * 0.5)
+                platform_fill = results.get('platform_fill', fill * 0.5)
+                slope_cut = results.get('slope_cut', cut * 0.5)
+                slope_fill = results.get('slope_fill', fill * 0.5)
+
+                primary_label = "Plattform"
+                secondary_label = "Böschung"
+
+            # Generate site detail section
+            site_sections.append(f"""
+    <div class="section">
+        <h2>📍 {site_name}</h2>
+
+        <div class="highlight-box info">
+            <p><strong>Standortkoordinaten:</strong> {coords[0]:.0f}, {coords[1]:.0f}</p>
+            <p><strong>Kranstellflächen-Höhe:</strong> {crane_height:.2f} m ü.NN</p>
+            <p><strong>Geschätzte Gesamtkosten:</strong> {total_cost:,.0f} €</p>
+        </div>
+
+        <h3>Volumenübersicht</h3>
+        <div class="grid">
+            <div class="card">
+                <h3>Abtrag</h3>
+                <div class="value">{cut:,.0f}</div>
+                <div class="unit">m³</div>
+            </div>
+            <div class="card">
+                <h3>Auftrag</h3>
+                <div class="value">{fill:,.0f}</div>
+                <div class="unit">m³</div>
+            </div>
+            <div class="card">
+                <h3>Gesamt Erdbewegungen</h3>
+                <div class="value">{total_moved:,.0f}</div>
+                <div class="unit">m³</div>
+            </div>
+            <div class="card">
+                <h3>Netto-Bilanz</h3>
+                <div class="value">{net:,.0f}</div>
+                <div class="unit">m³</div>
+            </div>
+            <div class="card">
+                <h3>Externes Schottermaterial</h3>
+                <div class="value">{gravel:,.0f}</div>
+                <div class="unit">m³</div>
+            </div>
+        </div>
+
+        <h3>Geländestatistik</h3>
+        <table>
+            <tr>
+                <th>Kennwert</th>
+                <th>Wert</th>
+                <th>Einheit</th>
+            </tr>
+            <tr>
+                <td>Minimale Geländehöhe</td>
+                <td>{terrain_min:.2f}</td>
+                <td>m ü.NN</td>
+            </tr>
+            <tr>
+                <td>Maximale Geländehöhe</td>
+                <td>{terrain_max:.2f}</td>
+                <td>m ü.NN</td>
+            </tr>
+            <tr>
+                <td>Mittlere Geländehöhe</td>
+                <td>{terrain_mean:.2f}</td>
+                <td>m ü.NN</td>
+            </tr>
+            <tr>
+                <td>Höhenunterschied</td>
+                <td>{terrain_range:.2f}</td>
+                <td>m</td>
+            </tr>
+        </table>
+
+        <h3>Volumenaufschlüsselung nach Komponente</h3>
+        <table>
+            <tr>
+                <th>Komponente</th>
+                <th>Abtrag</th>
+                <th>Auftrag</th>
+                <th>Summe</th>
+            </tr>
+            <tr>
+                <td>{primary_label}</td>
+                <td>{platform_cut:,.0f} m³</td>
+                <td>{platform_fill:,.0f} m³</td>
+                <td>{platform_cut + platform_fill:,.0f} m³</td>
+            </tr>
+            <tr>
+                <td>{secondary_label}</td>
+                <td>{slope_cut:,.0f} m³</td>
+                <td>{slope_fill:,.0f} m³</td>
+                <td>{slope_cut + slope_fill:,.0f} m³</td>
+            </tr>
+            <tr style="font-weight: bold; background-color: #f0f0f0;">
+                <td>Gesamt</td>
+                <td>{cut:,.0f} m³</td>
+                <td>{fill:,.0f} m³</td>
+                <td>{total_moved:,.0f} m³</td>
+            </tr>
+        </table>
+
+        <h3>Kostenaufschlüsselung</h3>
+        <table>
+            <tr>
+                <th>Kostenart</th>
+                <th>Volumen/Menge</th>
+                <th>Einheitspreis</th>
+                <th>Gesamtkosten</th>
+            </tr>
+            <tr>
+                <td>Abtrag</td>
+                <td>{cut:,.0f} m³</td>
+                <td>{self.cost_config['cut_cost_per_m3']:.2f} €/m³</td>
+                <td>{cut_cost:,.0f} €</td>
+            </tr>
+            <tr>
+                <td>Auftrag</td>
+                <td>{fill:,.0f} m³</td>
+                <td>{self.cost_config['fill_cost_per_m3']:.2f} €/m³</td>
+                <td>{fill_cost:,.0f} €</td>
+            </tr>
+            <tr>
+                <td>Schottermaterial</td>
+                <td>{gravel:,.0f} m³</td>
+                <td>{self.cost_config['gravel_cost_per_m3']:.2f} €/m³</td>
+                <td>{gravel_cost:,.0f} €</td>
+            </tr>
+            <tr>
+                <td>Transport (Ø {avg_transport_distance:.1f} km)</td>
+                <td>{total_moved:,.0f} m³</td>
+                <td>{self.cost_config['transport_cost_per_m3_km']:.2f} €/m³·km</td>
+                <td>{transport_cost:,.0f} €</td>
+            </tr>
+            <tr style="font-weight: bold; background-color: #f0f0f0;">
+                <td>Gesamtkosten</td>
+                <td colspan="2"></td>
+                <td>{total_cost:,.0f} €</td>
+            </tr>
+        </table>
+
+        <h3>Plattformkonfiguration</h3>
+        <table>
+            <tr>
+                <th>Parameter</th>
+                <th>Wert</th>
+                <th>Einheit</th>
+            </tr>
+            <tr>
+                <td>Plattformfläche</td>
+                <td>{platform_area:,.1f}</td>
+                <td>m²</td>
+            </tr>
+            <tr>
+                <td>Gesamtfläche (inkl. Böschung)</td>
+                <td>{total_area:,.1f}</td>
+                <td>m²</td>
+            </tr>
+            <tr>
+                <td>Böschungswinkel</td>
+                <td>{slope_angle:.1f}</td>
+                <td>°</td>
+            </tr>
+            <tr>
+                <td>Böschungsbreite</td>
+                <td>{slope_width:.2f}</td>
+                <td>m</td>
+            </tr>
+        </table>
+    </div>
+""")
+
+        # Combine all site sections with a header
+        header_section = """
+    <div class="section">
+        <h2>🏗️ Detaillierte Standort-Einzelauswertung</h2>
+        <p>Nachfolgend finden Sie die vollständigen Ergebnisse für jeden einzelnen Standort mit Volumen, Kosten und Konfigurationsdetails.</p>
+    </div>
+"""
+
+        return header_section + ''.join(site_sections)
 
     def _generate_cost_breakdown(self) -> str:
         """Generate cost breakdown section."""
