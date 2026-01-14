@@ -31,6 +31,12 @@ async def generate_report(request: ReportGenerateRequest):
 
     Creates a formatted report from calculation results.
     Supports multiple template types: WKA, Road, Solar, Terrain
+
+    Features:
+    - Embedded charts for volume visualizations
+    - Height scenario comparison tables (WKA reports)
+    - Customizable branding (logo, company name, footer)
+    - Professional PDF output with optimized page breaks
     """
     logger.info("=" * 70)
     logger.info(f"Generating {request.format.upper()} report: {request.project_name}")
@@ -39,6 +45,10 @@ async def generate_report(request: ReportGenerateRequest):
 
     # Prepare template data based on template type
     data = {'project_name': request.project_name}
+
+    # Add branding options if provided
+    if request.branding:
+        data['branding'] = request.branding.dict()
 
     if request.template == 'wka':
         # WKA template
