@@ -137,6 +137,9 @@ class ReportGenerateRequest(BaseModel):
     solar_data: Optional[SolarReportData] = Field(None, description="Solar park report data")
     terrain_data: Optional[TerrainReportData] = Field(None, description="Terrain analysis report data")
 
+    # Branding customization
+    branding: Optional[BrandingOptions] = Field(None, description="Branding customization options")
+
 
 class ReportResponse(BaseModel):
     """Response with generated report"""
