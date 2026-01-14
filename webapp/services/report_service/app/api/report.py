@@ -32,11 +32,63 @@ async def generate_report(request: ReportGenerateRequest):
     Creates a formatted report from calculation results.
     Supports multiple template types: WKA, Road, Solar, Terrain
 
-    Features:
-    - Embedded charts for volume visualizations
-    - Height scenario comparison tables (WKA reports)
-    - Customizable branding (logo, company name, footer)
-    - Professional PDF output with optimized page breaks
+    ## Features
+
+    ### Embedded Charts
+    - Automatic generation of volume visualization charts
+    - Bar charts for cut/fill comparisons
+    - Multi-site comparison charts
+    - Cost comparison visualizations
+
+    ### Height Scenario Comparison Tables (WKA reports)
+    - Compare multiple platform height scenarios side-by-side
+    - Displays cut volume, fill volume, and costs for each scenario
+    - Highlights optimal height scenario with visual indicator
+    - Add scenarios via `sites[].scenarios` parameter (list of HeightScenario objects)
+
+    ### Customizable Branding
+    - **Company Logo**: Upload via `branding.logo_base64` (base64-encoded image, max 2MB)
+    - **Company Name**: Display via `branding.company_name` in report header
+    - **Custom Footer**: Add custom text via `branding.custom_footer_text`
+    - Supports PNG, JPEG, GIF, and WEBP formats for logos
+
+    ### Professional PDF Output
+    - Optimized page breaks (no splits in charts/tables)
+    - Print-friendly styling
+    - Generation time <10 seconds for standard reports
+
+    ## Template-Specific Data
+
+    - **WKA**: Requires `sites` parameter (list of SiteData objects)
+    - **Road**: Requires `road_data` parameter (RoadReportData object)
+    - **Solar**: Requires `solar_data` parameter (SolarReportData object)
+    - **Terrain**: Requires `terrain_data` parameter (TerrainReportData object)
+
+    ## Example Request
+
+    ```json
+    {
+      "project_name": "Wind Park North",
+      "format": "pdf",
+      "template": "wka",
+      "sites": [
+        {
+          "id": 1,
+          "total_cut": 1500.0,
+          "total_fill": 1200.0,
+          "scenarios": [
+            {"height": 0.0, "cut_volume": 1800, "fill_volume": 1000, "total_cost": 45000, "is_optimal": false},
+            {"height": 0.5, "cut_volume": 1500, "fill_volume": 1200, "total_cost": 42000, "is_optimal": true}
+          ]
+        }
+      ],
+      "branding": {
+        "logo_base64": "iVBORw0KGgoAAAANSUhEUg...",
+        "company_name": "Acme Engineering GmbH",
+        "custom_footer_text": "Confidential - Internal Use Only"
+      }
+    }
+    ```
     """
     logger.info("=" * 70)
     logger.info(f"Generating {request.format.upper()} report: {request.project_name}")
