@@ -14,6 +14,13 @@ from .chart_generator import (
     generate_cost_comparison_chart,
     is_matplotlib_available
 )
+from .branding import (
+    process_logo,
+    process_footer_text,
+    LogoValidationError,
+    FooterValidationError
+)
+import base64
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +288,50 @@ class ReportGenerator:
                 data['volume_chart'] = chart_data
                 logger.info("  ✓ Terrain analysis volume chart generated")
 
+    def _process_branding(self, data: dict) -> None:
+        """
+        Process and validate branding options for the report.
+
+        Args:
+            data: Report data dictionary (modified in place)
+        """
+        branding = data.get('branding')
+        if not branding:
+            return
+
+        logger.info("Processing branding options")
+
+        try:
+            # Process logo if provided
+            logo_base64 = branding.get('logo_base64')
+            if logo_base64:
+                try:
+                    # Validate the logo by decoding from base64 and re-encoding
+                    logo_bytes = base64.b64decode(logo_base64)
+                    # Validate and re-encode (process_logo validates if needed)
+                    validated_logo_base64 = process_logo(logo_bytes, validate=True)
+                    branding['logo_base64'] = validated_logo_base64
+                    logger.info("  ✓ Logo validated and processed")
+                except (base64.binascii.Error, LogoValidationError) as e:
+                    logger.warning(f"  ⚠ Logo validation failed: {e}. Removing logo from report.")
+                    branding['logo_base64'] = None
+
+            # Process footer text if provided
+            custom_footer = branding.get('custom_footer_text')
+            if custom_footer:
+                try:
+                    sanitized_footer = process_footer_text(custom_footer, validate=True)
+                    branding['custom_footer_text'] = sanitized_footer
+                    logger.info("  ✓ Footer text validated and sanitized")
+                except FooterValidationError as e:
+                    logger.warning(f"  ⚠ Footer validation failed: {e}. Using default footer.")
+                    branding['custom_footer_text'] = None
+
+        except Exception as e:
+            logger.error(f"Error processing branding options: {e}", exc_info=True)
+            # Continue without branding rather than failing the entire report
+            data['branding'] = None
+
     def generate_report(
         self,
         template: str,
@@ -312,6 +363,9 @@ class ReportGenerator:
         }
 
         template_file = template_files.get(template, 'wka_report.html')
+
+        # Process branding options before rendering template
+        self._process_branding(data)
 
         # Generate charts before rendering template
         self._generate_charts(template, data)
