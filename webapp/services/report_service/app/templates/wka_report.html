@@ -63,6 +63,20 @@
             margin-top: 10px;
         }
 
+        .report-header .logo {
+            max-width: 200px;
+            max-height: 80px;
+            margin-bottom: 20px;
+            object-fit: contain;
+        }
+
+        .report-header .company-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 15px;
+        }
+
         /* Summary Cards */
         .summary {
             display: grid;
@@ -350,6 +364,14 @@
                 padding: 20px;
             }
 
+            .report-header {
+                page-break-after: avoid;
+            }
+
+            .report-header .logo {
+                max-height: 60px;
+            }
+
             .site-card {
                 page-break-inside: avoid;
                 margin-bottom: 20px;
@@ -371,6 +393,10 @@
             .comparison-section {
                 page-break-inside: avoid;
                 margin-bottom: 20px;
+            }
+
+            .report-footer {
+                page-break-before: avoid;
             }
         }
 
@@ -394,6 +420,12 @@
     <div class="container">
         <!-- Header -->
         <div class="report-header">
+            {% if branding and branding.logo_base64 %}
+            <img src="data:image/png;base64,{{ branding.logo_base64 }}" alt="Company Logo" class="logo">
+            {% endif %}
+            {% if branding and branding.company_name %}
+            <div class="company-name">{{ branding.company_name }}</div>
+            {% endif %}
             <h1>🌬️ WKA Erdarbeits-Bericht</h1>
             <div class="subtitle">{{ project_name }}</div>
             <div class="date">Erstellt am: {{ report_date }} um {{ report_time }}</div>
@@ -579,7 +611,11 @@
 
         <!-- Footer -->
         <div class="report-footer">
+            {% if branding and branding.custom_footer_text %}
+            <p>{{ branding.custom_footer_text }}</p>
+            {% else %}
             <p><strong>Geo-Engineering Platform</strong> v1.0 | hoehendaten.de</p>
+            {% endif %}
             <p>Bericht erstellt am {{ report_date }} um {{ report_time }}</p>
         </div>
     </div>
