@@ -118,6 +118,13 @@ class TerrainReportData(BaseModel):
     contour_data: Optional[Dict[str, Any]] = None
 
 
+class BrandingOptions(BaseModel):
+    """Branding customization options for reports"""
+    logo_base64: Optional[str] = Field(None, description="Company logo as base64-encoded image")
+    company_name: Optional[str] = Field(None, description="Company name to display in header")
+    custom_footer_text: Optional[str] = Field(None, description="Custom footer text for report")
+
+
 class ReportGenerateRequest(BaseModel):
     """Request to generate a report"""
     project_name: str = Field(..., min_length=1, description="Project name")
