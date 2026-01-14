@@ -266,6 +266,69 @@
             line-height: 1.5;
         }
 
+        /* Comparison Table */
+        .comparison-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .comparison-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: var(--text-dark);
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .comparison-table th {
+            background: var(--bg-light);
+            padding: 12px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--text-dark);
+            border-bottom: 2px solid var(--border);
+        }
+
+        .comparison-table td {
+            padding: 12px;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .comparison-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .comparison-table tr.optimal-row {
+            background: #E8F5E9;
+            font-weight: 600;
+        }
+
+        .comparison-table tr.optimal-row td {
+            color: var(--success);
+        }
+
+        .comparison-table .optimal-badge {
+            display: inline-block;
+            background: var(--success);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 5px;
+        }
+
         /* Footer */
         .report-footer {
             margin-top: 60px;
@@ -303,6 +366,11 @@
 
             .chart-item {
                 page-break-inside: avoid;
+            }
+
+            .comparison-section {
+                page-break-inside: avoid;
+                margin-bottom: 20px;
             }
         }
 
@@ -437,6 +505,40 @@
                             </tr>
                         </tbody>
                     </table>
+
+                    <!-- Height Scenarios Comparison Table -->
+                    {% if site.scenarios %}
+                    <div class="comparison-section">
+                        <h3>Höhenszenarien Vergleich</h3>
+                        <table class="comparison-table">
+                            <thead>
+                                <tr>
+                                    <th>Plattform-Höhe</th>
+                                    <th>Aushub (m³)</th>
+                                    <th>Auftrag (m³)</th>
+                                    <th>Gesamt bewegt (m³)</th>
+                                    <th>Kosten (€)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for scenario in site.scenarios %}
+                                <tr{% if scenario.is_optimal %} class="optimal-row"{% endif %}>
+                                    <td>
+                                        {{ "{:.2f}".format(scenario.height) }} m
+                                        {% if scenario.is_optimal %}
+                                        <span class="optimal-badge">Optimal</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ "{:,.1f}".format(scenario.cut_volume) }}</td>
+                                    <td>{{ "{:,.1f}".format(scenario.fill_volume) }}</td>
+                                    <td>{{ "{:,.1f}".format(scenario.cut_volume + scenario.fill_volume) }}</td>
+                                    <td>{{ "{:,.2f}".format(scenario.total_cost) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
 
                     <!-- Material Balance -->
                     {% if site.material_reuse %}
