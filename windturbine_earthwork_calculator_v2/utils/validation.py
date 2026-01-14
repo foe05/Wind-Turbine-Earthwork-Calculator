@@ -151,13 +151,14 @@ def validate_polygon(geometry):
         raise ValidationError(_format_error('geometry_invalid_area', area=area))
 
 
-def validate_raster_layer(raster_layer, required_crs_epsg=25832):
+def validate_raster_layer(raster_layer, required_crs_epsg=25832, max_resolution=5.0):
     """
-    Validate raster layer.
+    Validate raster layer with detailed extent and resolution checks.
 
     Args:
         raster_layer (QgsRasterLayer): Raster layer to validate
         required_crs_epsg (int): Required EPSG code
+        max_resolution (float): Maximum acceptable resolution in meters (default: 5.0m)
 
     Raises:
         ValidationError: If raster is invalid
@@ -173,6 +174,31 @@ def validate_raster_layer(raster_layer, required_crs_epsg=25832):
     if raster_layer.bandCount() != 1:
         raise ValidationError(_format_error('raster_wrong_band_count',
                                            band_count=raster_layer.bandCount()))
+
+    # Validate extent
+    extent = raster_layer.extent()
+    if extent.isEmpty():
+        raise ValidationError(_format_error('raster_invalid'))
+
+    # Check extent dimensions are reasonable (not zero or negative)
+    width = extent.width()
+    height = extent.height()
+    if width <= 0 or height <= 0:
+        raise ValidationError(_format_error('raster_invalid'))
+
+    # Validate resolution
+    # Resolution is in CRS units (meters for projected CRS)
+    pixel_size_x = raster_layer.rasterUnitsPerPixelX()
+    pixel_size_y = raster_layer.rasterUnitsPerPixelY()
+
+    # Use the larger of the two resolutions for the check
+    resolution = max(abs(pixel_size_x), abs(pixel_size_y))
+
+    # Warn if resolution is too coarse (e.g., > 5m for detailed earthwork calculations)
+    if resolution > max_resolution:
+        raise ValidationError(_format_error('raster_resolution_too_coarse',
+                                           resolution=resolution,
+                                           recommended=max_resolution))
 
 
 def validate_raster_covers_geometry(raster_layer, geometry, buffer_m=0):
