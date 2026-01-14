@@ -3,7 +3,7 @@
   "spec": "003-multi-site-comparison-report",
   "state": "building",
   "subtasks": {
-    "completed": 3,
+    "completed": 5,
     "total": 15,
     "in_progress": 1,
     "failed": 0
@@ -18,8 +18,8 @@
     "max": 1
   },
   "session": {
-    "number": 5,
+    "number": 7,
     "started_at": "2026-01-14T16:10:19.219542"
   },
-  "last_update": "2026-01-14T16:24:20.496869"
+  "last_update": "2026-01-14T16:29:32.611857"
 }
