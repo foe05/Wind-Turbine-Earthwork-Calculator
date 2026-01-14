@@ -46,6 +46,9 @@ class SiteData(BaseModel):
     material_deficit: Optional[float] = 0.0
     material_reused: Optional[float] = 0.0
 
+    # Comparison scenarios (optional)
+    scenarios: Optional[List[HeightScenario]] = Field(None, description="List of height scenarios for comparison table")
+
 
 class RoadReportData(BaseModel):
     """Data for Road construction report"""
