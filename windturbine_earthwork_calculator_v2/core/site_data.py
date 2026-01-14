@@ -92,6 +92,44 @@ class SiteData:
         """Foundation top edge elevation (m ü.NN)."""
         return self.calculation_result.fok
 
+    @property
+    def gravel_volume(self) -> float:
+        """External gravel volume for this site (m³)."""
+        return self.calculation_result.gravel_fill_external
+
+    @property
+    def terrain_min(self) -> float:
+        """Minimum terrain elevation across all surfaces (m ü.NN)."""
+        surface_results = self.calculation_result.surface_results.values()
+        return min((r.terrain_min for r in surface_results), default=0.0)
+
+    @property
+    def terrain_max(self) -> float:
+        """Maximum terrain elevation across all surfaces (m ü.NN)."""
+        surface_results = self.calculation_result.surface_results.values()
+        return max((r.terrain_max for r in surface_results), default=0.0)
+
+    @property
+    def terrain_mean(self) -> float:
+        """Area-weighted mean terrain elevation across all surfaces (m ü.NN)."""
+        surface_results = list(self.calculation_result.surface_results.values())
+        if not surface_results:
+            return 0.0
+        total_area = sum(r.total_area for r in surface_results)
+        if total_area == 0:
+            return 0.0
+        return sum(r.terrain_mean * r.total_area for r in surface_results) / total_area
+
+    @property
+    def platform_area(self) -> float:
+        """Total platform area for this site (m²)."""
+        return self.calculation_result.total_platform_area
+
+    @property
+    def total_area(self) -> float:
+        """Total area (platform + slopes) for this site (m²)."""
+        return self.calculation_result.total_platform_area + self.calculation_result.total_slope_area
+
     def get_complexity_score(self) -> float:
         """
         Calculate a complexity score for this site.
