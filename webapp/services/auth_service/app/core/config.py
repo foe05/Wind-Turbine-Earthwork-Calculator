@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379"
+
     # JWT
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
