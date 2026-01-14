@@ -13,6 +13,9 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from weasyprint import HTML, CSS
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 from ..utils.logging_utils import get_plugin_logger
 
@@ -236,6 +239,489 @@ class MultiSiteReportGenerator:
         )
 
         self.logger.info(f"  ✓ PDF report generated: {output_path}")
+
+    def generate_excel(self, output_path: str, project_name: Optional[str] = None):
+        """
+        Generate Excel report with formatted tables.
+
+        Args:
+            output_path (str): Path to save Excel file
+            project_name (str): Project name for the report header (optional)
+        """
+        self.logger.info(f"Generating Excel report: {output_path}")
+
+        project_name = project_name or "Windpark-Projekt"
+
+        # Create workbook
+        wb = Workbook()
+
+        # Remove default sheet
+        if 'Sheet' in wb.sheetnames:
+            wb.remove(wb['Sheet'])
+
+        # Create sheets
+        self._create_summary_sheet(wb, project_name)
+        self._create_ranking_sheet(wb)
+        self._create_individual_sites_sheet(wb)
+
+        # Save workbook
+        output_path_obj = Path(output_path)
+        output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        wb.save(str(output_path_obj))
+
+        self.logger.info(f"  ✓ Excel report generated: {output_path}")
+
+    def _create_summary_sheet(self, wb: Workbook, project_name: str):
+        """Create summary sheet with project-wide statistics."""
+        ws = wb.create_sheet("Summary")
+
+        # Define styles
+        header_font = Font(name='Arial', size=14, bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='667EEA', end_color='667EEA', fill_type='solid')
+        title_font = Font(name='Arial', size=16, bold=True)
+        label_font = Font(name='Arial', size=11, bold=True)
+        value_font = Font(name='Arial', size=11)
+        center_alignment = Alignment(horizontal='center', vertical='center')
+        right_alignment = Alignment(horizontal='right', vertical='center')
+
+        # Title
+        ws['A1'] = 'Multi-Site Erdmassenvergleich'
+        ws['A1'].font = title_font
+        ws['A2'] = project_name
+        ws['A2'].font = Font(name='Arial', size=12, bold=True)
+        ws['A3'] = f"Erstellt am: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+        ws['A3'].font = Font(name='Arial', size=10, color='666666')
+
+        # Project scope
+        row = 5
+        ws[f'A{row}'] = 'Projektumfang'
+        ws[f'A{row}'].font = Font(name='Arial', size=12, bold=True, color='667EEA')
+        row += 1
+
+        num_sites = len(self.site_results)
+        ws[f'A{row}'] = 'Anzahl Standorte:'
+        ws[f'A{row}'].font = label_font
+        ws[f'B{row}'] = num_sites
+        ws[f'B{row}'].font = value_font
+        row += 1
+
+        ws[f'A{row}'] = 'Gesamtkosten (geschätzt):'
+        ws[f'A{row}'].font = label_font
+        ws[f'B{row}'] = self.total_cost
+        ws[f'B{row}'].number_format = '#,##0 €'
+        ws[f'B{row}'].font = value_font
+        row += 1
+
+        ws[f'A{row}'] = 'Durchschnittliche Kosten pro Standort:'
+        ws[f'A{row}'].font = label_font
+        ws[f'B{row}'] = self.total_cost / max(num_sites, 1)
+        ws[f'B{row}'].number_format = '#,##0 €'
+        ws[f'B{row}'].font = value_font
+        row += 2
+
+        # Volume summary table
+        ws[f'A{row}'] = 'Volumenübersicht'
+        ws[f'A{row}'].font = Font(name='Arial', size=12, bold=True, color='667EEA')
+        row += 1
+
+        # Table headers
+        headers = ['Kennwert', 'Wert', 'Einheit']
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=row, column=col_idx)
+            cell.value = header
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_alignment
+        row += 1
+
+        # Table data
+        volume_data = [
+            ('Gesamt Abtrag', self.total_cut, 'm³'),
+            ('Gesamt Auftrag', self.total_fill, 'm³'),
+            ('Gesamt Erdbewegungen', self.total_volume_moved, 'm³'),
+            ('Netto-Bilanz', self.total_net_volume, 'm³'),
+            ('Externes Schottermaterial', self.total_gravel, 'm³'),
+        ]
+
+        for label, value, unit in volume_data:
+            ws[f'A{row}'] = label
+            ws[f'A{row}'].font = value_font
+            ws[f'B{row}'] = value
+            ws[f'B{row}'].number_format = '#,##0'
+            ws[f'B{row}'].font = value_font
+            ws[f'B{row}'].alignment = right_alignment
+            ws[f'C{row}'] = unit
+            ws[f'C{row}'].font = value_font
+            row += 1
+
+        row += 1
+
+        # Statistics table
+        ws[f'A{row}'] = 'Statistische Auswertung'
+        ws[f'A{row}'].font = Font(name='Arial', size=12, bold=True, color='667EEA')
+        row += 1
+
+        # Abtrag statistics
+        ws[f'A{row}'] = 'Abtrag-Statistik'
+        ws[f'A{row}'].font = Font(name='Arial', size=11, bold=True)
+        row += 1
+
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=row, column=col_idx)
+            cell.value = header
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_alignment
+        row += 1
+
+        cut_stats = [
+            ('Durchschnitt', self.avg_cut, 'm³'),
+            ('Minimum', self.min_cut, 'm³'),
+            ('Maximum', self.max_cut, 'm³'),
+        ]
+
+        for label, value, unit in cut_stats:
+            ws[f'A{row}'] = label
+            ws[f'A{row}'].font = value_font
+            ws[f'B{row}'] = value
+            ws[f'B{row}'].number_format = '#,##0'
+            ws[f'B{row}'].font = value_font
+            ws[f'B{row}'].alignment = right_alignment
+            ws[f'C{row}'] = unit
+            ws[f'C{row}'].font = value_font
+            row += 1
+
+        row += 1
+
+        # Fill statistics
+        ws[f'A{row}'] = 'Auftrag-Statistik'
+        ws[f'A{row}'].font = Font(name='Arial', size=11, bold=True)
+        row += 1
+
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=row, column=col_idx)
+            cell.value = header
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_alignment
+        row += 1
+
+        fill_stats = [
+            ('Durchschnitt', self.avg_fill, 'm³'),
+            ('Minimum', self.min_fill, 'm³'),
+            ('Maximum', self.max_fill, 'm³'),
+        ]
+
+        for label, value, unit in fill_stats:
+            ws[f'A{row}'] = label
+            ws[f'A{row}'].font = value_font
+            ws[f'B{row}'] = value
+            ws[f'B{row}'].number_format = '#,##0'
+            ws[f'B{row}'].font = value_font
+            ws[f'B{row}'].alignment = right_alignment
+            ws[f'C{row}'] = unit
+            ws[f'C{row}'].font = value_font
+            row += 1
+
+        # Adjust column widths
+        ws.column_dimensions['A'].width = 35
+        ws.column_dimensions['B'].width = 20
+        ws.column_dimensions['C'].width = 15
+
+    def _create_ranking_sheet(self, wb: Workbook):
+        """Create ranking sheet with sites sorted by complexity."""
+        ws = wb.create_sheet("Sites Ranking")
+
+        # Define styles
+        header_font = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='667EEA', end_color='667EEA', fill_type='solid')
+        title_font = Font(name='Arial', size=14, bold=True)
+        value_font = Font(name='Arial', size=10)
+        center_alignment = Alignment(horizontal='center', vertical='center')
+        right_alignment = Alignment(horizontal='right', vertical='center')
+
+        # Title
+        ws['A1'] = 'Standort-Rangliste nach Komplexität'
+        ws['A1'].font = title_font
+        ws['A2'] = 'Standorte sortiert nach Gesamterdbewegungen (höchste zuerst)'
+        ws['A2'].font = Font(name='Arial', size=10, color='666666')
+
+        # Sort sites by total volume moved
+        ranked_sites = sorted(
+            self.site_results,
+            key=lambda s: s['results'].get('total_cut', 0) + s['results'].get('total_fill', 0),
+            reverse=True
+        )
+
+        # Table headers
+        row = 4
+        headers = ['Rang', 'Standort', 'Gesamt Erdbewegungen', 'Abtrag', 'Auftrag', 'Kranstellflächen-Höhe', 'Kosten (geschätzt)']
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=row, column=col_idx)
+            cell.value = header
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_alignment
+        row += 1
+
+        # Table data
+        for i, site in enumerate(ranked_sites, 1):
+            site_name = site.get('site_name', site.get('site_id', f'Site {i}'))
+            results = site.get('results', {})
+
+            cut = results.get('total_cut', 0)
+            fill = results.get('total_fill', 0)
+            total_moved = cut + fill
+            cost = site.get('calculated_cost', 0)
+            crane_height = results.get('crane_height', results.get('platform_height', 0))
+
+            ws[f'A{row}'] = i
+            ws[f'A{row}'].font = Font(name='Arial', size=10, bold=True)
+            ws[f'A{row}'].alignment = center_alignment
+
+            ws[f'B{row}'] = site_name
+            ws[f'B{row}'].font = value_font
+
+            ws[f'C{row}'] = total_moved
+            ws[f'C{row}'].number_format = '#,##0'
+            ws[f'C{row}'].font = value_font
+            ws[f'C{row}'].alignment = right_alignment
+
+            ws[f'D{row}'] = cut
+            ws[f'D{row}'].number_format = '#,##0'
+            ws[f'D{row}'].font = value_font
+            ws[f'D{row}'].alignment = right_alignment
+
+            ws[f'E{row}'] = fill
+            ws[f'E{row}'].number_format = '#,##0'
+            ws[f'E{row}'].font = value_font
+            ws[f'E{row}'].alignment = right_alignment
+
+            ws[f'F{row}'] = crane_height
+            ws[f'F{row}'].number_format = '0.00'
+            ws[f'F{row}'].font = value_font
+            ws[f'F{row}'].alignment = right_alignment
+
+            ws[f'G{row}'] = cost
+            ws[f'G{row}'].number_format = '#,##0 €'
+            ws[f'G{row}'].font = value_font
+            ws[f'G{row}'].alignment = right_alignment
+
+            # Color coding by complexity
+            if total_moved > self.avg_cut + self.avg_fill:
+                fill_color = 'FFEBEE'  # Red tint for high complexity
+            elif total_moved > (self.avg_cut + self.avg_fill) * 0.7:
+                fill_color = 'FFF3E0'  # Orange tint for medium complexity
+            else:
+                fill_color = 'E8F5E9'  # Green tint for low complexity
+
+            for col_idx in range(1, 8):
+                cell = ws.cell(row=row, column=col_idx)
+                cell.fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type='solid')
+
+            row += 1
+
+        # Adjust column widths
+        ws.column_dimensions['A'].width = 8
+        ws.column_dimensions['B'].width = 25
+        ws.column_dimensions['C'].width = 22
+        ws.column_dimensions['D'].width = 15
+        ws.column_dimensions['E'].width = 15
+        ws.column_dimensions['F'].width = 22
+        ws.column_dimensions['G'].width = 20
+
+    def _create_individual_sites_sheet(self, wb: Workbook):
+        """Create individual sites sheet with detailed data for each site."""
+        ws = wb.create_sheet("Individual Sites")
+
+        # Define styles
+        header_font = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='667EEA', end_color='667EEA', fill_type='solid')
+        title_font = Font(name='Arial', size=14, bold=True)
+        site_font = Font(name='Arial', size=12, bold=True, color='667EEA')
+        label_font = Font(name='Arial', size=10, bold=True)
+        value_font = Font(name='Arial', size=10)
+        center_alignment = Alignment(horizontal='center', vertical='center')
+        right_alignment = Alignment(horizontal='right', vertical='center')
+
+        # Title
+        ws['A1'] = 'Detaillierte Standort-Einzelauswertung'
+        ws['A1'].font = title_font
+
+        row = 3
+
+        # Process each site
+        for i, site in enumerate(self.site_results, 1):
+            site_name = site.get('site_name', site.get('site_id', f'Site {i}'))
+            results = site.get('results', {})
+            coords = site.get('coordinates', (0, 0))
+            config = site.get('config', {})
+
+            # Site header
+            ws[f'A{row}'] = f'📍 {site_name}'
+            ws[f'A{row}'].font = site_font
+            row += 1
+
+            # Site info
+            ws[f'A{row}'] = 'Standortkoordinaten:'
+            ws[f'A{row}'].font = label_font
+            ws[f'B{row}'] = f"{coords[0]:.0f}, {coords[1]:.0f}"
+            ws[f'B{row}'].font = value_font
+            row += 1
+
+            crane_height = results.get('crane_height', results.get('platform_height', 0))
+            ws[f'A{row}'] = 'Kranstellflächen-Höhe:'
+            ws[f'A{row}'].font = label_font
+            ws[f'B{row}'] = crane_height
+            ws[f'B{row}'].number_format = '0.00'
+            ws[f'B{row}'].font = value_font
+            ws[f'C{row}'] = 'm ü.NN'
+            ws[f'C{row}'].font = value_font
+            row += 1
+
+            total_cost = site.get('calculated_cost', 0)
+            ws[f'A{row}'] = 'Geschätzte Gesamtkosten:'
+            ws[f'A{row}'].font = label_font
+            ws[f'B{row}'] = total_cost
+            ws[f'B{row}'].number_format = '#,##0 €'
+            ws[f'B{row}'].font = value_font
+            row += 2
+
+            # Volume overview table
+            ws[f'A{row}'] = 'Volumenübersicht'
+            ws[f'A{row}'].font = label_font
+            row += 1
+
+            volume_headers = ['Parameter', 'Wert', 'Einheit']
+            for col_idx, header in enumerate(volume_headers, 1):
+                cell = ws.cell(row=row, column=col_idx)
+                cell.value = header
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center_alignment
+            row += 1
+
+            cut = results.get('total_cut', 0)
+            fill = results.get('total_fill', 0)
+            net = results.get('net_volume', 0)
+            gravel = results.get('gravel_fill_external', 0)
+            total_moved = cut + fill
+
+            volume_data = [
+                ('Abtrag', cut, 'm³'),
+                ('Auftrag', fill, 'm³'),
+                ('Gesamt Erdbewegungen', total_moved, 'm³'),
+                ('Netto-Bilanz', net, 'm³'),
+                ('Externes Schottermaterial', gravel, 'm³'),
+            ]
+
+            for label, value, unit in volume_data:
+                ws[f'A{row}'] = label
+                ws[f'A{row}'].font = value_font
+                ws[f'B{row}'] = value
+                ws[f'B{row}'].number_format = '#,##0'
+                ws[f'B{row}'].font = value_font
+                ws[f'B{row}'].alignment = right_alignment
+                ws[f'C{row}'] = unit
+                ws[f'C{row}'].font = value_font
+                row += 1
+
+            row += 1
+
+            # Terrain statistics table
+            ws[f'A{row}'] = 'Geländestatistik'
+            ws[f'A{row}'].font = label_font
+            row += 1
+
+            for col_idx, header in enumerate(volume_headers, 1):
+                cell = ws.cell(row=row, column=col_idx)
+                cell.value = header
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center_alignment
+            row += 1
+
+            terrain_min = results.get('terrain_min', 0)
+            terrain_max = results.get('terrain_max', 0)
+            terrain_mean = results.get('terrain_mean', 0)
+            terrain_range = terrain_max - terrain_min
+
+            terrain_data = [
+                ('Minimale Geländehöhe', terrain_min, 'm ü.NN'),
+                ('Maximale Geländehöhe', terrain_max, 'm ü.NN'),
+                ('Mittlere Geländehöhe', terrain_mean, 'm ü.NN'),
+                ('Höhenunterschied', terrain_range, 'm'),
+            ]
+
+            for label, value, unit in terrain_data:
+                ws[f'A{row}'] = label
+                ws[f'A{row}'].font = value_font
+                ws[f'B{row}'] = value
+                ws[f'B{row}'].number_format = '0.00'
+                ws[f'B{row}'].font = value_font
+                ws[f'B{row}'].alignment = right_alignment
+                ws[f'C{row}'] = unit
+                ws[f'C{row}'].font = value_font
+                row += 1
+
+            row += 1
+
+            # Cost breakdown table
+            ws[f'A{row}'] = 'Kostenaufschlüsselung'
+            ws[f'A{row}'].font = label_font
+            row += 1
+
+            cost_headers = ['Kostenart', 'Volumen/Menge', 'Einheitspreis', 'Gesamtkosten']
+            for col_idx, header in enumerate(cost_headers, 1):
+                cell = ws.cell(row=row, column=col_idx)
+                cell.value = header
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center_alignment
+            row += 1
+
+            cut_cost = cut * self.cost_config['cut_cost_per_m3']
+            fill_cost = fill * self.cost_config['fill_cost_per_m3']
+            gravel_cost = gravel * self.cost_config['gravel_cost_per_m3']
+            avg_transport_distance = 5.0
+            transport_cost = (cut + fill) * self.cost_config['transport_cost_per_m3_km'] * avg_transport_distance
+
+            cost_data = [
+                ('Abtrag', f"{cut:,.0f} m³", f"{self.cost_config['cut_cost_per_m3']:.2f} €/m³", cut_cost),
+                ('Auftrag', f"{fill:,.0f} m³", f"{self.cost_config['fill_cost_per_m3']:.2f} €/m³", fill_cost),
+                ('Schottermaterial', f"{gravel:,.0f} m³", f"{self.cost_config['gravel_cost_per_m3']:.2f} €/m³", gravel_cost),
+                ('Transport (Ø 5.0 km)', f"{total_moved:,.0f} m³", f"{self.cost_config['transport_cost_per_m3_km']:.2f} €/m³·km", transport_cost),
+            ]
+
+            for label, volume, unit_price, total in cost_data:
+                ws[f'A{row}'] = label
+                ws[f'A{row}'].font = value_font
+                ws[f'B{row}'] = volume
+                ws[f'B{row}'].font = value_font
+                ws[f'C{row}'] = unit_price
+                ws[f'C{row}'].font = value_font
+                ws[f'D{row}'] = total
+                ws[f'D{row}'].number_format = '#,##0 €'
+                ws[f'D{row}'].font = value_font
+                ws[f'D{row}'].alignment = right_alignment
+                row += 1
+
+            # Total cost row
+            ws[f'A{row}'] = 'Gesamtkosten'
+            ws[f'A{row}'].font = Font(name='Arial', size=10, bold=True)
+            ws[f'D{row}'] = total_cost
+            ws[f'D{row}'].number_format = '#,##0 €'
+            ws[f'D{row}'].font = Font(name='Arial', size=10, bold=True)
+            ws[f'D{row}'].alignment = right_alignment
+            ws[f'D{row}'].fill = PatternFill(start_color='F0F0F0', end_color='F0F0F0', fill_type='solid')
+
+            row += 3  # Add spacing between sites
+
+        # Adjust column widths
+        ws.column_dimensions['A'].width = 30
+        ws.column_dimensions['B'].width = 20
+        ws.column_dimensions['C'].width = 20
+        ws.column_dimensions['D'].width = 20
 
     def _get_css_styles(self) -> str:
         """Get CSS styles for the report."""
