@@ -116,6 +116,419 @@ class DXFImporter:
             self.logger.error(f"Failed to load DXF file: {e}")
             raise
 
+    def detect_coordinate_system(self) -> dict:
+        """
+        Detect likely coordinate system from DXF coordinate values.
+
+        DXF files typically don't contain CRS metadata, so this method analyzes
+        coordinate ranges to suggest likely coordinate systems.
+
+        Returns:
+            dict: Dictionary with detection results:
+                  {
+                      'detected_epsg': int or None,
+                      'confidence': str ('high', 'medium', 'low', 'unknown'),
+                      'coordinate_range': {'x_min': float, 'x_max': float,
+                                           'y_min': float, 'y_max': float},
+                      'suggestions': [list of {epsg, name, reason}],
+                      'warnings': [list of warning messages]
+                  }
+
+        Raises:
+            Exception: If DXF file is not loaded or has no entities
+        """
+        if self.doc is None:
+            self.load_dxf()
+
+        modelspace = self.doc.modelspace()
+
+        # Collect all coordinates from entities
+        all_x = []
+        all_y = []
+
+        for entity in modelspace:
+            entity_type = entity.dxftype()
+
+            if entity_type == 'LWPOLYLINE':
+                for point in entity.get_points('xy'):
+                    all_x.append(point[0])
+                    all_y.append(point[1])
+            elif entity_type == 'POLYLINE':
+                for vertex in entity.vertices:
+                    all_x.append(vertex.dxf.location.x)
+                    all_y.append(vertex.dxf.location.y)
+            elif entity_type == 'LINE':
+                all_x.append(entity.dxf.start.x)
+                all_x.append(entity.dxf.end.x)
+                all_y.append(entity.dxf.start.y)
+                all_y.append(entity.dxf.end.y)
+
+        if not all_x or not all_y:
+            self.logger.warning("No coordinates found in DXF file")
+            return {
+                'detected_epsg': None,
+                'confidence': 'unknown',
+                'coordinate_range': None,
+                'suggestions': [],
+                'warnings': ['No coordinates found in DXF file']
+            }
+
+        # Calculate coordinate ranges
+        x_min, x_max = min(all_x), max(all_x)
+        y_min, y_max = min(all_y), max(all_y)
+
+        coord_range = {
+            'x_min': x_min,
+            'x_max': x_max,
+            'y_min': y_min,
+            'y_max': y_max
+        }
+
+        self.logger.info(
+            f"Coordinate range: X=[{x_min:.2f}, {x_max:.2f}], "
+            f"Y=[{y_min:.2f}, {y_max:.2f}]"
+        )
+
+        # Analyze coordinate ranges to suggest CRS
+        suggestions = []
+        warnings = []
+        detected_epsg = None
+        confidence = 'unknown'
+
+        # Check for geographic coordinates (WGS84 / EPSG:4326)
+        if abs(x_min) < 180 and abs(x_max) < 180 and abs(y_min) < 90 and abs(y_max) < 90:
+            suggestions.append({
+                'epsg': 4326,
+                'name': 'WGS84 (Geographic)',
+                'reason': 'Coordinates in geographic range (±180°, ±90°)'
+            })
+            warnings.append(
+                'Geographic CRS (WGS84) detected. This plugin requires projected CRS '
+                'with meter units. Please transform to EPSG:25832 or similar.'
+            )
+            confidence = 'high'
+
+        # Check for UTM Zone 32N (EPSG:25832) - Common in western/central Germany
+        elif 200000 <= x_min and x_max <= 500000 and 5400000 <= y_min and y_max <= 6100000:
+            if 300000 <= x_min and x_max <= 400000:
+                suggestions.append({
+                    'epsg': 25832,
+                    'name': 'ETRS89 / UTM Zone 32N',
+                    'reason': 'Coordinates match UTM Zone 32N range (300k-400k E, 5.4M-6.1M N)'
+                })
+                detected_epsg = 25832
+                confidence = 'high'
+            else:
+                suggestions.append({
+                    'epsg': 25832,
+                    'name': 'ETRS89 / UTM Zone 32N',
+                    'reason': 'Coordinates in extended UTM Zone 32N range'
+                })
+                confidence = 'medium'
+
+        # Check for UTM Zone 33N (EPSG:25833) - Common in eastern Germany
+        elif 300000 <= x_min and x_max <= 600000 and 5400000 <= y_min and y_max <= 6100000:
+            if 400000 <= x_min and x_max <= 500000:
+                suggestions.append({
+                    'epsg': 25833,
+                    'name': 'ETRS89 / UTM Zone 33N',
+                    'reason': 'Coordinates match UTM Zone 33N range (400k-500k E, 5.4M-6.1M N)'
+                })
+                detected_epsg = 25833
+                confidence = 'high'
+            else:
+                suggestions.append({
+                    'epsg': 25833,
+                    'name': 'ETRS89 / UTM Zone 33N',
+                    'reason': 'Coordinates in extended UTM Zone 33N range'
+                })
+                confidence = 'medium'
+
+        # Check for Gauss-Krüger Zone 3 (EPSG:31467) - Legacy German system
+        elif 3200000 <= x_min and x_max <= 3900000 and 5400000 <= y_min and y_max <= 6100000:
+            if 3300000 <= x_min and x_max <= 3700000:
+                suggestions.append({
+                    'epsg': 31467,
+                    'name': 'DHDN / Gauss-Krüger Zone 3',
+                    'reason': 'Coordinates match Gauss-Krüger Zone 3 (3.3M-3.7M E)'
+                })
+                detected_epsg = 31467
+                confidence = 'high'
+            else:
+                suggestions.append({
+                    'epsg': 31467,
+                    'name': 'DHDN / Gauss-Krüger Zone 3',
+                    'reason': 'Coordinates in extended Gauss-Krüger Zone 3 range'
+                })
+                confidence = 'medium'
+            warnings.append(
+                'Gauss-Krüger detected (legacy system). Consider transforming to '
+                'ETRS89/UTM (EPSG:25832 or 25833) for modern projects.'
+            )
+
+        # Check for Gauss-Krüger Zone 4 (EPSG:31468) - Legacy German system
+        elif 4200000 <= x_min and x_max <= 4900000 and 5400000 <= y_min and y_max <= 6100000:
+            if 4300000 <= x_min and x_max <= 4700000:
+                suggestions.append({
+                    'epsg': 31468,
+                    'name': 'DHDN / Gauss-Krüger Zone 4',
+                    'reason': 'Coordinates match Gauss-Krüger Zone 4 (4.3M-4.7M E)'
+                })
+                detected_epsg = 31468
+                confidence = 'high'
+            else:
+                suggestions.append({
+                    'epsg': 31468,
+                    'name': 'DHDN / Gauss-Krüger Zone 4',
+                    'reason': 'Coordinates in extended Gauss-Krüger Zone 4 range'
+                })
+                confidence = 'medium'
+            warnings.append(
+                'Gauss-Krüger detected (legacy system). Consider transforming to '
+                'ETRS89/UTM (EPSG:25832 or 25833) for modern projects.'
+            )
+
+        # Unknown coordinate system
+        else:
+            confidence = 'low'
+            warnings.append(
+                f'Could not confidently detect CRS from coordinate range. '
+                f'Please verify that coordinates are in EPSG:{self.crs_epsg}.'
+            )
+
+        # Log results
+        if detected_epsg:
+            self.logger.info(
+                f"Detected CRS: EPSG:{detected_epsg} "
+                f"({suggestions[0]['name']}) with {confidence} confidence"
+            )
+        else:
+            self.logger.warning(f"Could not detect CRS (confidence: {confidence})")
+
+        for warning in warnings:
+            self.logger.warning(warning)
+
+        return {
+            'detected_epsg': detected_epsg,
+            'confidence': confidence,
+            'coordinate_range': coord_range,
+            'suggestions': suggestions,
+            'warnings': warnings
+        }
+
+    def suggest_coordinate_system(self, coordinate_range: dict = None) -> List[dict]:
+        """
+        Suggest appropriate coordinate systems for German wind energy projects.
+
+        Args:
+            coordinate_range (dict): Optional coordinate range from detect_coordinate_system()
+
+        Returns:
+            List[dict]: List of suggested CRS with metadata:
+                        [{'epsg': int, 'name': str, 'description': str, 'use_case': str}]
+        """
+        suggestions = [
+            {
+                'epsg': 25832,
+                'name': 'ETRS89 / UTM Zone 32N',
+                'description': 'Modern standard for western and central Germany',
+                'use_case': 'Recommended for projects in NRW, Lower Saxony (west), Hesse, Rhineland-Palatinate',
+                'x_range': '300,000 - 400,000',
+                'y_range': '5,400,000 - 6,100,000'
+            },
+            {
+                'epsg': 25833,
+                'name': 'ETRS89 / UTM Zone 33N',
+                'description': 'Modern standard for eastern Germany',
+                'use_case': 'Recommended for projects in Brandenburg, Saxony, Thuringia, Mecklenburg-Vorpommern',
+                'x_range': '400,000 - 500,000',
+                'y_range': '5,400,000 - 6,100,000'
+            },
+            {
+                'epsg': 31467,
+                'name': 'DHDN / Gauss-Krüger Zone 3',
+                'description': 'Legacy system (being phased out)',
+                'use_case': 'Historic projects, western Germany. Consider transforming to EPSG:25832.',
+                'x_range': '3,300,000 - 3,700,000',
+                'y_range': '5,400,000 - 6,100,000'
+            },
+            {
+                'epsg': 31468,
+                'name': 'DHDN / Gauss-Krüger Zone 4',
+                'description': 'Legacy system (being phased out)',
+                'use_case': 'Historic projects, eastern Germany. Consider transforming to EPSG:25833.',
+                'x_range': '4,300,000 - 4,700,000',
+                'y_range': '5,400,000 - 6,100,000'
+            }
+        ]
+
+        # If coordinate range provided, filter suggestions to most likely matches
+        if coordinate_range:
+            x_min = coordinate_range.get('x_min', 0)
+            x_max = coordinate_range.get('x_max', 0)
+
+            filtered = []
+            for suggestion in suggestions:
+                epsg = suggestion['epsg']
+
+                # Check if coordinates match this CRS range
+                if epsg == 25832 and 250000 <= x_min and x_max <= 450000:
+                    filtered.append(suggestion)
+                elif epsg == 25833 and 350000 <= x_min and x_max <= 550000:
+                    filtered.append(suggestion)
+                elif epsg == 31467 and 3200000 <= x_min and x_max <= 3800000:
+                    filtered.append(suggestion)
+                elif epsg == 31468 and 4200000 <= x_min and x_max <= 4800000:
+                    filtered.append(suggestion)
+
+            if filtered:
+                return filtered
+
+        return suggestions
+
+    def validate_coordinate_system(self, expected_epsg: int = None) -> Tuple[bool, str]:
+        """
+        Validate coordinate system of DXF data against expected CRS.
+
+        Args:
+            expected_epsg (int): Expected EPSG code (uses self.crs_epsg if None)
+
+        Returns:
+            Tuple[bool, str]: (is_valid, message)
+                              is_valid: True if coordinates match expected CRS
+                              message: Validation message or error with suggestions
+
+        Raises:
+            ValueError: If DXF contains no coordinate data
+        """
+        if expected_epsg is None:
+            expected_epsg = self.crs_epsg
+
+        # Detect CRS from coordinates
+        detection = self.detect_coordinate_system()
+
+        if not detection['coordinate_range']:
+            raise ValueError("DXF file contains no coordinate data")
+
+        detected_epsg = detection['detected_epsg']
+        confidence = detection['confidence']
+        warnings = detection['warnings']
+
+        # Build validation message
+        coord_range = detection['coordinate_range']
+        range_str = (
+            f"X=[{coord_range['x_min']:.2f}, {coord_range['x_max']:.2f}], "
+            f"Y=[{coord_range['y_min']:.2f}, {coord_range['y_max']:.2f}]"
+        )
+
+        # Case 1: High confidence detection matches expected
+        if detected_epsg == expected_epsg and confidence == 'high':
+            message = (
+                f"✓ Coordinate system validated: EPSG:{expected_epsg}\n"
+                f"  Coordinate range: {range_str}\n"
+                f"  Confidence: {confidence}"
+            )
+            self.logger.info(message)
+            return True, message
+
+        # Case 2: High confidence detection, but doesn't match expected
+        if detected_epsg and detected_epsg != expected_epsg and confidence == 'high':
+            # Get bilingual error message
+            error_msg = get_message(
+                'crs_mismatch',
+                ERROR_MESSAGES,
+                actual=detected_epsg,
+                expected=expected_epsg
+            )
+            fix_msg = get_message(
+                'crs_mismatch',
+                {k: v['fix'] for k, v in ERROR_MESSAGES.items()},
+                expected=expected_epsg
+            )
+
+            message = (
+                f"{error_msg}\n"
+                f"  Detected: EPSG:{detected_epsg} (confidence: {confidence})\n"
+                f"  Expected: EPSG:{expected_epsg}\n"
+                f"  Coordinate range: {range_str}\n\n"
+                f"{fix_msg}"
+            )
+
+            # Add suggestions
+            if detection['suggestions']:
+                message += "\n\nDetected coordinate system:"
+                for suggestion in detection['suggestions'][:1]:  # Show top suggestion
+                    message += (
+                        f"\n  • EPSG:{suggestion['epsg']}: {suggestion['name']}\n"
+                        f"    {suggestion['reason']}"
+                    )
+
+            self.logger.warning(message)
+            return False, message
+
+        # Case 3: Low confidence or unknown - warn but don't fail
+        if confidence in ['low', 'unknown']:
+            message = (
+                f"⚠ Could not confidently detect coordinate system\n"
+                f"  Coordinate range: {range_str}\n"
+                f"  Assuming EPSG:{expected_epsg} as specified\n"
+                f"  Confidence: {confidence}\n\n"
+                f"Please verify that your DXF coordinates are in EPSG:{expected_epsg}.\n"
+            )
+
+            # Add suggestions if available
+            suggestions = self.suggest_coordinate_system(coord_range)
+            if suggestions:
+                message += "\nCommon German coordinate systems:\n"
+                for suggestion in suggestions[:2]:  # Show top 2
+                    message += (
+                        f"  • EPSG:{suggestion['epsg']}: {suggestion['name']}\n"
+                        f"    X: {suggestion['x_range']}, Y: {suggestion['y_range']}\n"
+                    )
+
+            # Add warnings
+            for warning in warnings:
+                message += f"\n⚠ {warning}"
+
+            self.logger.warning(message)
+            # Return True (with warning) since we can't be certain
+            return True, message
+
+        # Case 4: Medium confidence detection matches expected
+        if detected_epsg == expected_epsg:
+            message = (
+                f"✓ Coordinate system likely correct: EPSG:{expected_epsg}\n"
+                f"  Coordinate range: {range_str}\n"
+                f"  Confidence: {confidence}"
+            )
+
+            for warning in warnings:
+                message += f"\n⚠ {warning}"
+
+            self.logger.info(message)
+            return True, message
+
+        # Case 5: Medium confidence, different from expected
+        message = (
+            f"⚠ Coordinate system mismatch (medium confidence)\n"
+            f"  Detected: EPSG:{detected_epsg or 'unknown'} (confidence: {confidence})\n"
+            f"  Expected: EPSG:{expected_epsg}\n"
+            f"  Coordinate range: {range_str}\n\n"
+            f"The coordinates may not match EPSG:{expected_epsg}. "
+            f"Please verify your data."
+        )
+
+        if detection['suggestions']:
+            message += "\n\nSuggested coordinate systems:\n"
+            for suggestion in detection['suggestions'][:2]:
+                message += (
+                    f"  • EPSG:{suggestion['epsg']}: {suggestion['name']}\n"
+                    f"    {suggestion['reason']}\n"
+                )
+
+        self.logger.warning(message)
+        return False, message
+
     def get_available_layers(self) -> List[str]:
         """
         Get list of available layer names in DXF file.
