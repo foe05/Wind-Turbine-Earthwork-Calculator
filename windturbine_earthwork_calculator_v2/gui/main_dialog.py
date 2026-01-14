@@ -24,7 +24,12 @@ from qgis.PyQt.QtCore import Qt, pyqtSignal
 from qgis.PyQt.QtGui import QIcon
 
 from ..utils.logging_utils import get_plugin_logger
-from ..utils.validation import ValidationError, validate_file_exists
+from ..utils.validation import (
+    ValidationError,
+    validate_file_exists,
+    validate_height_range,
+    validate_crs
+)
 from ..utils.i18n import get_message, get_language
 from ..utils.error_messages import ERROR_MESSAGES
 from ..core.dxf_importer import DXFImporter
@@ -829,6 +834,223 @@ class MainDialog(QDialog):
         """Toggle road gravel thickness input based on checkbox state."""
         self.input_road_gravel_thickness.setEnabled(state == Qt.Checked)
 
+    def _run_preflight_validation(self) -> bool:
+        """
+        Run comprehensive pre-flight validation before processing starts.
+
+        This validates all inputs comprehensively:
+        - DXF files (existence, readability, CRS consistency)
+        - Height parameters (range validation)
+        - Workspace
+        - Network connectivity for DEM download
+
+        Returns:
+            bool: True if all validations pass, False otherwise
+        """
+        lang = get_language()
+
+        # === PHASE 1: Basic input validation ===
+        if not self._validate_inputs():
+            return False
+
+        # === PHASE 2: DXF CRS consistency check ===
+        try:
+            self.logger.info("=" * 60)
+            self.logger.info("🔍 PRE-FLIGHT VALIDATION STARTED")
+            self.logger.info("=" * 60)
+
+            self.logger.info("Validating DXF coordinate reference systems...")
+
+            dxf_files = []
+            dxf_names = []
+
+            # Required files
+            if self.input_dxf_crane.text().strip():
+                dxf_files.append(self.input_dxf_crane.text().strip())
+                dxf_names.append("Kranstellfläche" if lang == 'de' else "Crane pad")
+
+            if self.input_dxf_foundation.text().strip():
+                dxf_files.append(self.input_dxf_foundation.text().strip())
+                dxf_names.append("Fundamentfläche" if lang == 'de' else "Foundation")
+
+            # Optional files
+            if self.input_dxf_boom.text().strip():
+                dxf_files.append(self.input_dxf_boom.text().strip())
+                dxf_names.append("Auslegerfläche" if lang == 'de' else "Boom surface")
+
+            if self.input_dxf_rotor.text().strip():
+                dxf_files.append(self.input_dxf_rotor.text().strip())
+                dxf_names.append("Blattlagerfläche" if lang == 'de' else "Blade storage")
+
+            if self.input_dxf_holms.text().strip():
+                dxf_files.append(self.input_dxf_holms.text().strip())
+                dxf_names.append("Holme" if lang == 'de' else "Holms")
+
+            if self.input_dxf_road.text().strip():
+                dxf_files.append(self.input_dxf_road.text().strip())
+                dxf_names.append("Zufahrtsstraße" if lang == 'de' else "Road access")
+
+            # Check CRS consistency across all DXF files
+            detected_crs_list = []
+            for i, dxf_path in enumerate(dxf_files):
+                try:
+                    importer = DXFImporter(dxf_path, tolerance=self.input_dxf_tolerance.value())
+                    crs_info = importer.detect_coordinate_system()
+
+                    if crs_info and crs_info.get('suggested_epsg'):
+                        detected_epsg = crs_info['suggested_epsg']
+                        confidence = crs_info.get('confidence', 'unknown')
+                        detected_crs_list.append((dxf_names[i], detected_epsg, confidence))
+                        self.logger.info(
+                            f"  ✓ {dxf_names[i]}: EPSG:{detected_epsg} (confidence: {confidence})"
+                        )
+                    else:
+                        self.logger.warning(f"  ⚠ {dxf_names[i]}: Could not detect CRS")
+
+                except Exception as e:
+                    error_msg = (
+                        f"Fehler beim Lesen von {dxf_names[i]}: {str(e)}"
+                        if lang == 'de' else
+                        f"Error reading {dxf_names[i]}: {str(e)}"
+                    )
+                    self._show_validation_error(
+                        "DXF-Fehler" if lang == 'de' else "DXF Error",
+                        error_msg
+                    )
+                    return False
+
+            # Check if all detected CRS are consistent
+            if len(detected_crs_list) > 1:
+                first_epsg = detected_crs_list[0][1]
+                inconsistent = [
+                    (name, epsg, conf) for name, epsg, conf in detected_crs_list
+                    if epsg != first_epsg
+                ]
+
+                if inconsistent:
+                    error_parts = []
+                    if lang == 'de':
+                        error_parts.append(
+                            "⚠️ Warnung: Inkonsistente Koordinatensysteme erkannt!\n\n"
+                            "Die DXF-Dateien verwenden unterschiedliche CRS:"
+                        )
+                    else:
+                        error_parts.append(
+                            "⚠️ Warning: Inconsistent coordinate systems detected!\n\n"
+                            "The DXF files use different CRS:"
+                        )
+
+                    for name, epsg, conf in detected_crs_list:
+                        error_parts.append(f"  • {name}: EPSG:{epsg}")
+
+                    if lang == 'de':
+                        error_parts.append(
+                            "\nLösung: Transformieren Sie alle DXF-Dateien in dasselbe "
+                            "Koordinatensystem (z.B. EPSG:25832 für UTM 32N)."
+                        )
+                    else:
+                        error_parts.append(
+                            "\nFix: Transform all DXF files to the same coordinate system "
+                            "(e.g., EPSG:25832 for UTM 32N)."
+                        )
+
+                    self._show_validation_error(
+                        "CRS-Inkonsistenz" if lang == 'de' else "CRS Inconsistency",
+                        "\n".join(error_parts)
+                    )
+                    return False
+
+                self.logger.info(f"✓ All DXF files use consistent CRS: EPSG:{first_epsg}")
+
+        except Exception as e:
+            self.logger.error(f"Pre-flight validation error: {str(e)}", exc_info=True)
+            self._show_validation_error(
+                "Validierungsfehler" if lang == 'de' else "Validation Error",
+                str(e)
+            )
+            return False
+
+        # === PHASE 3: Height parameter validation ===
+        try:
+            self.logger.info("Validating height parameters...")
+
+            fok = self.input_fok.value()
+            search_below = self.input_search_below_fok.value()
+            search_above = self.input_search_above_fok.value()
+            height_step = self.input_height_step.value()
+
+            min_height = fok - search_below
+            max_height = fok + search_above
+
+            # Use the validation utility
+            validate_height_range(min_height, max_height, height_step)
+
+            num_scenarios = int((max_height - min_height) / height_step) + 1
+            self.logger.info(
+                f"✓ Height parameters valid: {min_height:.2f} - {max_height:.2f} m "
+                f"(step: {height_step:.2f} m, {num_scenarios} scenarios)"
+            )
+
+        except ValidationError as e:
+            self._show_validation_error(
+                "Ungültige Höhenparameter" if lang == 'de' else "Invalid Height Parameters",
+                str(e)
+            )
+            return False
+
+        # === PHASE 4: Network connectivity check (for DEM download) ===
+        try:
+            import socket
+
+            self.logger.info("Checking network connectivity for DEM download...")
+
+            # Check if we can resolve the DEM API hostname
+            try:
+                socket.gethostbyname("api.hoehendaten.de")
+                self.logger.info("✓ Network connectivity OK")
+            except socket.gaierror:
+                if lang == 'de':
+                    warning_msg = (
+                        "⚠️ Warnung: Keine Verbindung zur DEM-API möglich!\n\n"
+                        "Die DEM-Daten können nicht heruntergeladen werden. "
+                        "Prüfen Sie Ihre Internetverbindung.\n\n"
+                        "Möchten Sie trotzdem fortfahren?"
+                    )
+                    title = "Netzwerkverbindung"
+                else:
+                    warning_msg = (
+                        "⚠️ Warning: Cannot connect to DEM API!\n\n"
+                        "DEM data cannot be downloaded. "
+                        "Check your internet connection.\n\n"
+                        "Do you want to continue anyway?"
+                    )
+                    title = "Network Connection"
+
+                reply = QMessageBox.question(
+                    self,
+                    title,
+                    warning_msg,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+
+                if reply == QMessageBox.No:
+                    self.logger.info("User cancelled due to network issue")
+                    return False
+
+                self.logger.warning("User chose to continue despite network issue")
+
+        except ImportError:
+            # socket module not available (unlikely but handle gracefully)
+            self.logger.warning("Cannot check network connectivity (socket module unavailable)")
+
+        # === VALIDATION COMPLETE ===
+        self.logger.info("=" * 60)
+        self.logger.info("✅ PRE-FLIGHT VALIDATION PASSED")
+        self.logger.info("=" * 60)
+
+        return True
+
     def _validate_inputs(self):
         """Validate user inputs with enhanced bilingual validation."""
         errors = []
@@ -950,8 +1172,10 @@ class MainDialog(QDialog):
         return True
 
     def _on_start(self):
-        """Handle start button click."""
-        if not self._validate_inputs():
+        """Handle start button click with comprehensive pre-flight validation."""
+        # Run comprehensive pre-flight validation BEFORE processing starts
+        # This validates: DXF files, CRS consistency, height parameters, network connectivity
+        if not self._run_preflight_validation():
             return
 
         # Collect all parameters
