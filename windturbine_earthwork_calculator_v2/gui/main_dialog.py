@@ -20,8 +20,8 @@ from qgis.PyQt.QtWidgets import (
     QDoubleSpinBox, QSpinBox, QGroupBox, QFormLayout,
     QCheckBox, QMessageBox, QProgressBar, QTextEdit, QScrollArea
 )
-from qgis.PyQt.QtCore import Qt, pyqtSignal
-from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtCore import Qt, pyqtSignal, QUrl
+from qgis.PyQt.QtGui import QIcon, QDesktopServices
 
 from ..utils.logging_utils import get_plugin_logger
 
@@ -861,6 +861,7 @@ class MainDialog(QDialog):
         self.btn_next.clicked.connect(self._on_next)
         self.btn_cancel.clicked.connect(self.reject)
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.btn_generate_multisite_report.clicked.connect(self._on_generate_multisite_report)
 
     def _setup_validators(self):
         """Setup value validators and constraints."""
@@ -1275,3 +1276,137 @@ class MainDialog(QDialog):
             'cost_fill': self.input_cost_fill.value(),
             'cost_gravel': self.input_cost_gravel.value()
         }
+
+    def _on_generate_multisite_report(self):
+        """Handle generate multi-site report button click."""
+        try:
+            # Validate selected sites
+            selected_sites = self.get_selected_sites()
+            if not selected_sites:
+                QMessageBox.warning(
+                    self,
+                    "Keine Standorte ausgewählt",
+                    "Bitte wählen Sie mindestens einen Standort aus der Liste aus."
+                )
+                return
+
+            # Get report parameters
+            report_format = self.get_multisite_report_format()
+            cost_params = self.get_multisite_cost_parameters()
+            output_path = self.get_multisite_report_output_path()
+
+            # Determine output path with default if not set
+            if not output_path:
+                workspace = self.input_workspace.text().strip()
+                if not workspace:
+                    QMessageBox.warning(
+                        self,
+                        "Kein Workspace",
+                        "Bitte wählen Sie zuerst einen Workspace-Ordner auf der 'Ausgabe'-Tab aus."
+                    )
+                    return
+
+                # Generate default output path based on format
+                format_extensions = {
+                    'html': '.html',
+                    'pdf': '.pdf',
+                    'excel': '.xlsx'
+                }
+                ext = format_extensions.get(report_format, '.html')
+                output_path = os.path.join(workspace, f"standortvergleich{ext}")
+                self.input_multisite_report_output.setText(output_path)
+
+            # Prepare site results for report generator
+            site_results = []
+            for site_data in selected_sites:
+                site_result = {
+                    'site_id': site_data.site_id,
+                    'site_name': site_data.site_name,
+                    'results': {
+                        'total_cut': site_data.total_cut,
+                        'total_fill': site_data.total_fill,
+                        'net_volume': site_data.net_volume,
+                        'gravel_fill_external': site_data.gravel_volume,
+                        'crane_height': site_data.crane_height,
+                        'platform_height': site_data.crane_height,
+                        'terrain_min': site_data.terrain_min,
+                        'terrain_max': site_data.terrain_max,
+                        'terrain_mean': site_data.terrain_mean,
+                        'total_platform_area': site_data.platform_area,
+                        'platform_area': site_data.platform_area,
+                        'total_area': site_data.total_area,
+                        'slope_width': 0.0,  # Will be calculated if needed
+                    },
+                    'coordinates': (site_data.location.x(), site_data.location.y()),
+                    'config': {}
+                }
+                site_results.append(site_result)
+
+            # Create cost configuration for report generator
+            cost_config = {
+                'cut_cost_per_m3': cost_params['cost_cut'],
+                'fill_cost_per_m3': cost_params['cost_fill'],
+                'gravel_cost_per_m3': cost_params['cost_gravel'],
+                'transport_cost_per_m3_km': 0.5  # Default transport cost
+            }
+
+            # Import report generator
+            from ..core.multi_site_report_generator import MultiSiteReportGenerator
+
+            # Create report generator
+            self.logger.info(f"Generating multi-site report for {len(selected_sites)} sites...")
+            generator = MultiSiteReportGenerator(site_results, cost_config)
+
+            # Generate report based on format
+            if report_format == 'html':
+                generator.generate_html(output_path, project_name="Windpark-Projekt")
+                self.logger.info(f"HTML report generated: {output_path}")
+
+            elif report_format == 'pdf':
+                # Generate HTML first, then convert to PDF
+                html_path = output_path.replace('.pdf', '.html')
+                generator.generate_html(html_path, project_name="Windpark-Projekt")
+                generator.generate_pdf(html_path, output_path)
+                self.logger.info(f"PDF report generated: {output_path}")
+
+            elif report_format == 'excel':
+                generator.generate_excel(output_path, project_name="Windpark-Projekt")
+                self.logger.info(f"Excel report generated: {output_path}")
+
+            # Show success message
+            QMessageBox.information(
+                self,
+                "Bericht erfolgreich erstellt",
+                f"Multi-Standort-Vergleichsbericht wurde erfolgreich erstellt:\n{output_path}"
+            )
+
+            # Open the generated file
+            self._open_file(output_path)
+
+        except Exception as e:
+            self.logger.error(f"Error generating multi-site report: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Fehler beim Erstellen des Berichts",
+                f"Ein Fehler ist beim Erstellen des Berichts aufgetreten:\n\n{str(e)}"
+            )
+
+    def _open_file(self, file_path: str):
+        """
+        Open a file with the system's default application.
+
+        Args:
+            file_path (str): Path to the file to open
+        """
+        try:
+            file_url = QUrl.fromLocalFile(file_path)
+            if not QDesktopServices.openUrl(file_url):
+                self.logger.warning(f"Could not open file with default application: {file_path}")
+                QMessageBox.warning(
+                    self,
+                    "Datei konnte nicht geöffnet werden",
+                    f"Die Datei wurde erfolgreich erstellt, konnte aber nicht automatisch geöffnet werden:\n{file_path}"
+                )
+        except Exception as e:
+            self.logger.warning(f"Error opening file: {e}")
+            # Don't show error - file was created successfully
