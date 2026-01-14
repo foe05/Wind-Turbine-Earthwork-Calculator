@@ -19,6 +19,25 @@ from qgis.core import QgsGeometry, QgsPointXY, QgsWkbTypes
 from .surface_types import MultiSurfaceProject, SurfaceType, SurfaceConfig
 from ..utils.logging_utils import get_plugin_logger
 from ..utils.geometry_utils import get_polygon_boundary
+from ..utils.i18n import get_message, get_language
+from ..utils.error_messages import ERROR_MESSAGES
+
+
+def _format_error(error_key, **params):
+    """
+    Format error message with fix suggestion.
+
+    Args:
+        error_key (str): Error message key
+        **params: Parameters for message formatting
+
+    Returns:
+        str: Formatted error message with fix suggestion
+    """
+    error_msg = get_message(error_key, ERROR_MESSAGES, **params)
+    lang = get_language()
+    fix_msg = ERROR_MESSAGES[error_key]['fix'][lang]
+    return f"{error_msg}\n{fix_msg}"
 
 
 class SurfaceValidator:
@@ -46,7 +65,7 @@ class SurfaceValidator:
         # 1. Validate project configuration
         config_valid, config_error = self.project.validate()
         if not config_valid:
-            errors.append(f"Configuration error: {config_error}")
+            errors.append(_format_error('config_error', error=config_error))
 
         # 2. Foundation within crane pad
         valid, error = self.validate_foundation_in_crane_pad()
@@ -94,7 +113,7 @@ class SurfaceValidator:
 
         # Check if foundation touches or intersects crane pad
         if not crane_geom.touches(foundation_geom) and not crane_geom.intersects(foundation_geom):
-            return False, "Fundamentfläche muss die Kranstellfläche berühren oder darin liegen"
+            return False, _format_error('foundation_not_touching_crane_pad')
 
         self.logger.info("✓ Foundation touches or is within crane pad")
         return True, ""
@@ -123,16 +142,15 @@ class SurfaceValidator:
         )
 
         if connection_edge is None or edge_length == 0:
-            return False, "Konnte keine Verbindungskante der Auslegerfläche zur Kranstellfläche finden"
+            return False, _format_error('boom_connection_edge_not_found')
 
         # Check distance between boom and crane pad
         distance = crane_geom.distance(boom_geom)
 
         if distance > max_distance:
-            return False, (
-                f"Auslegerfläche ist zu weit von der Kranstellfläche entfernt. "
-                f"Abstand: {distance:.2f}m, Maximum: {max_distance:.1f}m"
-            )
+            return False, _format_error('boom_too_far_from_crane_pad',
+                                       distance=distance,
+                                       max_distance=max_distance)
 
         self.logger.info(
             f"✓ Boom connection edge identified: {edge_length:.2f}m length, "
@@ -159,10 +177,9 @@ class SurfaceValidator:
         distance = crane_geom.distance(rotor_geom)
 
         if distance > max_distance:
-            return False, (
-                f"Blattlagerfläche ist zu weit von der Kranstellfläche entfernt. "
-                f"Abstand: {distance:.2f}m, Maximum: {max_distance:.1f}m"
-            )
+            return False, _format_error('rotor_too_far_from_crane_pad',
+                                       distance=distance,
+                                       max_distance=max_distance)
 
         self.logger.info(
             f"✓ Rotor storage is near crane pad (distance: {distance:.2f}m)"
@@ -182,17 +199,14 @@ class SurfaceValidator:
         if boom_geom.overlaps(rotor_geom):
             intersection = boom_geom.intersection(rotor_geom)
             overlap_area = intersection.area()
-            return False, (
-                f"Auslegerfläche und Blattlagerfläche dürfen sich nicht überlappen. "
-                f"Überlappung: {overlap_area:.1f}m²"
-            )
+            return False, _format_error('boom_rotor_overlap', overlap_area=overlap_area)
 
         # Also check if they're just touching (which is ok) vs. overlapping
         if boom_geom.intersects(rotor_geom):
             intersection = boom_geom.intersection(rotor_geom)
             if intersection.type() == QgsWkbTypes.PolygonGeometry:
                 # It's a polygon intersection, not just a line/point - this is overlap
-                return False, "Auslegerfläche und Blattlagerfläche überlappen sich"
+                return False, _format_error('boom_rotor_intersection')
 
         self.logger.info("✓ Boom and rotor storage do not overlap")
         return True, ""
@@ -221,15 +235,11 @@ class SurfaceValidator:
             min_area, max_area = size_limits[surface.surface_type]
 
             if area < min_area:
-                errors.append(
-                    f"{surface.surface_type.display_name} zu klein: {area:.1f}m² "
-                    f"(Minimum: {min_area}m²)"
-                )
+                errors.append(_format_error('geometry_too_small',
+                                           area=area, min_area=min_area))
             elif area > max_area:
-                errors.append(
-                    f"{surface.surface_type.display_name} zu groß: {area:.1f}m² "
-                    f"(Maximum: {max_area}m²)"
-                )
+                errors.append(_format_error('geometry_too_large',
+                                           area=area, max_area=max_area))
             else:
                 self.logger.info(
                     f"✓ {surface.surface_type.display_name} size OK: {area:.1f}m²"
@@ -245,15 +255,11 @@ class SurfaceValidator:
             min_area, max_area = size_limits[surface.surface_type]
 
             if area < min_area:
-                errors.append(
-                    f"{surface.surface_type.display_name} zu klein: {area:.1f}m² "
-                    f"(Minimum: {min_area}m²)"
-                )
+                errors.append(_format_error('geometry_too_small',
+                                           area=area, min_area=min_area))
             elif area > max_area:
-                errors.append(
-                    f"{surface.surface_type.display_name} zu groß: {area:.1f}m² "
-                    f"(Maximum: {max_area}m²)"
-                )
+                errors.append(_format_error('geometry_too_large',
+                                           area=area, max_area=max_area))
             else:
                 self.logger.info(
                     f"✓ {surface.surface_type.display_name} size OK: {area:.1f}m²"
