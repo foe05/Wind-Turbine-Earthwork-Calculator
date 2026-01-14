@@ -12,6 +12,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from weasyprint import HTML, CSS
+
 from ..utils.logging_utils import get_plugin_logger
 
 
@@ -201,6 +203,39 @@ class MultiSiteReportGenerator:
         # Write to file
         Path(output_path).write_text(html_content, encoding='utf-8')
         self.logger.info(f"Multi-site HTML report generated: {output_path}")
+
+    def generate_pdf(self, html_path: str, output_path: str):
+        """
+        Generate PDF from HTML report.
+
+        Args:
+            html_path (str): Path to HTML file
+            output_path (str): Path to save PDF file
+        """
+        self.logger.info(f"Generating PDF from HTML: {html_path}")
+
+        # Custom CSS for PDF (optional)
+        pdf_css = CSS(string='''
+            @page {
+                size: A4;
+                margin: 2cm;
+            }
+            body {
+                font-size: 12px;
+            }
+        ''')
+
+        # Convert to PDF
+        html_path_obj = Path(html_path)
+        output_path_obj = Path(output_path)
+        output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+        HTML(filename=str(html_path_obj)).write_pdf(
+            target=str(output_path_obj),
+            stylesheets=[pdf_css]
+        )
+
+        self.logger.info(f"  ✓ PDF report generated: {output_path}")
 
     def _get_css_styles(self) -> str:
         """Get CSS styles for the report."""
