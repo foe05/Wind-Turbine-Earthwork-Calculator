@@ -3,7 +3,7 @@
   "spec": "017-jwt-tokens-cannot-be-revoked-after-logout",
   "state": "building",
   "subtasks": {
-    "completed": 4,
+    "completed": 6,
     "total": 9,
     "in_progress": 1,
     "failed": 0
@@ -18,8 +18,8 @@
     "max": 1
   },
   "session": {
-    "number": 6,
+    "number": 8,
     "started_at": "2026-01-14T20:05:44.947868"
   },
-  "last_update": "2026-01-14T20:17:06.735233"
+  "last_update": "2026-01-14T20:20:51.452266"
 }
