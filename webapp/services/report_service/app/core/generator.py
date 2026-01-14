@@ -8,6 +8,13 @@ from pathlib import Path
 import logging
 import uuid
 
+from .chart_generator import (
+    generate_volume_chart,
+    generate_multi_site_comparison_chart,
+    generate_cost_comparison_chart,
+    is_matplotlib_available
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -103,6 +110,177 @@ class ReportGenerator:
 
         return output_path
 
+    def _generate_charts(self, template: str, data: dict) -> None:
+        """
+        Generate charts for the report and add to data dictionary.
+
+        Args:
+            template: Template name ('wka', 'road', 'solar', 'terrain')
+            data: Report data dictionary (modified in place)
+        """
+        if not is_matplotlib_available():
+            logger.warning("matplotlib not available, skipping chart generation")
+            return
+
+        logger.info("Generating charts for report")
+
+        try:
+            if template == 'wka':
+                self._generate_wka_charts(data)
+            elif template == 'road':
+                self._generate_road_charts(data)
+            elif template == 'solar':
+                self._generate_solar_charts(data)
+            elif template == 'terrain':
+                self._generate_terrain_charts(data)
+        except Exception as e:
+            logger.error(f"Error generating charts: {e}", exc_info=True)
+            # Continue without charts rather than failing the entire report
+
+    def _generate_wka_charts(self, data: dict) -> None:
+        """
+        Generate charts for WKA reports.
+
+        Args:
+            data: WKA report data dictionary (modified in place)
+        """
+        sites = data.get('sites', [])
+        if not sites:
+            return
+
+        # Generate individual site volume charts
+        for site in sites:
+            total_cut = site.get('total_cut', 0)
+            total_fill = site.get('total_fill', 0)
+            site_id = site.get('id', '')
+
+            if total_cut > 0 or total_fill > 0:
+                chart_data = generate_volume_chart(
+                    cut_volume=total_cut,
+                    fill_volume=total_fill,
+                    title=f"Erdarbeiten - WKA {site_id}",
+                    dpi=150  # Lower DPI for performance
+                )
+
+                if chart_data:
+                    site['volume_chart'] = chart_data
+                    logger.info(f"  ✓ Volume chart generated for WKA {site_id}")
+
+        # Generate multi-site comparison charts if multiple sites
+        if len(sites) > 1:
+            # Volume comparison chart
+            sites_data = [
+                {
+                    'id': site.get('id'),
+                    'total_cut': site.get('total_cut', 0),
+                    'total_fill': site.get('total_fill', 0)
+                }
+                for site in sites
+            ]
+
+            comparison_chart = generate_multi_site_comparison_chart(
+                sites_data=sites_data,
+                dpi=150
+            )
+
+            if comparison_chart:
+                data['volume_comparison_chart'] = comparison_chart
+                logger.info("  ✓ Multi-site volume comparison chart generated")
+
+            # Cost comparison chart
+            cost_comparison_chart = generate_cost_comparison_chart(
+                sites_data=[
+                    {
+                        'id': site.get('id'),
+                        'cost_total': site.get('cost_total', 0)
+                    }
+                    for site in sites
+                ],
+                dpi=150
+            )
+
+            if cost_comparison_chart:
+                data['cost_comparison_chart'] = cost_comparison_chart
+                logger.info("  ✓ Multi-site cost comparison chart generated")
+
+    def _generate_road_charts(self, data: dict) -> None:
+        """
+        Generate charts for road reports.
+
+        Args:
+            data: Road report data dictionary (modified in place)
+        """
+        road_data = data.get('road_data')
+        if not road_data:
+            return
+
+        total_cut = road_data.get('total_cut', 0)
+        total_fill = road_data.get('total_fill', 0)
+
+        if total_cut > 0 or total_fill > 0:
+            chart_data = generate_volume_chart(
+                cut_volume=total_cut,
+                fill_volume=total_fill,
+                title="Straßenbau - Erdarbeiten",
+                dpi=150
+            )
+
+            if chart_data:
+                data['volume_chart'] = chart_data
+                logger.info("  ✓ Road volume chart generated")
+
+    def _generate_solar_charts(self, data: dict) -> None:
+        """
+        Generate charts for solar park reports.
+
+        Args:
+            data: Solar report data dictionary (modified in place)
+        """
+        solar_data = data.get('solar_data')
+        if not solar_data:
+            return
+
+        total_cut = solar_data.get('total_cut', 0)
+        total_fill = solar_data.get('total_fill', 0)
+
+        if total_cut > 0 or total_fill > 0:
+            chart_data = generate_volume_chart(
+                cut_volume=total_cut,
+                fill_volume=total_fill,
+                title="Solarpark - Erdarbeiten",
+                dpi=150
+            )
+
+            if chart_data:
+                data['volume_chart'] = chart_data
+                logger.info("  ✓ Solar park volume chart generated")
+
+    def _generate_terrain_charts(self, data: dict) -> None:
+        """
+        Generate charts for terrain analysis reports.
+
+        Args:
+            data: Terrain report data dictionary (modified in place)
+        """
+        terrain_data = data.get('terrain_data')
+        if not terrain_data:
+            return
+
+        cut_volume = terrain_data.get('cut_volume', 0)
+        fill_volume = terrain_data.get('fill_volume', 0)
+
+        if cut_volume > 0 or fill_volume > 0:
+            chart_data = generate_volume_chart(
+                cut_volume=cut_volume,
+                fill_volume=fill_volume,
+                title="Geländeanalyse - Erdarbeiten",
+                dpi=150
+            )
+
+            if chart_data:
+                data['volume_chart'] = chart_data
+                logger.info("  ✓ Terrain analysis volume chart generated")
+
     def generate_report(
         self,
         template: str,
@@ -134,6 +312,9 @@ class ReportGenerator:
         }
 
         template_file = template_files.get(template, 'wka_report.html')
+
+        # Generate charts before rendering template
+        self._generate_charts(template, data)
 
         # Generate HTML first
         html_path = reports_dir / f"report_{report_id}.html"
