@@ -183,3 +183,15 @@ prototype/old_versions/
 
 # Auto Claude data directory
 .auto-claude/
+
+# Auto Claude generated files
+.auto-claude-security.json
+.auto-claude-status
+.claude_settings.json
+.worktrees/
+.security-key
+logs/security/
+
+# Central logging: the committed file holds a placeholder; users write their
+# real API key locally. Ignore so local edits never get pushed.
+windturbine_earthwork_calculator_v2/log.config

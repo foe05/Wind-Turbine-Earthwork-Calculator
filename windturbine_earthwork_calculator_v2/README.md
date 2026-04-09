@@ -313,6 +313,62 @@ Terrain Range: 8.5 m (min: 301.2, max: 309.7)
 
 ---
 
+## 📡 Telemetry
+
+The plugin can optionally forward a small set of anonymous usage events to the
+central logging service at `log.broetzens.de`. Telemetry is **opt-in** and
+**off by default**.
+
+### What is sent
+
+Exactly four events, each with a minimal payload:
+
+| Event | When | Payload fields |
+|---|---|---|
+| `calculation_started` | Beginning of the earthwork calculation | `num_turbines`, `dem_source_type`, `platform_w`, `platform_h`, `rotation_opt_enabled` (fields are omitted if not determinable) |
+| `calculation_completed` | After a successful calculation | `duration_ms`, `cut_m3`, `fill_m3`, `balance_m3`, `num_turbines` |
+| `calculation_failed` | On calculation error | `error_class` (exception class name only), `step` |
+| `report_generated` | After a successful HTML / vector-layer export | `format` (e.g. `"html"`, `"vector_layer"`) |
+
+Each request additionally includes:
+- `tool`: `wind-turbine-earthwork-calculator`
+- `tool_version`: plugin version from `metadata.txt`
+- `instance`: an anonymous UUID4 generated on first start and stored in QGIS
+  `QSettings` under `wind-turbine-earthwork-calculator/installation_id`
+
+**No PII is ever sent.** No file paths, file names, coordinates, user names,
+hostnames, IP addresses, stack traces or exception messages are included.
+
+### Where it goes
+
+All events are sent via `POST https://log.broetzens.de/api/log` with a
+5-second timeout, from a background daemon thread. Errors are swallowed
+silently — the plugin never blocks or crashes because of telemetry.
+
+### How to enable telemetry
+
+1. Locate the file `log.config` inside the installed plugin directory (next
+   to `__init__.py`). It ships with the placeholder `REPLACE_WITH_YOUR_API_KEY`.
+2. Replace the contents of that file with your real API key (a single line,
+   no quotes, no `key=value` syntax, no comments).
+3. Restart QGIS.
+
+Status is logged once at plugin load to the QGIS message log (panel
+*WindTurbine Telemetry*), either confirming activation or noting that
+telemetry is inactive.
+
+### How to disable telemetry
+
+Either leave `log.config` empty, keep the shipped placeholder
+`REPLACE_WITH_YOUR_API_KEY`, or delete the file. In any of those states the
+telemetry module is a strict no-op and makes no network calls.
+
+> **Note:** `log.config` is listed in the repository's `.gitignore`. The
+> committed placeholder stays in place, but your locally edited real key is
+> never pushed.
+
+---
+
 ## 📝 License
 
 This plugin is provided "as-is" for wind energy site planning purposes.
