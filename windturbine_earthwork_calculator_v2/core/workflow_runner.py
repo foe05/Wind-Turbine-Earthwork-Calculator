@@ -54,6 +54,7 @@ from .surface_validators import validate_project
 from .uncertainty import UncertaintyConfig, TerrainType
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
+from ..utils.central_logging import log_event
 
 
 class WorkflowProgressFeedback(QgsProcessingFeedback):
@@ -143,6 +144,16 @@ class WorkflowWorker(QObject):
             self.logger.info("MULTI-SURFACE WORKFLOW GESTARTET")
             self.logger.info(f"Startzeit: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             self.logger.info("=" * 60)
+
+            # Opt-in telemetry: signal start. No-op if no API key in log.config.
+            log_event("calculation_started", {
+                "uncertainty_enabled": bool(self.params.get('uncertainty_enabled', False)),
+                "boom_enabled": bool(self.params.get('dxf_boom')),
+                "rotor_enabled": bool(self.params.get('dxf_rotor')),
+                "road_enabled": bool(self.params.get('dxf_road')),
+                "stabilization_enabled": bool(self.params.get('enable_stabilization', True)),
+            })
+
             self._run_workflow()
 
             # Success - calculate duration
@@ -153,6 +164,10 @@ class WorkflowWorker(QObject):
             self.logger.info(f"Endzeit: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             self.logger.info("=" * 60)
 
+            log_event("calculation_completed", {
+                "duration_seconds": round(elapsed, 1),
+            })
+
         except Exception as e:
             # Failure - log error with duration
             elapsed = time.time() - workflow_start
@@ -162,6 +177,11 @@ class WorkflowWorker(QObject):
             self.logger.error(f"Fehlertyp: {type(e).__name__}")
             self.logger.error(f"Fehlermeldung: {str(e)}")
             self.logger.error("=" * 60, exc_info=True)
+
+            log_event("calculation_failed", {
+                "error_class": type(e).__name__,
+                "duration_seconds": round(elapsed, 1),
+            })
 
             self.finished.emit(False, f"Fehler: {str(e)}")
 
@@ -806,6 +826,8 @@ class WorkflowWorker(QObject):
             report_config,
             profiles_dir=str(profiles_dir)
         )
+
+        log_event("report_generated")
 
         # === STEP 7.5: Calculate Terrain Intersection Lines ===
         self.progress_updated.emit(88, "🔍 Berechne Geländeschnittkanten...")
