@@ -180,3 +180,7 @@ Thumbs.db
 # Project specific
 prototype/backup/
 prototype/old_versions/
+
+# Central logging: the committed file holds a placeholder; users write their
+# real API key locally. Ignore so local edits never get pushed.
+windturbine_earthwork_calculator_v2/log.config
