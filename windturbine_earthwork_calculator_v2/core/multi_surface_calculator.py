@@ -77,8 +77,16 @@ def _get_safe_max_workers(requested_workers: Optional[int] = None) -> int:
     """
     Get safe number of workers for multiprocessing in QGIS context.
 
-    On Windows, multiprocessing with QGIS causes issues (spawns multiple QGIS instances).
-    This function returns 1 worker on Windows to disable multiprocessing.
+    On Windows, multiprocessing with QGIS causes issues (spawns multiple QGIS instances),
+    so we always use 1 worker.
+
+    On Linux/macOS, we force the 'spawn' start method instead of the default 'fork'.
+    Reason: QGIS pre-loads numpy via Qt/GDAL bindings; with 'fork' the child process
+    inherits the parent's in-memory state, and numpy's C extensions get into a broken
+    state in the forked process - this causes hundreds of
+    'numpy.core.multiarray failed to import' errors and makes all DEM sampling fail
+    (resulting in Cut/Fill = 0 m³). With 'spawn' each worker starts as a fresh Python
+    process and re-imports numpy cleanly.
 
     Args:
         requested_workers: Requested number of workers (None = auto-detect)
@@ -86,20 +94,36 @@ def _get_safe_max_workers(requested_workers: Optional[int] = None) -> int:
     Returns:
         Safe number of workers (1 on Windows, cpu_count-1 on Linux/Mac)
     """
+    logger = get_plugin_logger()
+
     if platform.system() == 'Windows':
         # Disable multiprocessing on Windows (QGIS compatibility issue)
-        logger = get_plugin_logger()
         logger.warning(
             "Multiprocessing disabled on Windows due to QGIS compatibility. "
             "Calculations will run sequentially (slower but stable)."
         )
         return 1
+
+    # Linux/macOS: ensure 'spawn' start method to avoid numpy/fork issues with QGIS
+    try:
+        current_method = mp.get_start_method(allow_none=True)
+        if current_method != 'spawn':
+            mp.set_start_method('spawn', force=True)
+            logger.info(
+                "Set multiprocessing start method to 'spawn' "
+                "(fixes 'numpy.core.multiarray failed to import' in worker processes "
+                "on Linux/macOS with QGIS pre-loaded numpy)"
+            )
+    except RuntimeError as exc:
+        logger.warning(
+            f"Could not set 'spawn' start method "
+            f"(using existing '{mp.get_start_method()}'): {exc}"
+        )
+
+    if requested_workers is None:
+        return max(1, mp.cpu_count() - 1)
     else:
-        # On Linux/Mac: Use multiprocessing
-        if requested_workers is None:
-            return max(1, mp.cpu_count() - 1)
-        else:
-            return max(1, requested_workers)
+        return max(1, requested_workers)
 
 
 # ============================================================================
