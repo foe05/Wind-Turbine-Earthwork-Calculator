@@ -705,6 +705,51 @@ class WorkflowWorker(QObject):
             self.logger.error(f"Profile generation failed: {e}", exc_info=True)
             raise
 
+        # === STEP 6.5: Bodenstabilisierung ===
+        stabilization_data = None
+        if self.params.get('enable_stabilization', True):
+            self.progress_updated.emit(83, "🏗️ Bodenstabilisierung wird berechnet...")
+            self.logger.info("")
+            self.logger.info("=" * 60)
+            self.logger.info("SCHRITT 6.5: Bodenstabilisierung berechnen")
+            self.logger.info("=" * 60)
+
+            try:
+                from .soil_stabilization_calculator import SoilStabilizationCalculator
+
+                stabilization_calc = SoilStabilizationCalculator()
+
+                stabilization_data = stabilization_calc.calculate_full_requirements(
+                    platform_area_m2=project.crane_pad.geometry.area(),
+                    soil_type=self.params.get('soil_type', 'Schluff'),
+                    current_ev2=self.params.get('ev2_bestand', 45.0),
+                    water_content=self.params.get('water_content', 0),
+                    optimum_water=self.params.get('optimum_water', 0)
+                )
+
+                self.logger.info("")
+                self.logger.info("Bodenstabilisierung berechnet:")
+                if stabilization_data.get('total_lime_tons', 0) > 0:
+                    self.logger.info(f"  Kalkbedarf: {stabilization_data['total_lime_tons']:.1f} Tonnen")
+
+                self.logger.info(f"  Schotterbedarf: {stabilization_data['total_gravel_tons']:.0f} Tonnen")
+                self.logger.info(
+                    f"  Schichtdicke: {stabilization_data['gravel_layer']['thickness_m']*100:.0f} cm"
+                )
+
+                self.progress_updated.emit(
+                    84,
+                    f"✓ Bodenstabilisierung: {stabilization_data['total_gravel_tons']:.0f} t Schotter"
+                )
+
+            except Exception as e:
+                self.logger.error(f"Bodenstabilisierung fehlgeschlagen: {e}", exc_info=True)
+                # Nicht kritisch - Workflow kann fortgesetzt werden
+                stabilization_data = None
+                self.progress_updated.emit(84, "⚠ Bodenstabilisierung übersprungen (Fehler)")
+        else:
+            self.logger.info("Bodenstabilisierung deaktiviert (übersprungen)")
+
         # === STEP 7: Report Generation ===
         self.progress_updated.emit(85, "📝 HTML-Bericht wird erstellt...")
         self.logger.info("Generating HTML report")
@@ -741,8 +786,10 @@ class WorkflowWorker(QObject):
             'long_profile_spacing': self.params.get('long_profile_spacing', 10.0)
         }
 
+        results_for_report = results.to_dict()
+        results_for_report['stabilization'] = stabilization_data
         report_gen = ReportGenerator(
-            results.to_dict(),
+            results_for_report,
             project.crane_pad.geometry,
             dem_layer,
             platform_layer=surface_layers.get('crane_pad'),
