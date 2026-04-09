@@ -24,6 +24,15 @@ from qgis.PyQt.QtCore import Qt, pyqtSignal, QUrl
 from qgis.PyQt.QtGui import QIcon, QDesktopServices
 
 from ..utils.logging_utils import get_plugin_logger
+from ..utils.validation import (
+    ValidationError,
+    validate_file_exists,
+    validate_height_range,
+    validate_crs
+)
+from ..utils.i18n import get_message, get_language
+from ..utils.error_messages import ERROR_MESSAGES
+from ..core.dxf_importer import DXFImporter
 
 
 class MainDialog(QDialog):
@@ -868,8 +877,111 @@ class MainDialog(QDialog):
         # Connect FOK change to update search range display
         self.input_fok.valueChanged.connect(self._update_search_range_display)
 
+    def _show_validation_error(self, title: str, error: str):
+        """
+        Display validation error with bilingual message and fix suggestions.
+
+        Args:
+            title (str): Error dialog title
+            error (str): Error message (already formatted with fix suggestions)
+        """
+        # Format message with line breaks for better readability
+        formatted_error = error.replace('\n', '\n\n')
+
+        QMessageBox.critical(
+            self,
+            title,
+            formatted_error
+        )
+
+    def _validate_dxf_file(self, file_path: str, surface_name: str) -> bool:
+        """
+        Validate a DXF file with enhanced validation.
+
+        Args:
+            file_path (str): Path to DXF file
+            surface_name (str): Name of surface for error messages
+
+        Returns:
+            bool: True if validation passed, False otherwise
+        """
+        try:
+            # Validate file exists and has correct extension
+            validate_file_exists(file_path, extension='.dxf')
+
+            # Try to open DXF file and perform basic validation
+            try:
+                importer = DXFImporter(file_path, tolerance=0.01)
+
+                # Get available layers
+                layers = importer.get_available_layers()
+                if not layers:
+                    lang = get_language()
+                    error_msg = get_message('dxf_no_entities', ERROR_MESSAGES)
+                    fix_msg = ERROR_MESSAGES['dxf_no_entities']['fix'][lang]
+                    raise ValidationError(f"{error_msg}\n{fix_msg}")
+
+                # Detect coordinate system and provide feedback
+                crs_info = importer.detect_coordinate_system()
+                if crs_info and crs_info.get('suggested_epsg'):
+                    suggested_epsg = crs_info['suggested_epsg']
+                    confidence = crs_info.get('confidence', 'unknown')
+                    self.logger.info(
+                        f"DXF {surface_name}: Detected CRS EPSG:{suggested_epsg} "
+                        f"(confidence: {confidence})"
+                    )
+
+                # Validate entity types
+                entity_stats = importer.validate_entity_types()
+                if entity_stats['unsupported_entities'] > 0:
+                    self.logger.warning(
+                        f"DXF {surface_name}: Found {entity_stats['unsupported_entities']} "
+                        f"unsupported entities. Supported entities: {entity_stats['supported_entities']}"
+                    )
+
+                return True
+
+            except ImportError as e:
+                # Handle ezdxf not installed
+                lang = get_language()
+                error_msg = get_message('ezdxf_not_installed', ERROR_MESSAGES)
+                fix_msg = ERROR_MESSAGES['ezdxf_not_installed']['fix'][lang]
+                self._show_validation_error(
+                    "Import Error" if lang == 'en' else "Import-Fehler",
+                    f"{error_msg}\n\n{fix_msg}"
+                )
+                return False
+
+            except Exception as e:
+                # Handle DXF reading errors
+                lang = get_language()
+                error_msg = get_message('dxf_read_error', ERROR_MESSAGES, error=str(e))
+                fix_msg = ERROR_MESSAGES['dxf_read_error']['fix'][lang]
+                self._show_validation_error(
+                    "DXF Error" if lang == 'en' else "DXF-Fehler",
+                    f"{error_msg}\n\n{fix_msg}"
+                )
+                return False
+
+        except ValidationError as e:
+            lang = get_language()
+            self._show_validation_error(
+                "Validation Error" if lang == 'en' else "Validierungsfehler",
+                str(e)
+            )
+            return False
+
+        except Exception as e:
+            # Catch-all for unexpected errors
+            lang = get_language()
+            self._show_validation_error(
+                "Unexpected Error" if lang == 'en' else "Unerwarteter Fehler",
+                str(e)
+            )
+            return False
+
     def _browse_dxf(self, line_edit: QLineEdit, surface_name: str):
-        """Browse for DXF file."""
+        """Browse for DXF file with validation."""
         filename, _ = QFileDialog.getOpenFileName(
             self,
             f"DXF-Datei für {surface_name} auswählen",
@@ -877,7 +989,10 @@ class MainDialog(QDialog):
             "DXF-Dateien (*.dxf)"
         )
         if filename:
-            line_edit.setText(filename)
+            # Validate the selected DXF file
+            if self._validate_dxf_file(filename, surface_name):
+                line_edit.setText(filename)
+                self.logger.info(f"DXF file validated successfully: {filename}")
 
     def _browse_workspace(self):
         """Browse for workspace directory."""
@@ -939,70 +1054,348 @@ class MainDialog(QDialog):
         """Toggle road gravel thickness input based on checkbox state."""
         self.input_road_gravel_thickness.setEnabled(state == Qt.Checked)
 
+    def _run_preflight_validation(self) -> bool:
+        """
+        Run comprehensive pre-flight validation before processing starts.
+
+        This validates all inputs comprehensively:
+        - DXF files (existence, readability, CRS consistency)
+        - Height parameters (range validation)
+        - Workspace
+        - Network connectivity for DEM download
+
+        Returns:
+            bool: True if all validations pass, False otherwise
+        """
+        lang = get_language()
+
+        # === PHASE 1: Basic input validation ===
+        if not self._validate_inputs():
+            return False
+
+        # === PHASE 2: DXF CRS consistency check ===
+        try:
+            self.logger.info("=" * 60)
+            self.logger.info("🔍 PRE-FLIGHT VALIDATION STARTED")
+            self.logger.info("=" * 60)
+
+            self.logger.info("Validating DXF coordinate reference systems...")
+
+            dxf_files = []
+            dxf_names = []
+
+            # Required files
+            if self.input_dxf_crane.text().strip():
+                dxf_files.append(self.input_dxf_crane.text().strip())
+                dxf_names.append("Kranstellfläche" if lang == 'de' else "Crane pad")
+
+            if self.input_dxf_foundation.text().strip():
+                dxf_files.append(self.input_dxf_foundation.text().strip())
+                dxf_names.append("Fundamentfläche" if lang == 'de' else "Foundation")
+
+            # Optional files
+            if self.input_dxf_boom.text().strip():
+                dxf_files.append(self.input_dxf_boom.text().strip())
+                dxf_names.append("Auslegerfläche" if lang == 'de' else "Boom surface")
+
+            if self.input_dxf_rotor.text().strip():
+                dxf_files.append(self.input_dxf_rotor.text().strip())
+                dxf_names.append("Blattlagerfläche" if lang == 'de' else "Blade storage")
+
+            if self.input_dxf_holms.text().strip():
+                dxf_files.append(self.input_dxf_holms.text().strip())
+                dxf_names.append("Holme" if lang == 'de' else "Holms")
+
+            if self.input_dxf_road.text().strip():
+                dxf_files.append(self.input_dxf_road.text().strip())
+                dxf_names.append("Zufahrtsstraße" if lang == 'de' else "Road access")
+
+            # Check CRS consistency across all DXF files
+            detected_crs_list = []
+            for i, dxf_path in enumerate(dxf_files):
+                try:
+                    importer = DXFImporter(dxf_path, tolerance=self.input_dxf_tolerance.value())
+                    crs_info = importer.detect_coordinate_system()
+
+                    if crs_info and crs_info.get('suggested_epsg'):
+                        detected_epsg = crs_info['suggested_epsg']
+                        confidence = crs_info.get('confidence', 'unknown')
+                        detected_crs_list.append((dxf_names[i], detected_epsg, confidence))
+                        self.logger.info(
+                            f"  ✓ {dxf_names[i]}: EPSG:{detected_epsg} (confidence: {confidence})"
+                        )
+                    else:
+                        self.logger.warning(f"  ⚠ {dxf_names[i]}: Could not detect CRS")
+
+                except Exception as e:
+                    error_msg = (
+                        f"Fehler beim Lesen von {dxf_names[i]}: {str(e)}"
+                        if lang == 'de' else
+                        f"Error reading {dxf_names[i]}: {str(e)}"
+                    )
+                    self._show_validation_error(
+                        "DXF-Fehler" if lang == 'de' else "DXF Error",
+                        error_msg
+                    )
+                    return False
+
+            # Check if all detected CRS are consistent
+            if len(detected_crs_list) > 1:
+                first_epsg = detected_crs_list[0][1]
+                inconsistent = [
+                    (name, epsg, conf) for name, epsg, conf in detected_crs_list
+                    if epsg != first_epsg
+                ]
+
+                if inconsistent:
+                    error_parts = []
+                    if lang == 'de':
+                        error_parts.append(
+                            "⚠️ Warnung: Inkonsistente Koordinatensysteme erkannt!\n\n"
+                            "Die DXF-Dateien verwenden unterschiedliche CRS:"
+                        )
+                    else:
+                        error_parts.append(
+                            "⚠️ Warning: Inconsistent coordinate systems detected!\n\n"
+                            "The DXF files use different CRS:"
+                        )
+
+                    for name, epsg, conf in detected_crs_list:
+                        error_parts.append(f"  • {name}: EPSG:{epsg}")
+
+                    if lang == 'de':
+                        error_parts.append(
+                            "\nLösung: Transformieren Sie alle DXF-Dateien in dasselbe "
+                            "Koordinatensystem (z.B. EPSG:25832 für UTM 32N)."
+                        )
+                    else:
+                        error_parts.append(
+                            "\nFix: Transform all DXF files to the same coordinate system "
+                            "(e.g., EPSG:25832 for UTM 32N)."
+                        )
+
+                    self._show_validation_error(
+                        "CRS-Inkonsistenz" if lang == 'de' else "CRS Inconsistency",
+                        "\n".join(error_parts)
+                    )
+                    return False
+
+                self.logger.info(f"✓ All DXF files use consistent CRS: EPSG:{first_epsg}")
+
+        except Exception as e:
+            self.logger.error(f"Pre-flight validation error: {str(e)}", exc_info=True)
+            self._show_validation_error(
+                "Validierungsfehler" if lang == 'de' else "Validation Error",
+                str(e)
+            )
+            return False
+
+        # === PHASE 3: Height parameter validation ===
+        try:
+            self.logger.info("Validating height parameters...")
+
+            fok = self.input_fok.value()
+            search_below = self.input_search_below_fok.value()
+            search_above = self.input_search_above_fok.value()
+            height_step = self.input_height_step.value()
+
+            min_height = fok - search_below
+            max_height = fok + search_above
+
+            # Use the validation utility
+            validate_height_range(min_height, max_height, height_step)
+
+            num_scenarios = int((max_height - min_height) / height_step) + 1
+            self.logger.info(
+                f"✓ Height parameters valid: {min_height:.2f} - {max_height:.2f} m "
+                f"(step: {height_step:.2f} m, {num_scenarios} scenarios)"
+            )
+
+        except ValidationError as e:
+            self._show_validation_error(
+                "Ungültige Höhenparameter" if lang == 'de' else "Invalid Height Parameters",
+                str(e)
+            )
+            return False
+
+        # === PHASE 4: Network connectivity check (for DEM download) ===
+        try:
+            import socket
+
+            self.logger.info("Checking network connectivity for DEM download...")
+
+            # Check if we can resolve the DEM API hostname
+            try:
+                socket.gethostbyname("api.hoehendaten.de")
+                self.logger.info("✓ Network connectivity OK")
+            except socket.gaierror:
+                if lang == 'de':
+                    warning_msg = (
+                        "⚠️ Warnung: Keine Verbindung zur DEM-API möglich!\n\n"
+                        "Die DEM-Daten können nicht heruntergeladen werden. "
+                        "Prüfen Sie Ihre Internetverbindung.\n\n"
+                        "Möchten Sie trotzdem fortfahren?"
+                    )
+                    title = "Netzwerkverbindung"
+                else:
+                    warning_msg = (
+                        "⚠️ Warning: Cannot connect to DEM API!\n\n"
+                        "DEM data cannot be downloaded. "
+                        "Check your internet connection.\n\n"
+                        "Do you want to continue anyway?"
+                    )
+                    title = "Network Connection"
+
+                reply = QMessageBox.question(
+                    self,
+                    title,
+                    warning_msg,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+
+                if reply == QMessageBox.No:
+                    self.logger.info("User cancelled due to network issue")
+                    return False
+
+                self.logger.warning("User chose to continue despite network issue")
+
+        except ImportError:
+            # socket module not available (unlikely but handle gracefully)
+            self.logger.warning("Cannot check network connectivity (socket module unavailable)")
+
+        # === VALIDATION COMPLETE ===
+        self.logger.info("=" * 60)
+        self.logger.info("✅ PRE-FLIGHT VALIDATION PASSED")
+        self.logger.info("=" * 60)
+
+        return True
+
     def _validate_inputs(self):
-        """Validate user inputs."""
+        """Validate user inputs with enhanced bilingual validation."""
         errors = []
+        lang = get_language()
 
         # Check required DXF files (Kranstellfläche and Fundament)
         required_dxf_inputs = [
-            ("Kranstellfläche", self.input_dxf_crane),
-            ("Fundamentfläche", self.input_dxf_foundation),
+            ("Kranstellfläche", self.input_dxf_crane, "Crane pad" if lang == 'en' else "Kranstellfläche"),
+            ("Fundamentfläche", self.input_dxf_foundation, "Foundation" if lang == 'en' else "Fundamentfläche"),
         ]
 
-        for name, line_edit in required_dxf_inputs:
+        for de_name, line_edit, display_name in required_dxf_inputs:
             path = line_edit.text().strip()
             if not path:
-                errors.append(f"Bitte DXF-Datei für {name} auswählen")
-            elif not os.path.exists(path):
-                errors.append(f"DXF-Datei für {name} nicht gefunden: {path}")
+                if lang == 'en':
+                    errors.append(f"Please select DXF file for {display_name}")
+                else:
+                    errors.append(f"Bitte DXF-Datei für {display_name} auswählen")
+            else:
+                try:
+                    validate_file_exists(path, extension='.dxf')
+                except ValidationError as e:
+                    errors.append(f"{display_name}: {str(e)}")
 
         # Check optional DXF files (only validate if provided)
         optional_dxf_inputs = [
-            ("Auslegerfläche", self.input_dxf_boom),
-            ("Blattlagerfläche", self.input_dxf_rotor),
-            ("Holme", self.input_dxf_holms),
-            ("Zufahrtsstraße", self.input_dxf_road),
+            ("Auslegerfläche", self.input_dxf_boom, "Boom surface" if lang == 'en' else "Auslegerfläche"),
+            ("Blattlagerfläche", self.input_dxf_rotor, "Blade storage" if lang == 'en' else "Blattlagerfläche"),
+            ("Holme", self.input_dxf_holms, "Holms" if lang == 'en' else "Holme"),
+            ("Zufahrtsstraße", self.input_dxf_road, "Road access" if lang == 'en' else "Zufahrtsstraße"),
         ]
 
-        for name, line_edit in optional_dxf_inputs:
+        for de_name, line_edit, display_name in optional_dxf_inputs:
             path = line_edit.text().strip()
-            if path and not os.path.exists(path):
-                errors.append(f"DXF-Datei für {name} nicht gefunden: {path}")
+            if path:
+                try:
+                    validate_file_exists(path, extension='.dxf')
+                except ValidationError as e:
+                    errors.append(f"{display_name}: {str(e)}")
 
         # Check workspace
         workspace = self.input_workspace.text().strip()
         if not workspace:
-            errors.append("Bitte Workspace-Ordner auswählen")
+            if lang == 'en':
+                errors.append("Please select workspace folder")
+            else:
+                errors.append("Bitte Workspace-Ordner auswählen")
+        else:
+            # Create workspace if it doesn't exist (this is okay)
+            workspace_path = Path(workspace)
+            if workspace_path.exists() and not workspace_path.is_dir():
+                if lang == 'en':
+                    errors.append(f"Workspace path exists but is not a directory: {workspace}")
+                else:
+                    errors.append(f"Workspace-Pfad existiert, ist aber kein Ordner: {workspace}")
 
         # Check FOK is reasonable
         fok = self.input_fok.value()
         if fok < 0 or fok > 9999:
-            errors.append(f"FOK {fok} m ü.NN scheint unrealistisch")
+            if lang == 'en':
+                errors.append(f"Foundation elevation (FOK) {fok} m seems unrealistic")
+            else:
+                errors.append(f"FOK {fok} m ü.NN scheint unrealistisch")
 
-        # Check search ranges
+        # Check search ranges are positive
         if self.input_search_below_fok.value() < 0:
-            errors.append("Suchbereich unter FOK muss positiv sein")
+            if lang == 'en':
+                errors.append("Search range below FOK must be positive")
+            else:
+                errors.append("Suchbereich unter FOK muss positiv sein")
         if self.input_search_above_fok.value() < 0:
-            errors.append("Suchbereich über FOK muss positiv sein")
+            if lang == 'en':
+                errors.append("Search range above FOK must be positive")
+            else:
+                errors.append("Suchbereich über FOK muss positiv sein")
+
+        # Check search range is reasonable
+        total_range = self.input_search_below_fok.value() + self.input_search_above_fok.value()
+        if total_range > 10.0:
+            if lang == 'en':
+                errors.append(f"Total search range {total_range:.1f} m is very large. Consider reducing it.")
+            else:
+                errors.append(f"Gesamter Suchbereich {total_range:.1f} m ist sehr groß. Erwägen Sie eine Reduzierung.")
 
         # Check boom slope is in range
         boom_slope = self.input_boom_slope.value()
         if boom_slope < 2.0 or boom_slope > 8.0:
-            errors.append(f"Auslegerflächen-Neigung {boom_slope}% außerhalb zulässigem Bereich [2%, 8%]")
+            if lang == 'en':
+                errors.append(f"Boom surface slope {boom_slope}% outside valid range [2%, 8%]")
+            else:
+                errors.append(f"Auslegerflächen-Neigung {boom_slope}% außerhalb zulässigem Bereich [2%, 8%]")
+
+        # Check height step is reasonable
+        height_step = self.input_height_step.value()
+        if height_step < 0.01:
+            if lang == 'en':
+                errors.append(f"Height step {height_step} m is too small (minimum 0.01 m)")
+            else:
+                errors.append(f"Höhenschritt {height_step} m ist zu klein (minimum 0.01 m)")
+
+        # Check slope angle is reasonable
+        slope_angle = self.input_slope_angle.value()
+        if slope_angle < 15.0 or slope_angle > 60.0:
+            if lang == 'en':
+                errors.append(f"Slope angle {slope_angle}° outside valid range [15°, 60°]")
+            else:
+                errors.append(f"Böschungswinkel {slope_angle}° außerhalb zulässigem Bereich [15°, 60°]")
 
         if errors:
+            title = "Invalid Inputs" if lang == 'en' else "Ungültige Eingaben"
+            error_message = "\n\n".join(errors)
             QMessageBox.warning(
                 self,
-                "Ungültige Eingaben",
-                "\n".join(errors)
+                title,
+                error_message
             )
             return False
 
         return True
 
     def _on_start(self):
-        """Handle start button click."""
-        if not self._validate_inputs():
+        """Handle start button click with comprehensive pre-flight validation."""
+        # Run comprehensive pre-flight validation BEFORE processing starts
+        # This validates: DXF files, CRS consistency, height parameters, network connectivity
+        if not self._run_preflight_validation():
             return
 
         # Collect all parameters
@@ -1083,22 +1476,34 @@ class MainDialog(QDialog):
             self.status_text.append(message)
 
     def processing_finished(self, success=True, message=""):
-        """Called when processing finishes."""
+        """Called when processing finishes with bilingual messages."""
         self.progress_bar.setVisible(False)
         self.btn_start.setEnabled(True)
 
+        lang = get_language()
+
         if success:
+            title = "Completed" if lang == 'en' else "Fertig"
+            default_msg = "Calculation completed successfully!" if lang == 'en' else "Berechnung erfolgreich abgeschlossen!"
             QMessageBox.information(
                 self,
-                "Fertig",
-                message or "Berechnung erfolgreich abgeschlossen!"
+                title,
+                message or default_msg
             )
             self.accept()
         else:
+            title = "Error" if lang == 'en' else "Fehler"
+            default_msg = "An error occurred during processing." if lang == 'en' else "Ein Fehler ist aufgetreten."
+
+            # Format error message with better line breaks
+            error_message = message or default_msg
+            if '\n' in error_message:
+                error_message = error_message.replace('\n', '\n\n')
+
             QMessageBox.critical(
                 self,
-                "Fehler",
-                message or "Ein Fehler ist aufgetreten."
+                title,
+                error_message
             )
 
     # ========== Multi-Site Report Methods ==========
