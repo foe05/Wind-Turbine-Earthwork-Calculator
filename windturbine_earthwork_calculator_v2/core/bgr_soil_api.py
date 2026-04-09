@@ -28,6 +28,10 @@ from qgis.core import (
 from ..utils.logging_utils import get_plugin_logger
 
 
+class _BGREndpointUnavailable(Exception):
+    """Raised when the BGR WFS endpoint returns 404 (service discontinued)."""
+
+
 class BGRSoilAPI:
     """
     API-Client für BGR WFS-Services.
@@ -154,6 +158,13 @@ class BGRSoilAPI:
 
             return result
 
+        except _BGREndpointUnavailable as e:
+            # BGR service has been retired or moved - clear, user-facing message
+            return {
+                'success': False,
+                'error': str(e),
+                'endpoint_unavailable': True,
+            }
         except Exception as e:
             self.logger.error(f"BGR-Abfrage fehlgeschlagen: {e}", exc_info=True)
             return {
@@ -267,6 +278,23 @@ class BGRSoilAPI:
             return features
 
         except HTTPError as e:
+            if e.code == 404:
+                # Known issue: BGR has discontinued the WFS endpoint for BÜK200.
+                # As of 2026, services.bgr.de only exposes a WMS for buek200, not WFS,
+                # so every GetFeature request returns 404 regardless of the parameters.
+                # TODO: migrate to WMS GetFeatureInfo as a replacement.
+                self.logger.error(
+                    f"BGR WFS-Endpoint nicht gefunden (HTTP 404): {url}\n"
+                    f"Der WFS-Service unter {self.BGR_WFS_BASE} ist nicht (mehr) verfügbar. "
+                    f"BGR bietet für BÜK200 derzeit nur noch einen WMS-Service an. "
+                    f"Bitte die Bodenart manuell im Tab 'Bodenstabilisierung' auswählen."
+                )
+                # Mark error type for the caller to surface a clear UI message
+                raise _BGREndpointUnavailable(
+                    "BGR WFS-Endpoint nicht verfügbar (HTTP 404). "
+                    "BGR bietet aktuell nur noch WMS für BÜK200 an. "
+                    "Bitte Bodenart manuell auswählen."
+                ) from e
             self.logger.error(f"HTTP Error bei WFS-Request: {e.code} - {e.reason}")
             return []
         except URLError as e:
