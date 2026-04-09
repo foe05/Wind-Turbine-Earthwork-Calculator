@@ -29,6 +29,7 @@ except ImportError:
 
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
+from ..utils.gdal_compat import read_band_as_array
 
 
 class EarthworkCalculator:
@@ -126,8 +127,11 @@ class EarthworkCalculator:
                 ds = None
                 return np.array([])
 
-            data = band.ReadAsArray(x_min_px, y_min_px, width, height)
-            if data is None:
+            # ReadRaster + np.frombuffer avoids GDAL's _gdal_array numpy
+            # binding, which is broken on some QGIS builds.
+            try:
+                data = read_band_as_array(band, x_min_px, y_min_px, width, height)
+            except Exception:
                 ds = None
                 return self._sample_dem_legacy(geometry)
 
@@ -154,7 +158,7 @@ class EarthworkCalculator:
             mask_band.Fill(0)
             gdal.RasterizeLayer(mask_ds, [1], mem_layer, burn_values=[1])
 
-            mask = mask_band.ReadAsArray()
+            mask = read_band_as_array(mask_band, 0, 0, width, height)
             masked_data = data[mask == 1]
 
             if nodata is not None:
