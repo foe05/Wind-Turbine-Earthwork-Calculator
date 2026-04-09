@@ -191,3 +191,7 @@ prototype/old_versions/
 .worktrees/
 .security-key
 logs/security/
+
+# Central logging: the committed file holds a placeholder; users write their
+# real API key locally. Ignore so local edits never get pushed.
+windturbine_earthwork_calculator_v2/log.config
