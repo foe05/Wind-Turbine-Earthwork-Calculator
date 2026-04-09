@@ -11,6 +11,7 @@ import os
 from app.schemas.report import ReportGenerateRequest, ReportResponse
 from app.core.generator import ReportGenerator
 from app.core.config import get_settings
+from app.utils.security import validate_safe_path
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/report", tags=["Report"])
@@ -154,7 +155,15 @@ async def download_report(report_id: str, filename: str):
 
     Returns the report file for download.
     """
-    file_path = REPORTS_DIR / filename
+    # Validate filename to prevent path traversal attacks
+    try:
+        file_path = validate_safe_path(filename, REPORTS_DIR)
+    except ValueError as e:
+        logger.warning(f"Invalid filename in download request: {filename} - {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid filename: {str(e)}"
+        )
 
     if not file_path.exists():
         raise HTTPException(
