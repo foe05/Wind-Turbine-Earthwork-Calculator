@@ -1,0 +1,25 @@
+{
+  "active": true,
+  "spec": "001-comprehensive-input-validation-error-handling",
+  "state": "complete",
+  "subtasks": {
+    "completed": 13,
+    "total": 13,
+    "in_progress": 0,
+    "failed": 0
+  },
+  "phase": {
+    "current": "GUI Integration & User Feedback",
+    "id": null,
+    "total": 3
+  },
+  "workers": {
+    "active": 0,
+    "max": 1
+  },
+  "session": {
+    "number": 14,
+    "started_at": "2026-01-14T09:42:15.524727"
+  },
+  "last_update": "2026-01-14T10:39:02.968977"
+}
