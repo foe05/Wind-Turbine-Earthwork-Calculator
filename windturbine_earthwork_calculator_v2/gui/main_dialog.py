@@ -20,8 +20,8 @@ from qgis.PyQt.QtWidgets import (
     QDoubleSpinBox, QSpinBox, QGroupBox, QFormLayout,
     QCheckBox, QMessageBox, QProgressBar, QTextEdit, QScrollArea
 )
-from qgis.PyQt.QtCore import Qt, pyqtSignal
-from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtCore import Qt, pyqtSignal, QUrl
+from qgis.PyQt.QtGui import QIcon, QDesktopServices
 
 from ..utils.logging_utils import get_plugin_logger
 from ..utils.validation import (
@@ -44,6 +44,7 @@ class MainDialog(QDialog):
     2. Optimierung (Optimization) - Height range and slope parameters
     3. Geländeschnitte (Profiles) - Profile generation settings
     4. Ausgabe (Output) - Workspace and export settings
+    5. Standortvergleich (Multi-Site Report) - Comparison report across multiple sites
     """
 
     # Signal emitted when user clicks "Start"
@@ -56,6 +57,10 @@ class MainDialog(QDialog):
 
         self.setWindowTitle("Erdmassenberechnung Windenergieanlagen - Multi-Flächen")
         self.setMinimumSize(900, 700)
+
+        # Store processed sites for multi-site report
+        self.processed_sites = []  # List of SiteData objects
+        self.site_checkboxes = {}  # Dict mapping site_id -> QCheckBox
 
         self._init_ui()
         self._connect_signals()
@@ -76,11 +81,13 @@ class MainDialog(QDialog):
         self.tab_optimization = self._create_optimization_tab()
         self.tab_profiles = self._create_profiles_tab()
         self.tab_output = self._create_output_tab()
+        self.tab_multisite = self._create_multisite_report_tab()
 
         self.tabs.addTab(self.tab_input, "📂 Eingabe")
         self.tabs.addTab(self.tab_optimization, "⚙️ Optimierung")
         self.tabs.addTab(self.tab_profiles, "📊 Geländeschnitte")
         self.tabs.addTab(self.tab_output, "💾 Ausgabe")
+        self.tabs.addTab(self.tab_multisite, "📈 Standortvergleich")
 
         layout.addWidget(self.tabs)
 
@@ -658,6 +665,185 @@ class MainDialog(QDialog):
         scroll.setWidget(widget)
         return scroll
 
+    def _create_multisite_report_tab(self):
+        """Create multi-site comparison report tab."""
+        # Create scrollable container
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        # Info section
+        info_group = QGroupBox("Standortvergleich")
+        info_layout = QVBoxLayout()
+
+        info_label = QLabel(
+            "<b>Multi-Standort-Vergleichsbericht</b><br><br>"
+            "<i>Generieren Sie umfassende Vergleichsberichte für mehrere Windenergieanlagen-Standorte.</i><br><br>"
+            "Der Bericht enthält:<br>"
+            "• Gesamte Erdmassen und Kosten für alle Standorte<br>"
+            "• Ranking der Standorte nach Komplexität<br>"
+            "• Detaillierte Aufschlüsselung pro Standort<br>"
+            "• Export als HTML, PDF oder Excel"
+        )
+        info_label.setWordWrap(True)
+        info_layout.addWidget(info_label)
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+
+        # Site Selection Group
+        group_sites = QGroupBox("Standortauswahl")
+        sites_layout = QVBoxLayout()
+
+        sites_info = QLabel(
+            "<i>Wählen Sie die Standorte aus, die in den Vergleichsbericht aufgenommen werden sollen.</i>"
+        )
+        sites_info.setWordWrap(True)
+        sites_info.setStyleSheet("color: gray; font-size: 10px;")
+        sites_layout.addWidget(sites_info)
+
+        # Create scrollable container for site checkboxes
+        sites_scroll = QScrollArea()
+        sites_scroll.setWidgetResizable(True)
+        sites_scroll.setMaximumHeight(200)
+        sites_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sites_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        # Container widget for checkboxes
+        self.sites_checkbox_container = QWidget()
+        self.sites_checkbox_layout = QVBoxLayout()
+        self.sites_checkbox_layout.setContentsMargins(5, 5, 5, 5)
+
+        # Empty state label (shown when no sites processed)
+        self.label_no_sites = QLabel("<i>Noch keine Standorte verarbeitet. Führen Sie zunächst Berechnungen durch.</i>")
+        self.label_no_sites.setWordWrap(True)
+        self.label_no_sites.setStyleSheet("color: gray; font-size: 10px; padding: 10px;")
+        self.sites_checkbox_layout.addWidget(self.label_no_sites)
+
+        self.sites_checkbox_layout.addStretch()
+        self.sites_checkbox_container.setLayout(self.sites_checkbox_layout)
+        sites_scroll.setWidget(self.sites_checkbox_container)
+        sites_layout.addWidget(sites_scroll)
+
+        # Select All / Deselect All buttons
+        sites_buttons_layout = QHBoxLayout()
+        self.btn_select_all_sites = QPushButton("Alle auswählen")
+        self.btn_select_all_sites.clicked.connect(self._select_all_sites)
+        self.btn_select_all_sites.setEnabled(False)
+
+        self.btn_deselect_all_sites = QPushButton("Alle abwählen")
+        self.btn_deselect_all_sites.clicked.connect(self._deselect_all_sites)
+        self.btn_deselect_all_sites.setEnabled(False)
+
+        sites_buttons_layout.addWidget(self.btn_select_all_sites)
+        sites_buttons_layout.addWidget(self.btn_deselect_all_sites)
+        sites_buttons_layout.addStretch()
+        sites_layout.addLayout(sites_buttons_layout)
+
+        group_sites.setLayout(sites_layout)
+        layout.addWidget(group_sites)
+
+        # Cost Parameters Group
+        group_costs = QGroupBox("Kostenparameter")
+        form_costs = QFormLayout()
+
+        # Cost per m³ for cut
+        self.input_cost_cut = QDoubleSpinBox()
+        self.input_cost_cut.setRange(0, 100)
+        self.input_cost_cut.setValue(8.0)
+        self.input_cost_cut.setDecimals(2)
+        self.input_cost_cut.setSuffix(" €/m³")
+        self.input_cost_cut.setToolTip("Kosten pro Kubikmeter Abtrag")
+        form_costs.addRow("Abtrag-Kosten:", self.input_cost_cut)
+
+        # Cost per m³ for fill
+        self.input_cost_fill = QDoubleSpinBox()
+        self.input_cost_fill.setRange(0, 100)
+        self.input_cost_fill.setValue(12.0)
+        self.input_cost_fill.setDecimals(2)
+        self.input_cost_fill.setSuffix(" €/m³")
+        self.input_cost_fill.setToolTip("Kosten pro Kubikmeter Auftrag")
+        form_costs.addRow("Auftrag-Kosten:", self.input_cost_fill)
+
+        # Cost per m³ for gravel
+        self.input_cost_gravel = QDoubleSpinBox()
+        self.input_cost_gravel.setRange(0, 200)
+        self.input_cost_gravel.setValue(45.0)
+        self.input_cost_gravel.setDecimals(2)
+        self.input_cost_gravel.setSuffix(" €/m³")
+        self.input_cost_gravel.setToolTip("Kosten pro Kubikmeter Schotter")
+        form_costs.addRow("Schotter-Kosten:", self.input_cost_gravel)
+
+        group_costs.setLayout(form_costs)
+        layout.addWidget(group_costs)
+
+        # Export Options Group
+        group_export = QGroupBox("Export-Optionen")
+        form_export = QFormLayout()
+
+        export_info = QLabel(
+            "<i>Wählen Sie das gewünschte Export-Format für den Vergleichsbericht.</i>"
+        )
+        export_info.setWordWrap(True)
+        export_info.setStyleSheet("color: gray; font-size: 10px;")
+        form_export.addRow("", export_info)
+
+        # Format selection
+        from qgis.PyQt.QtWidgets import QComboBox
+        self.input_multisite_report_format = QComboBox()
+        self.input_multisite_report_format.addItems([
+            "HTML (Webseite)",
+            "PDF (Dokument)",
+            "Excel (Tabelle)"
+        ])
+        self.input_multisite_report_format.setCurrentIndex(0)  # Default to HTML
+        self.input_multisite_report_format.setToolTip(
+            "Wählen Sie das Format für den Standortvergleichsbericht:\n"
+            "- HTML: Interaktiver Bericht im Browser\n"
+            "- PDF: Druckbares Dokument\n"
+            "- Excel: Tabellenkalkulationsdatei mit mehreren Arbeitsblättern"
+        )
+        form_export.addRow("Format:", self.input_multisite_report_format)
+
+        # Output path
+        self.input_multisite_report_output = QLineEdit()
+        self.input_multisite_report_output.setPlaceholderText("Pfad wird automatisch generiert...")
+        self.input_multisite_report_output.setReadOnly(True)
+        self.input_multisite_report_output.setToolTip("Ausgabepfad für den Bericht (wird automatisch basierend auf Workspace erstellt)")
+
+        btn_browse_multisite_output = QPushButton("Durchsuchen...")
+        btn_browse_multisite_output.clicked.connect(self._browse_multisite_report_output)
+
+        output_layout = QHBoxLayout()
+        output_layout.addWidget(self.input_multisite_report_output)
+        output_layout.addWidget(btn_browse_multisite_output)
+        form_export.addRow("Ausgabepfad:", output_layout)
+
+        # Generate button
+        self.btn_generate_multisite_report = QPushButton("Bericht generieren")
+        self.btn_generate_multisite_report.setToolTip(
+            "Generiert einen Vergleichsbericht für alle ausgewählten Standorte"
+        )
+        self.btn_generate_multisite_report.setEnabled(False)  # Disabled until sites are selected
+        # Signal connection will be added in subtask-4-4
+
+        generate_layout = QHBoxLayout()
+        generate_layout.addStretch()
+        generate_layout.addWidget(self.btn_generate_multisite_report)
+
+        form_export.addRow("", generate_layout)
+
+        group_export.setLayout(form_export)
+        layout.addWidget(group_export)
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        scroll.setWidget(widget)
+        return scroll
+
     def _on_tab_changed(self, index):
         """Handle tab change - show/hide appropriate buttons."""
         # Last tab (index 3) shows "Start" button, others show "Next" button
@@ -684,6 +870,7 @@ class MainDialog(QDialog):
         self.btn_next.clicked.connect(self._on_next)
         self.btn_cancel.clicked.connect(self.reject)
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.btn_generate_multisite_report.clicked.connect(self._on_generate_multisite_report)
 
     def _setup_validators(self):
         """Setup value validators and constraints."""
@@ -816,6 +1003,39 @@ class MainDialog(QDialog):
         )
         if directory:
             self.input_workspace.setText(directory)
+
+    def _browse_multisite_report_output(self):
+        """Browse for multi-site report output file."""
+        # Get current format selection to determine file extension
+        format_index = self.input_multisite_report_format.currentIndex()
+        file_filter = ""
+        default_ext = ""
+
+        if format_index == 0:  # HTML
+            file_filter = "HTML-Dateien (*.html)"
+            default_ext = ".html"
+        elif format_index == 1:  # PDF
+            file_filter = "PDF-Dateien (*.pdf)"
+            default_ext = ".pdf"
+        elif format_index == 2:  # Excel
+            file_filter = "Excel-Dateien (*.xlsx)"
+            default_ext = ".xlsx"
+
+        # Get default directory from workspace if set
+        default_dir = self.input_workspace.text().strip()
+        if default_dir:
+            default_dir = os.path.join(default_dir, f"standortvergleich{default_ext}")
+        else:
+            default_dir = f"standortvergleich{default_ext}"
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Ausgabepfad für Standortvergleichsbericht",
+            default_dir,
+            file_filter
+        )
+        if filename:
+            self.input_multisite_report_output.setText(filename)
 
     def _update_search_range_display(self):
         """Update the search range display label."""
@@ -1285,3 +1505,313 @@ class MainDialog(QDialog):
                 title,
                 error_message
             )
+
+    # ========== Multi-Site Report Methods ==========
+
+    def add_processed_site(self, site_data):
+        """
+        Add a processed site to the multi-site report selection list.
+
+        Args:
+            site_data: SiteData object containing site information
+
+        Note:
+            If a site with the same site_id already exists, it will be updated.
+        """
+        from ..core.site_data import SiteData
+
+        # Validate input
+        if not isinstance(site_data, SiteData):
+            self.logger.warning(f"Invalid site_data type: {type(site_data)}")
+            return
+
+        # Check if site already exists (update if so)
+        existing_site = None
+        for i, site in enumerate(self.processed_sites):
+            if site.site_id == site_data.site_id:
+                existing_site = i
+                break
+
+        if existing_site is not None:
+            # Update existing site
+            self.processed_sites[existing_site] = site_data
+            # Update checkbox label if it exists
+            if site_data.site_id in self.site_checkboxes:
+                checkbox = self.site_checkboxes[site_data.site_id]
+                checkbox.setText(self._format_site_checkbox_label(site_data))
+        else:
+            # Add new site
+            self.processed_sites.append(site_data)
+            self._add_site_checkbox(site_data)
+
+        # Update UI state
+        self._update_site_selection_ui()
+
+        self.logger.info(f"Added/updated site '{site_data.site_name}' to multi-site report list")
+
+    def _add_site_checkbox(self, site_data):
+        """
+        Add a checkbox for a site to the UI.
+
+        Args:
+            site_data: SiteData object
+        """
+        # Create checkbox
+        checkbox = QCheckBox(self._format_site_checkbox_label(site_data))
+        checkbox.setChecked(True)  # Default to checked
+        checkbox.setToolTip(
+            f"Standort: {site_data.site_name}\n"
+            f"Position: {site_data.location.x():.2f}, {site_data.location.y():.2f}\n"
+            f"Erdmassen: {site_data.total_volume_moved:.1f} m³\n"
+            f"Kosten: {site_data.total_cost:.2f} €"
+        )
+
+        # Store reference
+        self.site_checkboxes[site_data.site_id] = checkbox
+
+        # Add to layout (before the stretch)
+        insert_index = self.sites_checkbox_layout.count() - 1  # Before stretch
+        self.sites_checkbox_layout.insertWidget(insert_index, checkbox)
+
+    def _format_site_checkbox_label(self, site_data):
+        """
+        Format the label for a site checkbox.
+
+        Args:
+            site_data: SiteData object
+
+        Returns:
+            Formatted label string
+        """
+        return (
+            f"{site_data.site_name} - "
+            f"{site_data.total_volume_moved:.1f} m³, "
+            f"{site_data.total_cost:.2f} €"
+        )
+
+    def _update_site_selection_ui(self):
+        """Update the site selection UI based on current state."""
+        has_sites = len(self.processed_sites) > 0
+
+        # Show/hide empty state label
+        self.label_no_sites.setVisible(not has_sites)
+
+        # Enable/disable select/deselect buttons
+        self.btn_select_all_sites.setEnabled(has_sites)
+        self.btn_deselect_all_sites.setEnabled(has_sites)
+
+        # Enable/disable generate button
+        self.btn_generate_multisite_report.setEnabled(has_sites)
+
+    def _select_all_sites(self):
+        """Select all site checkboxes."""
+        for checkbox in self.site_checkboxes.values():
+            checkbox.setChecked(True)
+
+    def _deselect_all_sites(self):
+        """Deselect all site checkboxes."""
+        for checkbox in self.site_checkboxes.values():
+            checkbox.setChecked(False)
+
+    def get_selected_sites(self):
+        """
+        Get list of selected sites for multi-site report.
+
+        Returns:
+            List of SiteData objects for checked sites
+        """
+        selected = []
+        for site in self.processed_sites:
+            if site.site_id in self.site_checkboxes:
+                checkbox = self.site_checkboxes[site.site_id]
+                if checkbox.isChecked():
+                    selected.append(site)
+        return selected
+
+    def clear_processed_sites(self):
+        """Clear all processed sites from the multi-site report list."""
+        # Remove all checkboxes from layout
+        for site_id, checkbox in self.site_checkboxes.items():
+            self.sites_checkbox_layout.removeWidget(checkbox)
+            checkbox.deleteLater()
+
+        # Clear data structures
+        self.site_checkboxes.clear()
+        self.processed_sites.clear()
+
+        # Update UI state
+        self._update_site_selection_ui()
+
+        self.logger.info("Cleared all processed sites from multi-site report list")
+
+    def get_multisite_report_format(self):
+        """
+        Get the selected export format for the multi-site report.
+
+        Returns:
+            str: Format string - 'html', 'pdf', or 'excel'
+        """
+        format_index = self.input_multisite_report_format.currentIndex()
+        format_map = {
+            0: 'html',
+            1: 'pdf',
+            2: 'excel'
+        }
+        return format_map.get(format_index, 'html')
+
+    def get_multisite_report_output_path(self):
+        """
+        Get the output path for the multi-site report.
+
+        Returns:
+            str: Output file path, or None if not set
+        """
+        path = self.input_multisite_report_output.text().strip()
+        return path if path else None
+
+    def get_multisite_cost_parameters(self):
+        """
+        Get the cost parameters for multi-site report.
+
+        Returns:
+            dict: Cost parameters (cut, fill, gravel costs per m³)
+        """
+        return {
+            'cost_cut': self.input_cost_cut.value(),
+            'cost_fill': self.input_cost_fill.value(),
+            'cost_gravel': self.input_cost_gravel.value()
+        }
+
+    def _on_generate_multisite_report(self):
+        """Handle generate multi-site report button click."""
+        try:
+            # Validate selected sites
+            selected_sites = self.get_selected_sites()
+            if not selected_sites:
+                QMessageBox.warning(
+                    self,
+                    "Keine Standorte ausgewählt",
+                    "Bitte wählen Sie mindestens einen Standort aus der Liste aus."
+                )
+                return
+
+            # Get report parameters
+            report_format = self.get_multisite_report_format()
+            cost_params = self.get_multisite_cost_parameters()
+            output_path = self.get_multisite_report_output_path()
+
+            # Determine output path with default if not set
+            if not output_path:
+                workspace = self.input_workspace.text().strip()
+                if not workspace:
+                    QMessageBox.warning(
+                        self,
+                        "Kein Workspace",
+                        "Bitte wählen Sie zuerst einen Workspace-Ordner auf der 'Ausgabe'-Tab aus."
+                    )
+                    return
+
+                # Generate default output path based on format
+                format_extensions = {
+                    'html': '.html',
+                    'pdf': '.pdf',
+                    'excel': '.xlsx'
+                }
+                ext = format_extensions.get(report_format, '.html')
+                output_path = os.path.join(workspace, f"standortvergleich{ext}")
+                self.input_multisite_report_output.setText(output_path)
+
+            # Prepare site results for report generator
+            site_results = []
+            for site_data in selected_sites:
+                site_result = {
+                    'site_id': site_data.site_id,
+                    'site_name': site_data.site_name,
+                    'results': {
+                        'total_cut': site_data.total_cut,
+                        'total_fill': site_data.total_fill,
+                        'net_volume': site_data.net_volume,
+                        'gravel_fill_external': site_data.gravel_volume,
+                        'crane_height': site_data.crane_height,
+                        'platform_height': site_data.crane_height,
+                        'terrain_min': site_data.terrain_min,
+                        'terrain_max': site_data.terrain_max,
+                        'terrain_mean': site_data.terrain_mean,
+                        'total_platform_area': site_data.platform_area,
+                        'platform_area': site_data.platform_area,
+                        'total_area': site_data.total_area,
+                        'slope_width': 0.0,  # Will be calculated if needed
+                    },
+                    'coordinates': (site_data.location.x(), site_data.location.y()),
+                    'config': {}
+                }
+                site_results.append(site_result)
+
+            # Create cost configuration for report generator
+            cost_config = {
+                'cut_cost_per_m3': cost_params['cost_cut'],
+                'fill_cost_per_m3': cost_params['cost_fill'],
+                'gravel_cost_per_m3': cost_params['cost_gravel'],
+                'transport_cost_per_m3_km': 0.5  # Default transport cost
+            }
+
+            # Import report generator
+            from ..core.multi_site_report_generator import MultiSiteReportGenerator
+
+            # Create report generator
+            self.logger.info(f"Generating multi-site report for {len(selected_sites)} sites...")
+            generator = MultiSiteReportGenerator(site_results, cost_config)
+
+            # Generate report based on format
+            if report_format == 'html':
+                generator.generate_html(output_path, project_name="Windpark-Projekt")
+                self.logger.info(f"HTML report generated: {output_path}")
+
+            elif report_format == 'pdf':
+                # Generate HTML first, then convert to PDF
+                html_path = output_path.replace('.pdf', '.html')
+                generator.generate_html(html_path, project_name="Windpark-Projekt")
+                generator.generate_pdf(html_path, output_path)
+                self.logger.info(f"PDF report generated: {output_path}")
+
+            elif report_format == 'excel':
+                generator.generate_excel(output_path, project_name="Windpark-Projekt")
+                self.logger.info(f"Excel report generated: {output_path}")
+
+            # Show success message
+            QMessageBox.information(
+                self,
+                "Bericht erfolgreich erstellt",
+                f"Multi-Standort-Vergleichsbericht wurde erfolgreich erstellt:\n{output_path}"
+            )
+
+            # Open the generated file
+            self._open_file(output_path)
+
+        except Exception as e:
+            self.logger.error(f"Error generating multi-site report: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Fehler beim Erstellen des Berichts",
+                f"Ein Fehler ist beim Erstellen des Berichts aufgetreten:\n\n{str(e)}"
+            )
+
+    def _open_file(self, file_path: str):
+        """
+        Open a file with the system's default application.
+
+        Args:
+            file_path (str): Path to the file to open
+        """
+        try:
+            file_url = QUrl.fromLocalFile(file_path)
+            if not QDesktopServices.openUrl(file_url):
+                self.logger.warning(f"Could not open file with default application: {file_path}")
+                QMessageBox.warning(
+                    self,
+                    "Datei konnte nicht geöffnet werden",
+                    f"Die Datei wurde erfolgreich erstellt, konnte aber nicht automatisch geöffnet werden:\n{file_path}"
+                )
+        except Exception as e:
+            self.logger.warning(f"Error opening file: {e}")
+            # Don't show error - file was created successfully
