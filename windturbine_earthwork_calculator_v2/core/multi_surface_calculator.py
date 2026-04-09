@@ -77,53 +77,41 @@ def _get_safe_max_workers(requested_workers: Optional[int] = None) -> int:
     """
     Get safe number of workers for multiprocessing in QGIS context.
 
-    On Windows, multiprocessing with QGIS causes issues (spawns multiple QGIS instances),
-    so we always use 1 worker.
+    Multiprocessing is currently disabled on **all** platforms when running
+    inside QGIS. Reason:
 
-    On Linux/macOS, we force the 'spawn' start method instead of the default 'fork'.
-    Reason: QGIS pre-loads numpy via Qt/GDAL bindings; with 'fork' the child process
-    inherits the parent's in-memory state, and numpy's C extensions get into a broken
-    state in the forked process - this causes hundreds of
-    'numpy.core.multiarray failed to import' errors and makes all DEM sampling fail
-    (resulting in Cut/Fill = 0 m³). With 'spawn' each worker starts as a fresh Python
-    process and re-imports numpy cleanly.
+    - **Windows**: spawning a new Python process re-launches QGIS itself,
+      which is unusable.
+    - **Linux/macOS**: Even with the 'spawn' start method, worker processes
+      cannot import numpy correctly when launched from QGIS' bundled Python.
+      The error is 'numpy.core.multiarray failed to import', which makes
+      every DEM sampling call return empty arrays. The resulting workflow
+      reports 'WORKFLOW ERFOLGREICH ABGESCHLOSSEN' but Cut/Fill are 0 m³
+      and the terrain-intersection rasters fail. We tried forcing the
+      'spawn' start method - the message appears in the log, but the
+      numpy import in the worker still fails. The root cause is a
+      PYTHONPATH/site-packages mismatch between QGIS' main process and
+      the spawned children that 'spawn' alone cannot resolve.
+
+    Sequential execution is slower but produces correct results, which is
+    what matters. If the upstream numpy/QGIS situation changes in a future
+    version, this fallback can be relaxed.
 
     Args:
-        requested_workers: Requested number of workers (None = auto-detect)
+        requested_workers: Requested number of workers (kept for API
+            compatibility, but currently ignored).
 
     Returns:
-        Safe number of workers (1 on Windows, cpu_count-1 on Linux/Mac)
+        Always 1 (sequential execution).
     """
     logger = get_plugin_logger()
-
-    if platform.system() == 'Windows':
-        # Disable multiprocessing on Windows (QGIS compatibility issue)
-        logger.warning(
-            "Multiprocessing disabled on Windows due to QGIS compatibility. "
-            "Calculations will run sequentially (slower but stable)."
-        )
-        return 1
-
-    # Linux/macOS: ensure 'spawn' start method to avoid numpy/fork issues with QGIS
-    try:
-        current_method = mp.get_start_method(allow_none=True)
-        if current_method != 'spawn':
-            mp.set_start_method('spawn', force=True)
-            logger.info(
-                "Set multiprocessing start method to 'spawn' "
-                "(fixes 'numpy.core.multiarray failed to import' in worker processes "
-                "on Linux/macOS with QGIS pre-loaded numpy)"
-            )
-    except RuntimeError as exc:
-        logger.warning(
-            f"Could not set 'spawn' start method "
-            f"(using existing '{mp.get_start_method()}'): {exc}"
-        )
-
-    if requested_workers is None:
-        return max(1, mp.cpu_count() - 1)
-    else:
-        return max(1, requested_workers)
+    logger.warning(
+        "Multiprocessing disabled inside QGIS (all platforms): worker "
+        "processes cannot reliably import numpy from QGIS' bundled Python "
+        "environment. Calculations will run sequentially - slower, but "
+        "produces correct Cut/Fill volumes."
+    )
+    return 1
 
 
 # ============================================================================
