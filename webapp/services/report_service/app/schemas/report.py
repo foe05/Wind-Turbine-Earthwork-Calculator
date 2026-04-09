@@ -6,6 +6,15 @@ from typing import List, Optional, Literal, Dict, Any
 from datetime import datetime
 
 
+class HeightScenario(BaseModel):
+    """Data for a single height scenario in comparison table"""
+    height: float = Field(..., description="Platform height in meters")
+    cut_volume: float = Field(..., description="Cut volume in m³")
+    fill_volume: float = Field(..., description="Fill volume in m³")
+    total_cost: float = Field(..., description="Total construction cost")
+    is_optimal: bool = Field(False, description="Whether this is the optimal height scenario")
+
+
 class SiteData(BaseModel):
     """Data for a single WKA site"""
     id: int = Field(..., description="Site ID")
@@ -36,6 +45,9 @@ class SiteData(BaseModel):
     material_surplus: Optional[float] = 0.0
     material_deficit: Optional[float] = 0.0
     material_reused: Optional[float] = 0.0
+
+    # Comparison scenarios (optional)
+    scenarios: Optional[List[HeightScenario]] = Field(None, description="List of height scenarios for comparison table")
 
 
 class RoadReportData(BaseModel):
@@ -106,6 +118,13 @@ class TerrainReportData(BaseModel):
     contour_data: Optional[Dict[str, Any]] = None
 
 
+class BrandingOptions(BaseModel):
+    """Branding customization options for reports"""
+    logo_base64: Optional[str] = Field(None, description="Company logo as base64-encoded image")
+    company_name: Optional[str] = Field(None, description="Company name to display in header")
+    custom_footer_text: Optional[str] = Field(None, description="Custom footer text for report")
+
+
 class ReportGenerateRequest(BaseModel):
     """Request to generate a report"""
     project_name: str = Field(..., min_length=1, description="Project name")
@@ -117,6 +136,9 @@ class ReportGenerateRequest(BaseModel):
     road_data: Optional[RoadReportData] = Field(None, description="Road report data")
     solar_data: Optional[SolarReportData] = Field(None, description="Solar park report data")
     terrain_data: Optional[TerrainReportData] = Field(None, description="Terrain analysis report data")
+
+    # Branding customization
+    branding: Optional[BrandingOptions] = Field(None, description="Branding customization options")
 
 
 class ReportResponse(BaseModel):

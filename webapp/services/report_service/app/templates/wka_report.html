@@ -63,6 +63,20 @@
             margin-top: 10px;
         }
 
+        .report-header .logo {
+            max-width: 200px;
+            max-height: 80px;
+            margin-bottom: 20px;
+            object-fit: contain;
+        }
+
+        .report-header .company-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 15px;
+        }
+
         /* Summary Cards */
         .summary {
             display: grid;
@@ -207,6 +221,128 @@
             font-weight: 700;
         }
 
+        /* Charts Section */
+        .charts-section {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            margin-bottom: 40px;
+        }
+
+        .charts-header {
+            background: var(--primary);
+            color: white;
+            padding: 20px;
+        }
+
+        .charts-header h2 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .charts-body {
+            padding: 25px;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+        }
+
+        .chart-item {
+            background: var(--bg-light);
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .chart-item h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 15px;
+        }
+
+        .chart-item img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .chart-item .chart-description {
+            font-size: 13px;
+            color: var(--text-medium);
+            margin-top: 10px;
+            line-height: 1.5;
+        }
+
+        /* Comparison Table */
+        .comparison-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .comparison-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: var(--text-dark);
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .comparison-table th {
+            background: var(--bg-light);
+            padding: 12px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--text-dark);
+            border-bottom: 2px solid var(--border);
+        }
+
+        .comparison-table td {
+            padding: 12px;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .comparison-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .comparison-table tr.optimal-row {
+            background: #E8F5E9;
+            font-weight: 600;
+        }
+
+        .comparison-table tr.optimal-row td {
+            color: var(--success);
+        }
+
+        .comparison-table .optimal-badge {
+            display: inline-block;
+            background: var(--success);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 5px;
+        }
+
         /* Footer */
         .report-footer {
             margin-top: 60px;
@@ -219,22 +355,260 @@
 
         /* Print Styles */
         @media print {
+            /* General print settings */
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+
             body {
-                font-size: 12px;
+                font-size: 11pt;
+                line-height: 1.4;
+                background: white;
+                color: black;
             }
 
             .container {
                 max-width: 100%;
-                padding: 20px;
+                padding: 15mm;
+                margin: 0;
+            }
+
+            /* Page break control - Headers */
+            .report-header {
+                page-break-after: avoid;
+                page-break-inside: avoid;
+                margin-bottom: 30px;
+            }
+
+            .report-header h1 {
+                page-break-after: avoid;
+            }
+
+            .report-header .logo {
+                max-height: 50px;
+                page-break-inside: avoid;
+            }
+
+            /* Summary cards - keep together */
+            .summary {
+                page-break-inside: avoid;
+                page-break-after: avoid;
+                margin-bottom: 25px;
+            }
+
+            .summary-card {
+                page-break-inside: avoid;
+                box-shadow: none;
+                border: 1px solid var(--border);
+            }
+
+            /* Charts section - prevent breaks inside */
+            .charts-section {
+                page-break-inside: avoid;
+                page-break-before: auto;
+                margin-bottom: 25px;
+                box-shadow: none;
+                border: 1px solid var(--border);
+            }
+
+            .charts-header {
+                page-break-after: avoid;
+            }
+
+            .charts-body {
+                page-break-before: avoid;
+            }
+
+            .charts-grid {
+                page-break-inside: avoid;
+            }
+
+            .chart-item {
+                page-break-inside: avoid;
+                page-break-before: auto;
+                page-break-after: auto;
+                margin-bottom: 15px;
+            }
+
+            .chart-item h3 {
+                page-break-after: avoid;
+            }
+
+            .chart-item img {
+                page-break-inside: avoid;
+                max-width: 100%;
+                height: auto;
+                box-shadow: none;
+            }
+
+            /* Site cards - keep each site together */
+            .sites-grid {
+                page-break-inside: auto;
             }
 
             .site-card {
                 page-break-inside: avoid;
-                margin-bottom: 20px;
+                page-break-before: auto;
+                margin-bottom: 25px;
+                box-shadow: none;
+                border: 1px solid var(--border);
             }
 
-            .summary {
+            .site-header {
                 page-break-after: avoid;
+                page-break-inside: avoid;
+            }
+
+            .site-header h2 {
+                page-break-after: avoid;
+            }
+
+            .site-body {
+                page-break-before: avoid;
+            }
+
+            /* Tables - prevent breaks inside */
+            table {
+                page-break-inside: avoid;
+                page-break-before: auto;
+                page-break-after: auto;
+                margin-bottom: 15px;
+            }
+
+            table thead {
+                display: table-header-group;
+                page-break-inside: avoid;
+                page-break-after: avoid;
+            }
+
+            table tbody {
+                page-break-inside: avoid;
+            }
+
+            table tr {
+                page-break-inside: avoid;
+                page-break-after: auto;
+            }
+
+            table th {
+                page-break-after: avoid;
+                page-break-inside: avoid;
+                background: var(--bg-light) !important;
+            }
+
+            table td {
+                page-break-inside: avoid;
+            }
+
+            /* Comparison section - keep together */
+            .comparison-section {
+                page-break-inside: avoid;
+                page-break-before: auto;
+                page-break-after: auto;
+                margin-top: 15px;
+                margin-bottom: 15px;
+            }
+
+            .comparison-section h3 {
+                page-break-after: avoid;
+            }
+
+            .comparison-table {
+                page-break-inside: avoid;
+            }
+
+            .comparison-table thead {
+                display: table-header-group;
+            }
+
+            .comparison-table tr {
+                page-break-inside: avoid;
+            }
+
+            /* Material balance - keep together */
+            .material-balance {
+                page-break-inside: avoid;
+                page-break-before: avoid;
+                page-break-after: auto;
+                margin-top: 15px;
+            }
+
+            .material-balance h3 {
+                page-break-after: avoid;
+            }
+
+            .balance-grid {
+                page-break-inside: avoid;
+            }
+
+            .balance-item {
+                page-break-inside: avoid;
+            }
+
+            /* Footer */
+            .report-footer {
+                page-break-before: avoid;
+                page-break-inside: avoid;
+                margin-top: 30px;
+            }
+
+            /* Typography - prevent orphans and widows */
+            p, h1, h2, h3, h4, h5, h6 {
+                orphans: 3;
+                widows: 3;
+            }
+
+            h1, h2, h3, h4, h5, h6 {
+                page-break-after: avoid;
+                page-break-inside: avoid;
+            }
+
+            /* Remove unnecessary spacing for print */
+            .summary-card {
+                padding: 15px;
+            }
+
+            .site-body {
+                padding: 20px;
+            }
+
+            .charts-body {
+                padding: 20px;
+            }
+
+            /* Ensure colors print correctly */
+            .cut-value {
+                color: var(--accent) !important;
+            }
+
+            .fill-value {
+                color: var(--success) !important;
+            }
+
+            .cost-value {
+                color: var(--warning) !important;
+            }
+
+            /* Optimal row highlighting */
+            .comparison-table tr.optimal-row {
+                background: #E8F5E9 !important;
+            }
+
+            .optimal-badge {
+                background: var(--success) !important;
+                color: white !important;
+            }
+
+            /* Site header colors */
+            .site-header {
+                background: var(--primary) !important;
+                color: white !important;
+            }
+
+            .charts-header {
+                background: var(--primary) !important;
+                color: white !important;
             }
         }
 
@@ -247,6 +621,10 @@
             .balance-grid {
                 grid-template-columns: 1fr 1fr;
             }
+
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -254,6 +632,12 @@
     <div class="container">
         <!-- Header -->
         <div class="report-header">
+            {% if branding and branding.logo_base64 %}
+            <img src="data:image/png;base64,{{ branding.logo_base64 }}" alt="Company Logo" class="logo">
+            {% endif %}
+            {% if branding and branding.company_name %}
+            <div class="company-name">{{ branding.company_name }}</div>
+            {% endif %}
             <h1>🌬️ WKA Erdarbeits-Bericht</h1>
             <div class="subtitle">{{ project_name }}</div>
             <div class="date">Erstellt am: {{ report_date }} um {{ report_time }}</div>
@@ -285,6 +669,28 @@
                 <div class="unit">€</div>
             </div>
         </div>
+
+        <!-- Charts Section -->
+        {% if charts %}
+        <div class="charts-section">
+            <div class="charts-header">
+                <h2>📊 Diagramme & Visualisierungen</h2>
+            </div>
+            <div class="charts-body">
+                <div class="charts-grid">
+                    {% for chart in charts %}
+                    <div class="chart-item">
+                        <h3>{{ chart.title }}</h3>
+                        <img src="data:image/png;base64,{{ chart.data }}" alt="{{ chart.title }}">
+                        {% if chart.description %}
+                        <div class="chart-description">{{ chart.description }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
 
         <!-- Sites Detail -->
         <div class="sites-grid">
@@ -344,6 +750,40 @@
                         </tbody>
                     </table>
 
+                    <!-- Height Scenarios Comparison Table -->
+                    {% if site.scenarios %}
+                    <div class="comparison-section">
+                        <h3>Höhenszenarien Vergleich</h3>
+                        <table class="comparison-table">
+                            <thead>
+                                <tr>
+                                    <th>Plattform-Höhe</th>
+                                    <th>Aushub (m³)</th>
+                                    <th>Auftrag (m³)</th>
+                                    <th>Gesamt bewegt (m³)</th>
+                                    <th>Kosten (€)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for scenario in site.scenarios %}
+                                <tr{% if scenario.is_optimal %} class="optimal-row"{% endif %}>
+                                    <td>
+                                        {{ "{:.2f}".format(scenario.height) }} m
+                                        {% if scenario.is_optimal %}
+                                        <span class="optimal-badge">Optimal</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ "{:,.1f}".format(scenario.cut_volume) }}</td>
+                                    <td>{{ "{:,.1f}".format(scenario.fill_volume) }}</td>
+                                    <td>{{ "{:,.1f}".format(scenario.cut_volume + scenario.fill_volume) }}</td>
+                                    <td>{{ "{:,.2f}".format(scenario.total_cost) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+
                     <!-- Material Balance -->
                     {% if site.material_reuse %}
                     <div class="material-balance">
@@ -383,7 +823,11 @@
 
         <!-- Footer -->
         <div class="report-footer">
+            {% if branding and branding.custom_footer_text %}
+            <p>{{ branding.custom_footer_text }}</p>
+            {% else %}
             <p><strong>Geo-Engineering Platform</strong> v1.0 | hoehendaten.de</p>
+            {% endif %}
             <p>Bericht erstellt am {{ report_date }} um {{ report_time }}</p>
         </div>
     </div>
