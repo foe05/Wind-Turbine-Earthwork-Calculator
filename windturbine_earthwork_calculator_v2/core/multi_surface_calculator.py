@@ -2035,6 +2035,15 @@ class MultiSurfaceCalculator:
         if self.project.boom is not None and self.project.boom_slope_optimize:
             slope_step_coarse = self.project.boom_slope_step_coarse
             boom_slopes_coarse = np.arange(boom_slope_min, boom_slope_max + slope_step_coarse, slope_step_coarse)
+            # Filter out the "dead zone" |slope| < boom.slope_min, where SurfaceConfig
+            # validation rejects every scenario (e.g. with slope_min=2.0 the values
+            # -1.5, -1.0, -0.5, 0.0, +0.5, +1.0, +1.5 would all raise ValueError).
+            # Without this filter, ~41% of coarse scenarios fail with tracebacks.
+            abs_min = self.project.boom.slope_min
+            boom_slopes_coarse = boom_slopes_coarse[np.abs(boom_slopes_coarse) >= abs_min - 1e-9]
+            if len(boom_slopes_coarse) == 0:
+                # Defensive fallback: at least try the minimum allowed slope
+                boom_slopes_coarse = np.array([abs_min])
         elif self.project.boom is not None:
             boom_slopes_coarse = [self.project.boom.slope_longitudinal]
         else:
@@ -2280,6 +2289,13 @@ class MultiSurfaceCalculator:
             boom_slopes_fine = boom_slopes_fine[
                 (boom_slopes_fine >= boom_slope_min) & (boom_slopes_fine <= boom_slope_max)
             ]
+            # Same dead-zone filter as in coarse stage: even though the fine search
+            # is centered on a valid coarse value, the ±0.5m window can still cross
+            # into |slope| < slope_min if boom_slope_coarse is near the boundary.
+            abs_min = self.project.boom.slope_min
+            boom_slopes_fine = boom_slopes_fine[np.abs(boom_slopes_fine) >= abs_min - 1e-9]
+            if len(boom_slopes_fine) == 0:
+                boom_slopes_fine = np.array([boom_slope_coarse])
         elif self.project.boom is not None:
             boom_slopes_fine = [boom_slope_coarse]
         else:
