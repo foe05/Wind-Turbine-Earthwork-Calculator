@@ -18,7 +18,7 @@ from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
     QWidget, QLabel, QLineEdit, QPushButton, QFileDialog,
     QDoubleSpinBox, QSpinBox, QGroupBox, QFormLayout,
-    QCheckBox, QMessageBox, QProgressBar, QTextEdit, QScrollArea
+    QCheckBox, QMessageBox, QProgressBar, QTextEdit, QScrollArea, QComboBox
 )
 from qgis.PyQt.QtCore import Qt, pyqtSignal, QUrl
 from qgis.PyQt.QtGui import QIcon, QDesktopServices
@@ -80,12 +80,14 @@ class MainDialog(QDialog):
         self.tab_input = self._create_input_tab()
         self.tab_optimization = self._create_optimization_tab()
         self.tab_profiles = self._create_profiles_tab()
+        self.tab_stabilization = self._create_soil_stabilization_tab()
         self.tab_output = self._create_output_tab()
         self.tab_multisite = self._create_multisite_report_tab()
 
         self.tabs.addTab(self.tab_input, "📂 Eingabe")
         self.tabs.addTab(self.tab_optimization, "⚙️ Optimierung")
         self.tabs.addTab(self.tab_profiles, "📊 Geländeschnitte")
+        self.tabs.addTab(self.tab_stabilization, "🏗️ Bodenstabilisierung")
         self.tabs.addTab(self.tab_output, "💾 Ausgabe")
         self.tabs.addTab(self.tab_multisite, "📈 Standortvergleich")
 
@@ -608,6 +610,152 @@ class MainDialog(QDialog):
         widget.setLayout(layout)
         scroll.setWidget(widget)
         return scroll
+
+    def _create_soil_stabilization_tab(self):
+        """Create soil stabilization tab."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        # Bodenkennwerte
+        group_soil = QGroupBox("Bodenkennwerte")
+        form_soil = QFormLayout()
+
+        # Bodenart
+        self.input_soil_type = QComboBox()
+        self.input_soil_type.addItems([
+            'Ton (weich)',
+            'Ton (steif)',
+            'Ton (halbfest)',
+            'Schluff (weich)',
+            'Schluff (mitteldicht)',
+            'Lehm (steif)',
+            'Lehm (halbfest)',
+            'Sand (locker)',
+            'Sand (mitteldicht)',
+            'Sand (dicht)',
+            'Kies (mitteldicht)',
+            'Kies (dicht)',
+            'Unbekannt - Standardwert verwenden'
+        ])
+        self.input_soil_type.setCurrentIndex(3)  # Default: Schluff (weich)
+        self.input_soil_type.setToolTip("Bodenart für Bodenstabilisierungsberechnung")
+
+        form_soil.addRow("Bodenart:", self.input_soil_type)
+
+        # Ev2-Bestand
+        self.input_ev2_bestand = QDoubleSpinBox()
+        self.input_ev2_bestand.setRange(0, 200)
+        self.input_ev2_bestand.setValue(45.0)
+        self.input_ev2_bestand.setDecimals(1)
+        self.input_ev2_bestand.setSuffix(" MN/m²")
+        self.input_ev2_bestand.setToolTip(
+            "Verformungsmodul des anstehenden Bodens (Plattendruckversuch DIN 18134)\n"
+            "Typische Bereiche werden basierend auf gewählter Bodenart angezeigt"
+        )
+
+        form_soil.addRow("Ev2 Bestand:", self.input_ev2_bestand)
+
+        # Info-Label für typische Ev2-Bereiche (wird dynamisch aktualisiert)
+        self.label_ev2_range = QLabel("<i>Typisch für Schluff (weich): 20-35 MN/m²</i>")
+        self.label_ev2_range.setWordWrap(True)
+        self.label_ev2_range.setStyleSheet("QLabel { color: #666; font-size: 10pt; }")
+        form_soil.addRow("", self.label_ev2_range)
+
+        # Wassergehalt (optional)
+        self.input_water_content = QDoubleSpinBox()
+        self.input_water_content.setRange(0, 50)
+        self.input_water_content.setValue(0)
+        self.input_water_content.setDecimals(1)
+        self.input_water_content.setSuffix(" %")
+        self.input_water_content.setSpecialValueText("Unbekannt")
+        self.input_water_content.setToolTip(
+            "Aktueller Wassergehalt (optional, für genauere Kalkdosierung)"
+        )
+
+        form_soil.addRow("Wassergehalt:", self.input_water_content)
+
+        # Optimaler Wassergehalt (optional)
+        self.input_optimum_water = QDoubleSpinBox()
+        self.input_optimum_water.setRange(0, 50)
+        self.input_optimum_water.setValue(18.0)  # Default für Schluff
+        self.input_optimum_water.setDecimals(1)
+        self.input_optimum_water.setSuffix(" %")
+        self.input_optimum_water.setSpecialValueText("Unbekannt")
+        self.input_optimum_water.setToolTip(
+            "Optimaler Wassergehalt nach Proctor (DIN 18127)\n"
+            "Wird automatisch für gewählte Bodenart vorgeschlagen\n"
+            "Kann manuell überschrieben werden"
+        )
+
+        form_soil.addRow("Optimum Wassergehalt:", self.input_optimum_water)
+
+        group_soil.setLayout(form_soil)
+        layout.addWidget(group_soil)
+
+        # Connect signal to auto-fill optimum water content when soil type changes
+        self.input_soil_type.currentTextChanged.connect(self._on_soil_type_changed)
+
+        # Berechnungsoptionen
+        group_options = QGroupBox("Berechnungsoptionen")
+        form_options = QFormLayout()
+
+        self.input_enable_stabilization = QCheckBox("Bodenstabilisierung berechnen")
+        self.input_enable_stabilization.setChecked(True)
+        self.input_enable_stabilization.setToolTip(
+            "Aktiviert die Berechnung von Kalk- und Schottermengen"
+        )
+
+        form_options.addRow(self.input_enable_stabilization)
+
+        # Info-Label
+        info_label = QLabel(
+            "<i><b>Hinweis:</b> Alle Werte sind Richtwerte für Vordimensionierung. "
+            "Standortspezifische Eignungsprüfungen nach TP BF-StB Teil B 11.1 "
+            "sind vor Bauausführung zwingend erforderlich!</i>"
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("QLabel { color: #666; margin-top: 10px; }")
+
+        form_options.addRow("", info_label)
+
+        group_options.setLayout(form_options)
+        layout.addWidget(group_options)
+
+        # BGR-Datenabfrage (experimentell)
+        group_bgr = QGroupBox("BGR-Datenabfrage (experimentell)")
+        form_bgr = QFormLayout()
+
+        bgr_info = QLabel(
+            "<i>Fragt Bodendaten von der Bundesanstalt für Geowissenschaften "
+            "und Rohstoffe (BGR) ab. Benötigt Internet-Verbindung und "
+            "Koordinaten der Kranstellfläche aus DXF-Datei.</i>"
+        )
+        bgr_info.setWordWrap(True)
+        bgr_info.setStyleSheet("QLabel { color: #666; font-size: 10pt; }")
+
+        self.btn_bgr_query = QPushButton("Bodendaten von BGR abrufen")
+        self.btn_bgr_query.setEnabled(True)
+        self.btn_bgr_query.setToolTip(
+            "Fragt Bodenart von BGR BÜK200 WFS-Service ab\n"
+            "Hinweis: Benötigt valide Koordinaten aus DXF-Datei"
+        )
+        self.btn_bgr_query.clicked.connect(self._on_bgr_query)
+
+        # Status-Label für BGR-Abfrage
+        self.label_bgr_status = QLabel("")
+        self.label_bgr_status.setWordWrap(True)
+        self.label_bgr_status.setStyleSheet("QLabel { color: #666; font-size: 10pt; }")
+
+        form_bgr.addRow(bgr_info)
+        form_bgr.addRow("", self.btn_bgr_query)
+        form_bgr.addRow("Status:", self.label_bgr_status)
+
+        group_bgr.setLayout(form_bgr)
+        layout.addWidget(group_bgr)
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        return widget
 
     def _create_output_tab(self):
         """Create output tab."""
@@ -1271,6 +1419,189 @@ class MainDialog(QDialog):
 
         return True
 
+    def _on_bgr_query(self):
+        """
+        Führt BGR-Bodendaten-Abfrage aus.
+
+        Benötigt DXF-Datei mit Koordinaten der Kranstellfläche.
+        """
+        from qgis.core import QgsCoordinateReferenceSystem
+
+        # Prüfe ob DXF-Datei der Kranstellfläche angegeben
+        dxf_path = self.input_dxf_crane.text().strip()
+
+        if not dxf_path:
+            QMessageBox.warning(
+                self,
+                "Keine DXF-Datei",
+                "Bitte wählen Sie zuerst eine DXF-Datei der Kranstellfläche im Tab 'Eingabe' aus.\n"
+                "Die Koordinaten der Kranstellfläche werden aus der DXF-Datei benötigt."
+            )
+            return
+
+        if not os.path.exists(dxf_path):
+            QMessageBox.warning(
+                self,
+                "DXF-Datei nicht gefunden",
+                f"Die DXF-Datei wurde nicht gefunden:\n{dxf_path}"
+            )
+            return
+
+        # Status: Lade...
+        self.label_bgr_status.setText("<i>Lade Bodendaten von BGR...</i>")
+        self.label_bgr_status.setStyleSheet("QLabel { color: #0066cc; }")
+        self.btn_bgr_query.setEnabled(False)
+
+        try:
+            # Importiere DXF und hole Koordinaten
+            from ..core.dxf_importer import DXFImporter
+            from ..core.soil_stabilization_calculator import SoilStabilizationCalculator
+            from ..utils.geometry_utils import get_centroid
+
+            self.logger.info(f"Importiere DXF für BGR-Abfrage: {dxf_path}")
+
+            importer = DXFImporter(dxf_path, tolerance=self.input_dxf_tolerance.value())
+            polygon, metadata = importer.import_as_polygon()
+
+            if not polygon or polygon.isEmpty():
+                raise Exception("Keine Geometrie in DXF-Datei gefunden")
+
+            # Hole Zentroid als Abfragepunkt
+            centroid = get_centroid(polygon)
+
+            # CRS aus DXF oder Default (EPSG:25832 - UTM Zone 32N für Deutschland)
+            crs = importer.get_crs() or QgsCoordinateReferenceSystem("EPSG:25832")
+
+            self.logger.info(
+                f"Abfragepunkt: {centroid.x():.2f}, {centroid.y():.2f} ({crs.authid()})"
+            )
+
+            # BGR-Abfrage
+            calc = SoilStabilizationCalculator()
+            result = calc.query_soil_data_from_bgr(centroid, crs)
+
+            if result.get('available'):
+                # Erfolg!
+                soil_type = result.get('soil_type')
+                soil_code = result.get('soil_code', '')
+                description = result.get('description', '')
+
+                self.label_bgr_status.setText(
+                    f"<i>✓ Gefunden: <b>{soil_type}</b> (BGR-Code: {soil_code})<br>"
+                    f"{description[:100]}...</i>"
+                )
+                self.label_bgr_status.setStyleSheet("QLabel { color: #006600; }")
+
+                # Aktualisiere Bodenart-Dropdown
+                # Finde passenden Eintrag in Combo Box
+                for i in range(self.input_soil_type.count()):
+                    item_text = self.input_soil_type.itemText(i)
+                    if soil_type and soil_type in item_text:
+                        self.input_soil_type.setCurrentIndex(i)
+                        break
+
+                QMessageBox.information(
+                    self,
+                    "BGR-Daten erfolgreich",
+                    f"Bodenart gefunden: {soil_type}\n\n"
+                    f"BGR-Code: {soil_code}\n"
+                    f"Quelle: {result.get('source')}\n\n"
+                    f"Beschreibung:\n{description}"
+                )
+
+            else:
+                # Fehler
+                error = result.get('error', 'Unbekannter Fehler')
+                self.label_bgr_status.setText(
+                    f"<i>✗ Fehler: {error}</i>"
+                )
+                self.label_bgr_status.setStyleSheet("QLabel { color: #cc0000; }")
+
+                QMessageBox.warning(
+                    self,
+                    "BGR-Abfrage fehlgeschlagen",
+                    f"Bodendaten konnten nicht abgerufen werden.\n\n"
+                    f"Fehler: {error}\n\n"
+                    f"Mögliche Ursachen:\n"
+                    f"- Keine Internet-Verbindung\n"
+                    f"- Koordinaten außerhalb des BGR-Datenbereichs\n"
+                    f"- BGR-Service vorübergehend nicht verfügbar"
+                )
+
+        except Exception as e:
+            self.logger.error(f"BGR-Abfrage fehlgeschlagen: {e}", exc_info=True)
+            self.label_bgr_status.setText(
+                f"<i>✗ Fehler: {str(e)}</i>"
+            )
+            self.label_bgr_status.setStyleSheet("QLabel { color: #cc0000; }")
+
+            QMessageBox.critical(
+                self,
+                "Fehler",
+                f"BGR-Abfrage fehlgeschlagen:\n\n{str(e)}"
+            )
+
+        finally:
+            self.btn_bgr_query.setEnabled(True)
+
+    def _on_soil_type_changed(self, soil_type_text):
+        """
+        Auto-fill optimum water content and update Ev2 range hint when soil type changes.
+
+        Args:
+            soil_type_text: Text from combo box (e.g. "Ton (weich)")
+        """
+        # Import the constants
+        from ..core.soil_stabilization_calculator import (
+            OPTIMUM_WATER_CONTENT,
+            SOIL_EV2_RANGES
+        )
+
+        # Extract base soil type and consistency
+        if soil_type_text == 'Unbekannt - Standardwert verwenden':
+            base_type = 'Schluff'  # Default
+            consistency = 'weich'
+            full_key = 'Schluff_weich'
+        else:
+            parts = soil_type_text.replace('(', '').replace(')', '').split()
+            base_type = parts[0]  # "Ton", "Schluff", etc.
+            consistency = parts[1] if len(parts) > 1 else 'weich'
+            full_key = f"{base_type}_{consistency}"
+
+        # Update optimum water content
+        if base_type in OPTIMUM_WATER_CONTENT:
+            optimum = OPTIMUM_WATER_CONTENT[base_type]
+
+            # Auto-update if current value is a typical value
+            current_value = self.input_optimum_water.value()
+            typical_values = list(OPTIMUM_WATER_CONTENT.values()) + [0]
+
+            if current_value in typical_values or current_value == 0:
+                self.input_optimum_water.setValue(optimum)
+                self.logger.info(
+                    f"Auto-updated optimum water content: {optimum}% for {base_type}"
+                )
+
+        # Update Ev2 range hint
+        if full_key in SOIL_EV2_RANGES:
+            ev2_min, ev2_max = SOIL_EV2_RANGES[full_key]
+            self.label_ev2_range.setText(
+                f"<i>Typisch für {soil_type_text}: {ev2_min}-{ev2_max} MN/m²</i>"
+            )
+        else:
+            # Fallback: try to find similar entry
+            matching_keys = [k for k in SOIL_EV2_RANGES.keys() if base_type in k]
+            if matching_keys:
+                # Take first match
+                ev2_min, ev2_max = SOIL_EV2_RANGES[matching_keys[0]]
+                self.label_ev2_range.setText(
+                    f"<i>Typisch für {base_type}: ca. {ev2_min}-{ev2_max} MN/m²</i>"
+                )
+            else:
+                self.label_ev2_range.setText(
+                    f"<i>Typische Werte für {base_type} nicht verfügbar</i>"
+                )
+
     def _validate_inputs(self):
         """Validate user inputs with enhanced bilingual validation."""
         errors = []
@@ -1454,7 +1785,16 @@ class MainDialog(QDialog):
             'mc_samples': self.input_mc_samples.value(),
             'terrain_type_index': self.input_terrain_type.currentIndex(),
             'foundation_depth_std': self.input_foundation_depth_std.value(),
-            'slope_angle_std': self.input_slope_angle_std.value()
+            'slope_angle_std': self.input_slope_angle_std.value(),
+
+            # Bodenstabilisierung
+            'enable_stabilization': self.input_enable_stabilization.isChecked(),
+            'soil_type': self.input_soil_type.currentText().split(' (')[0]
+                         if self.input_soil_type.currentText() != 'Unbekannt - Standardwert verwenden'
+                         else 'Schluff',
+            'ev2_bestand': self.input_ev2_bestand.value(),
+            'water_content': self.input_water_content.value(),
+            'optimum_water': self.input_optimum_water.value()
         }
 
         # Emit signal
