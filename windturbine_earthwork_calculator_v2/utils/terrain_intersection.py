@@ -28,6 +28,7 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QVariant
 
 from ..utils.logging_utils import get_plugin_logger
+from ..utils.gdal_compat import read_band_as_array, write_array_to_band
 
 
 logger = get_plugin_logger()
@@ -181,7 +182,9 @@ def create_difference_raster_horizontal(
         raise ValueError(f"Could not open DEM: {dem_path}")
 
     dem_band = dem_ds.GetRasterBand(1)
-    dem_data = dem_band.ReadAsArray().astype(float)
+    # Use ReadRaster (see utils/gdal_compat.py) to avoid GDAL's broken
+    # _gdal_array extension on some QGIS builds.
+    dem_data = read_band_as_array(dem_band).astype(float)
     geotransform = dem_ds.GetGeoTransform()
     projection = dem_ds.GetProjection()
     nodata = dem_band.GetNoDataValue()
@@ -216,7 +219,7 @@ def create_difference_raster_horizontal(
     out_ds.SetProjection(projection)
 
     out_band = out_ds.GetRasterBand(1)
-    out_band.WriteArray(diff_data)
+    write_array_to_band(out_band, diff_data)
     out_band.SetNoDataValue(-9999.0)
 
     # Berechne Statistiken (wichtig für QGIS Min/Max)
@@ -265,9 +268,9 @@ def create_difference_raster_from_surfaces(
     if target_ds is None:
         raise ValueError(f"Could not open target surface: {target_surface_path}")
 
-    # Lese Daten
-    dem_data = dem_ds.GetRasterBand(1).ReadAsArray().astype(float)
-    target_data = target_ds.GetRasterBand(1).ReadAsArray().astype(float)
+    # Lese Daten via ReadRaster (siehe utils/gdal_compat.py).
+    dem_data = read_band_as_array(dem_ds.GetRasterBand(1)).astype(float)
+    target_data = read_band_as_array(target_ds.GetRasterBand(1)).astype(float)
     target_nodata = target_ds.GetRasterBand(1).GetNoDataValue()
 
     # Berechne Differenz
@@ -292,7 +295,7 @@ def create_difference_raster_from_surfaces(
     out_ds.SetProjection(dem_ds.GetProjection())
 
     out_band = out_ds.GetRasterBand(1)
-    out_band.WriteArray(diff_data)
+    write_array_to_band(out_band, diff_data)
     out_band.SetNoDataValue(-9999.0)
     out_band.ComputeStatistics(False)
 
@@ -407,7 +410,7 @@ def create_target_surface_raster(
 
     # Schreibe Raster
     target_band = target_ds.GetRasterBand(1)
-    target_band.WriteArray(target_data)
+    write_array_to_band(target_band, target_data)
     target_band.SetNoDataValue(-9999.0)
     target_band.ComputeStatistics(False)
 
@@ -464,8 +467,8 @@ def create_polygon_mask(polygon: QgsGeometry, reference_ds: gdal.Dataset) -> np.
     # Rasterize Polygon
     gdal.RasterizeLayer(mask_ds, [1], mem_layer, burn_values=[1])
 
-    # Lese Maske
-    mask_array = mask_ds.GetRasterBand(1).ReadAsArray()
+    # Lese Maske via ReadRaster (siehe utils/gdal_compat.py).
+    mask_array = read_band_as_array(mask_ds.GetRasterBand(1))
 
     # Cleanup
     mask_ds = None

@@ -23,6 +23,8 @@ from qgis.core import (
     QgsWkbTypes
 )
 
+from .gdal_compat import read_band_as_array
+
 
 def polygon_to_polygonz(geometry: QgsGeometry, z_value: float) -> QgsGeometry:
     """
@@ -133,7 +135,7 @@ def polygon_to_polygonz_with_dem(
         col = max(0, min(col, dem_ds.RasterXSize - 1))
         row = max(0, min(row, dem_ds.RasterYSize - 1))
 
-        z = dem_band.ReadAsArray(col, row, 1, 1)[0, 0]
+        z = read_band_as_array(dem_band, col, row, 1, 1)[0, 0]
         return float(z) + z_offset
 
     if geometry.isMultipart():
@@ -332,7 +334,7 @@ def create_slope_surface_3d(
         row = int((y - dem_transform[3]) / dem_transform[5])
         col = max(0, min(col, dem_ds.RasterXSize - 1))
         row = max(0, min(row, dem_ds.RasterYSize - 1))
-        return float(dem_band.ReadAsArray(col, row, 1, 1)[0, 0])
+        return float(read_band_as_array(dem_band, col, row, 1, 1)[0, 0])
 
     # Get vertices
     inner_verts = _get_polygon_vertices(inner_polygon)
@@ -571,7 +573,7 @@ def line_to_linestringz(
         row = int((y - dem_transform[3]) / dem_transform[5])
         col = max(0, min(col, dem_ds.RasterXSize - 1))
         row = max(0, min(row, dem_ds.RasterYSize - 1))
-        return float(dem_band.ReadAsArray(col, row, 1, 1)[0, 0]) + z_offset
+        return float(read_band_as_array(dem_band, col, row, 1, 1)[0, 0]) + z_offset
 
     # Get vertices
     if geometry.isMultipart():
@@ -625,7 +627,7 @@ def sample_terrain_boundary(
         row = int((y - dem_transform[3]) / dem_transform[5])
         col = max(0, min(col, dem_ds.RasterXSize - 1))
         row = max(0, min(row, dem_ds.RasterYSize - 1))
-        return float(dem_band.ReadAsArray(col, row, 1, 1)[0, 0])
+        return float(read_band_as_array(dem_band, col, row, 1, 1)[0, 0])
 
     # Sample boundary points
     boundary_points = _sample_polygon_boundary(geometry, num_samples)

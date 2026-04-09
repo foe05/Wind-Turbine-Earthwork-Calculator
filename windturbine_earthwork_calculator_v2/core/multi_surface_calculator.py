@@ -67,6 +67,7 @@ from ..utils.geometry_3d import (
     create_slope_surface_3d
 )
 from ..utils.logging_utils import get_plugin_logger
+from ..utils.gdal_compat import read_band_as_array
 
 
 # ============================================================================
@@ -901,12 +902,16 @@ class MultiSurfaceCalculator:
                 )
                 return self._sample_dem_legacy(geometry)
 
-            # Read elevation data
-            data = band.ReadAsArray(x_min_px, y_min_px, width, height)
-
-            if data is None:
+            # Read elevation data via ReadRaster (bypasses _gdal_array, which
+            # is broken on some QGIS builds where ``numpy.core.multiarray``
+            # fails to import inside the GDAL numpy bridge).
+            try:
+                data = read_band_as_array(band, x_min_px, y_min_px, width, height)
+            except Exception as e:
                 ds = None
-                self.logger.warning("Could not read raster data, falling back to legacy method")
+                self.logger.warning(
+                    f"Could not read raster data ({e}), falling back to legacy method"
+                )
                 return self._sample_dem_legacy(geometry)
 
             # Create temporary in-memory vector for polygon
@@ -938,8 +943,8 @@ class MultiSurfaceCalculator:
             mask_band.Fill(0)
             gdal.RasterizeLayer(mask_ds, [1], mem_layer, burn_values=[1])
 
-            # Read mask
-            mask = mask_band.ReadAsArray()
+            # Read mask via ReadRaster (see note in data read above).
+            mask = read_band_as_array(mask_band, 0, 0, width, height)
 
             # Apply mask to elevation data
             masked_data = data[mask == 1]
