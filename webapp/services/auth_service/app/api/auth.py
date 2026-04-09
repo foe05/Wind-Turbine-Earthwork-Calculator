@@ -13,7 +13,7 @@ from app.schemas.auth import (
 )
 from app.core.security import (
     generate_magic_link_token, verify_magic_link_token,
-    create_access_token, verify_token
+    create_access_token, verify_token, token_blacklist
 )
 from app.core.email import send_magic_link_email
 from app.core.config import get_settings
@@ -240,11 +240,18 @@ async def logout(
     db: Session = Depends(get_db)
 ):
     """
-    Logout user by invalidating session
+    Logout user by invalidating session and revoking JWT token
 
-    Note: This doesn't actually revoke the JWT (stateless),
-    but removes session from database for tracking
+    This will:
+    1. Add JWT token to Redis blacklist (prevents token reuse)
+    2. Delete session record from database
+
+    The JWT token is now truly revoked and cannot be used again,
+    even before its natural expiration time.
     """
+    # Add token to blacklist to prevent reuse
+    token_blacklist.add_to_blacklist(logout_request.token)
+
     # Find and delete session
     session = db.query(SessionModel).filter(
         SessionModel.jwt_token == logout_request.token
