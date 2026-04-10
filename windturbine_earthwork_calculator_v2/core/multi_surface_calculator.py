@@ -78,41 +78,56 @@ def _get_safe_max_workers(requested_workers: Optional[int] = None) -> int:
     """
     Get safe number of workers for multiprocessing in QGIS context.
 
-    Multiprocessing is currently disabled on **all** platforms when running
-    inside QGIS. Reason:
+    History:
 
-    - **Windows**: spawning a new Python process re-launches QGIS itself,
-      which is unusable.
-    - **Linux/macOS**: Even with the 'spawn' start method, worker processes
-      cannot import numpy correctly when launched from QGIS' bundled Python.
-      The error is 'numpy.core.multiarray failed to import', which makes
-      every DEM sampling call return empty arrays. The resulting workflow
-      reports 'WORKFLOW ERFOLGREICH ABGESCHLOSSEN' but Cut/Fill are 0 m³
-      and the terrain-intersection rasters fail. We tried forcing the
-      'spawn' start method - the message appears in the log, but the
-      numpy import in the worker still fails. The root cause is a
-      PYTHONPATH/site-packages mismatch between QGIS' main process and
-      the spawned children that 'spawn' alone cannot resolve.
+    - Before dc778d9 (Plan B): parallel on Linux/macOS with
+      ``cpu_count() - 1`` workers, single-worker on Windows.
+    - dc778d9 (Plan B): disabled on all platforms after a run showed
+      hundreds of ``numpy.core.multiarray failed to import`` errors and
+      Cut/Fill = 0 m³. Plan B diagnosed the symptom correctly but blamed
+      the wrong component: the numpy error was coming from GDAL's
+      ``_gdal_array`` extension in every ``band.ReadAsArray()`` call, not
+      from the multiprocessing start method. Plan B's sequential fallback
+      hit the exact same error in the main thread - the committed
+      ``windturbine_calculator_20260409.log`` proves it.
+    - This commit: after PR #48 routed all raster IO through
+      ``utils.gdal_compat`` (``ReadRaster`` + ``np.frombuffer``, no
+      ``_gdal_array``), there is no reason to keep the sequential
+      fallback on Linux/macOS. Workers read rasters through the same
+      code path as the main thread and the numpy binding is never
+      touched. Restore the ~7x speedup from the pre-dc778d9 behaviour.
 
-    Sequential execution is slower but produces correct results, which is
-    what matters. If the upstream numpy/QGIS situation changes in a future
-    version, this fallback can be relaxed.
+    On Windows we still return 1 worker because ``ProcessPoolExecutor``
+    there re-launches the QGIS executable for every worker, which is a
+    separate and still-unresolved QGIS compatibility issue.
 
     Args:
-        requested_workers: Requested number of workers (kept for API
-            compatibility, but currently ignored).
+        requested_workers: Requested number of workers (``None`` =
+            auto-detect, use ``cpu_count() - 1``).
 
     Returns:
-        Always 1 (sequential execution).
+        Safe number of workers: 1 on Windows, ``max(1, cpu_count() - 1)``
+        or ``requested_workers`` on Linux/macOS.
     """
     logger = get_plugin_logger()
-    logger.warning(
-        "Multiprocessing disabled inside QGIS (all platforms): worker "
-        "processes cannot reliably import numpy from QGIS' bundled Python "
-        "environment. Calculations will run sequentially - slower, but "
-        "produces correct Cut/Fill volumes."
-    )
-    return 1
+
+    if platform.system() == 'Windows':
+        logger.warning(
+            "Multiprocessing disabled on Windows: ProcessPoolExecutor "
+            "re-launches the QGIS executable for every worker. "
+            "Calculations will run sequentially (slower but stable)."
+        )
+        return 1
+
+    # Linux/macOS: parallel execution.
+    # The 2026-04-09 regression (Cut/Fill = 0) was caused by GDAL's
+    # _gdal_array numpy extension, not by multiprocessing itself.
+    # Once utils.gdal_compat replaced band.ReadAsArray() with
+    # band.ReadRaster() + np.frombuffer(), workers no longer hit the
+    # "numpy.core.multiarray failed to import" error.
+    if requested_workers is None:
+        return max(1, mp.cpu_count() - 1)
+    return max(1, requested_workers)
 
 
 # ============================================================================
