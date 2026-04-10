@@ -26,11 +26,9 @@ except ImportError:
 from qgis.core import (
     QgsRectangle,
     QgsGeometry,
-    QgsRasterLayer,
     QgsProcessingFeedback,
     QgsCoordinateReferenceSystem
 )
-import processing
 
 from ..utils.geometry_utils import create_bbox_with_buffer, get_centroid
 from ..utils.logging_utils import get_plugin_logger
@@ -359,45 +357,205 @@ class DEMDownloader:
         if feedback:
             feedback.pushInfo(f"Creating DEM mosaic from {len(tile_paths)} tiles...")
 
+        # We intentionally do NOT use processing.run("gdal:merge", ...) here.
+        # That entry point shells out to gdal_merge.py, which copies pixels
+        # via band.ReadAsArray() / band.WriteArray(). On QGIS builds where
+        # GDAL's _gdal_array numpy bridge is broken ("numpy.core.multiarray
+        # failed to import"), every read returns empty and the resulting
+        # mosaic is silently filled with nodata only. See gdal_compat.py.
         try:
-            # Load tiles as raster layers first
-            raster_layers = []
-            for tile_path in tile_paths:
-                layer = QgsRasterLayer(tile_path, f"tile_{len(raster_layers)}")
-                if layer.isValid():
-                    raster_layers.append(layer)
-                else:
-                    self.logger.warning(f"Could not load tile as raster: {tile_path}")
-
-            if not raster_layers:
-                raise Exception("No valid raster tiles to mosaic")
-
-            # Use GDAL merge
-            result = processing.run(
-                "gdal:merge",
-                {
-                    'INPUT': raster_layers,
-                    'PCT': False,  # No palette
-                    'SEPARATE': False,  # Combine into single band
-                    'NODATA_INPUT': -9999,
-                    'NODATA_OUTPUT': -9999,
-                    'DATA_TYPE': 5,  # Float32
-                    'OUTPUT': output_path
-                },
-                feedback=feedback
+            import numpy as np
+            from osgeo import gdal
+            from ..utils.gdal_compat import (
+                read_band_as_array,
+                write_array_to_band,
+            )
+        except ImportError as e:
+            raise Exception(
+                f"GDAL/numpy not available for mosaic creation: {e}"
             )
 
-            if result is None or 'OUTPUT' not in result:
-                raise Exception("GDAL merge failed - no output returned")
-
-            mosaic_path = result['OUTPUT']
-            self.logger.info(f"Mosaic created: {mosaic_path}")
-
-            return mosaic_path
-
+        try:
+            return self._create_mosaic_via_gdal_compat(
+                tile_paths, output_path, feedback, np, gdal,
+                read_band_as_array, write_array_to_band
+            )
         except Exception as e:
             self.logger.error(f"Failed to create mosaic: {e}")
             raise
+
+    def _create_mosaic_via_gdal_compat(
+        self, tile_paths, output_path, feedback,
+        np, gdal, read_band_as_array, write_array_to_band
+    ):
+        """
+        Mosaic tiles onto a single GeoTIFF using the ReadRaster/WriteRaster
+        path from ``gdal_compat``. This avoids GDAL's ``_gdal_array`` numpy
+        extension entirely.
+
+        Assumes all source tiles share the same pixel size and projection
+        (true for the hoehendaten.de dgm1 1m tiles we download).
+        """
+        datasets = []
+        try:
+            for tile_path in tile_paths:
+                ds = gdal.Open(tile_path, gdal.GA_ReadOnly)
+                if ds is None:
+                    self.logger.warning(
+                        f"Could not open tile with GDAL, skipping: {tile_path}"
+                    )
+                    continue
+                datasets.append(ds)
+
+            if not datasets:
+                raise Exception("No valid raster tiles to mosaic")
+
+            # Use the first tile's grid as the reference
+            gt0 = datasets[0].GetGeoTransform()
+            pixel_w = gt0[1]
+            pixel_h = gt0[5]  # usually negative
+            projection = datasets[0].GetProjection()
+
+            if pixel_w == 0 or pixel_h == 0:
+                raise Exception(f"First tile has degenerate pixel size: {gt0}")
+
+            # Union of all tile extents in world coordinates
+            min_x = None
+            max_x = None
+            min_y = None
+            max_y = None
+            for ds in datasets:
+                gt = ds.GetGeoTransform()
+                tile_min_x = gt[0]
+                tile_max_y = gt[3]
+                tile_max_x = tile_min_x + ds.RasterXSize * gt[1]
+                tile_min_y = tile_max_y + ds.RasterYSize * gt[5]
+                if min_x is None or tile_min_x < min_x:
+                    min_x = tile_min_x
+                if max_x is None or tile_max_x > max_x:
+                    max_x = tile_max_x
+                if min_y is None or tile_min_y < min_y:
+                    min_y = tile_min_y
+                if max_y is None or tile_max_y > max_y:
+                    max_y = tile_max_y
+
+            out_width = int(round((max_x - min_x) / pixel_w))
+            out_height = int(round((min_y - max_y) / pixel_h))  # pixel_h < 0
+
+            if out_width <= 0 or out_height <= 0:
+                raise Exception(
+                    f"Invalid mosaic dimensions: {out_width}x{out_height}"
+                )
+
+            self.logger.info(
+                f"Mosaic grid: {out_width}x{out_height} px, "
+                f"pixel=({pixel_w}, {pixel_h}), "
+                f"extent=[{min_x}, {min_y}, {max_x}, {max_y}]"
+            )
+
+            # Create the output raster and pre-fill with nodata
+            driver = gdal.GetDriverByName("GTiff")
+            out_ds = driver.Create(
+                output_path, out_width, out_height, 1, gdal.GDT_Float32,
+                options=["COMPRESS=LZW", "TILED=YES"]
+            )
+            if out_ds is None:
+                raise Exception(f"Could not create output raster: {output_path}")
+
+            out_ds.SetGeoTransform((min_x, pixel_w, 0, max_y, 0, pixel_h))
+            if projection:
+                out_ds.SetProjection(projection)
+            out_band = out_ds.GetRasterBand(1)
+            out_nodata = -9999.0
+            out_band.SetNoDataValue(out_nodata)
+            out_band.Fill(out_nodata)
+
+            # Copy each tile into the output via ReadRaster/WriteRaster
+            for idx, ds in enumerate(datasets):
+                gt = ds.GetGeoTransform()
+                src_band = ds.GetRasterBand(1)
+                src_nodata = src_band.GetNoDataValue()
+                src_w = ds.RasterXSize
+                src_h = ds.RasterYSize
+
+                dst_col = int(round((gt[0] - min_x) / pixel_w))
+                dst_row = int(round((gt[3] - max_y) / pixel_h))
+
+                # Clamp against the output grid (defensive; normally exact)
+                if (
+                    dst_col < 0 or dst_row < 0
+                    or dst_col + src_w > out_width
+                    or dst_row + src_h > out_height
+                ):
+                    self.logger.warning(
+                        f"Tile {idx} does not fit mosaic window "
+                        f"(dst=({dst_col},{dst_row}), src={src_w}x{src_h}, "
+                        f"out={out_width}x{out_height}), skipping"
+                    )
+                    continue
+
+                data = read_band_as_array(src_band, 0, 0, src_w, src_h)
+                data = data.astype(np.float32, copy=False)
+
+                # If the source tile has nodata pixels, preserve whatever is
+                # already in the destination (from earlier tiles or the
+                # initial fill) for those positions.
+                if src_nodata is not None:
+                    valid_mask = data != np.float32(src_nodata)
+                    if not valid_mask.all():
+                        existing = read_band_as_array(
+                            out_band, dst_col, dst_row, src_w, src_h
+                        ).astype(np.float32, copy=False)
+                        data = np.where(valid_mask, data, existing)
+
+                write_array_to_band(out_band, data, dst_col, dst_row)
+
+            out_band.FlushCache()
+            out_ds.FlushCache()
+
+            # Sanity check: sample a central window and verify we got real
+            # elevation data, not just nodata. Without this we can silently
+            # ship a broken mosaic again (regression guard).
+            sample_win = min(64, out_width, out_height)
+            if sample_win > 0:
+                cx = max(0, (out_width - sample_win) // 2)
+                cy = max(0, (out_height - sample_win) // 2)
+                sample = read_band_as_array(
+                    out_band, cx, cy, sample_win, sample_win
+                ).astype(np.float32, copy=False)
+                valid_sample = sample[sample != np.float32(out_nodata)]
+                if valid_sample.size == 0:
+                    self.logger.error(
+                        f"Mosaic sanity check failed: center window "
+                        f"({sample_win}x{sample_win} at {cx},{cy}) is "
+                        f"entirely nodata ({out_nodata}). DEM pipeline is "
+                        f"broken and all downstream Cut/Fill volumes will "
+                        f"be zero."
+                    )
+                    if feedback:
+                        feedback.reportError(
+                            "DEM mosaic is empty (nodata only). "
+                            "Calculated earthwork volumes will be zero.",
+                            fatalError=False,
+                        )
+                else:
+                    self.logger.info(
+                        f"Mosaic sanity check OK: center window min="
+                        f"{float(valid_sample.min()):.2f}, "
+                        f"max={float(valid_sample.max()):.2f}, "
+                        f"mean={float(valid_sample.mean()):.2f}, "
+                        f"valid={valid_sample.size}/{sample.size}"
+                    )
+
+            out_band = None
+            out_ds = None
+
+            self.logger.info(f"Mosaic created: {output_path}")
+            return output_path
+
+        finally:
+            for ds in datasets:
+                ds = None
 
     def download_for_geometry(self, geometry: QgsGeometry, output_path: str,
                              buffer_m: float = 250,
