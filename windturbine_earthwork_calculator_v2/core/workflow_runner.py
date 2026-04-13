@@ -53,8 +53,8 @@ from .surface_types import (
 from .surface_validators import validate_project
 from .uncertainty import UncertaintyConfig, TerrainType
 from ..utils.geometry_utils import get_centroid
+from ..utils.central_logging import log_event as _telemetry_log_event
 from ..utils.logging_utils import get_plugin_logger
-from ..utils.central_logging import log_event
 
 
 class WorkflowProgressFeedback(QgsProcessingFeedback):
@@ -138,22 +138,25 @@ class WorkflowWorker(QObject):
         """Run the workflow (called in thread)."""
         import time
         workflow_start = time.time()
+        # Expose start timestamp to _run_workflow() so the calculation_completed
+        # telemetry event can report duration without bubbling values back up.
+        self._workflow_start_ts = workflow_start
+
+        # Telemetry hook 1/4: calculation_started.
+        # Safe, non-blocking, no-op when log.config is absent.
+        _telemetry_log_event(
+            "calculation_started",
+            {
+                "num_turbines": 1,
+                "dem_source_type": "hoehendaten_api",
+            },
+        )
 
         try:
             self.logger.info("=" * 60)
             self.logger.info("MULTI-SURFACE WORKFLOW GESTARTET")
             self.logger.info(f"Startzeit: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             self.logger.info("=" * 60)
-
-            # Opt-in telemetry: signal start. No-op if no API key in log.config.
-            log_event("calculation_started", {
-                "uncertainty_enabled": bool(self.params.get('uncertainty_enabled', False)),
-                "boom_enabled": bool(self.params.get('dxf_boom')),
-                "rotor_enabled": bool(self.params.get('dxf_rotor')),
-                "road_enabled": bool(self.params.get('dxf_road')),
-                "stabilization_enabled": bool(self.params.get('enable_stabilization', True)),
-            })
-
             self._run_workflow()
 
             # Success - calculate duration
@@ -163,10 +166,6 @@ class WorkflowWorker(QObject):
             self.logger.info(f"Gesamtdauer: {elapsed/60:.1f} Minuten ({elapsed:.1f} Sekunden)")
             self.logger.info(f"Endzeit: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             self.logger.info("=" * 60)
-
-            log_event("calculation_completed", {
-                "duration_seconds": round(elapsed, 1),
-            })
 
         except Exception as e:
             # Failure - log error with duration
@@ -178,10 +177,16 @@ class WorkflowWorker(QObject):
             self.logger.error(f"Fehlermeldung: {str(e)}")
             self.logger.error("=" * 60, exc_info=True)
 
-            log_event("calculation_failed", {
-                "error_class": type(e).__name__,
-                "duration_seconds": round(elapsed, 1),
-            })
+            # Telemetry hook 3/4: calculation_failed.
+            # Only the exception class name and the workflow step are sent; no
+            # traceback, no paths, no messages.
+            _telemetry_log_event(
+                "calculation_failed",
+                {
+                    "error_class": type(e).__name__,
+                    "step": "workflow",
+                },
+            )
 
             self.finished.emit(False, f"Fehler: {str(e)}")
 
@@ -827,7 +832,8 @@ class WorkflowWorker(QObject):
             profiles_dir=str(profiles_dir)
         )
 
-        log_event("report_generated")
+        # Telemetry hook 4/4: report_generated (HTML).
+        _telemetry_log_event("report_generated", {"format": "html"})
 
         # === STEP 7.5: Calculate Terrain Intersection Lines ===
         self.progress_updated.emit(88, "🔍 Berechne Geländeschnittkanten...")
@@ -881,6 +887,35 @@ class WorkflowWorker(QObject):
 
         # Finished - emit success message
         self.progress_updated.emit(100, "✅ Fertig!")
+
+        # Telemetry hook 2/4: calculation_completed.
+        # Rounded, aggregate metrics only. No paths, no geometry, no PII.
+        try:
+            import time as _time
+            _start_ts = getattr(self, "_workflow_start_ts", None)
+            _duration_ms = (
+                int((_time.time() - _start_ts) * 1000)
+                if _start_ts is not None
+                else None
+            )
+            _cut = float(getattr(results, "total_cut", 0.0) or 0.0)
+            _fill = float(getattr(results, "total_fill", 0.0) or 0.0)
+            _completed_payload = {
+                "cut_m3": round(_cut),
+                "fill_m3": round(_fill),
+                "balance_m3": round(_cut - _fill),
+                "num_turbines": 1,
+            }
+            if _duration_ms is not None:
+                _completed_payload["duration_ms"] = _duration_ms
+            _telemetry_log_event("calculation_completed", _completed_payload)
+        except Exception:
+            # Telemetry must never break the workflow; log_event itself is
+            # already fail-safe, but the payload assembly above reads object
+            # attributes that could theoretically be absent on future results
+            # shapes. Swallow defensively.
+            pass
+
         self.finished.emit(
             True,
             f"Multi-Surface Berechnung erfolgreich abgeschlossen!\n\n"
