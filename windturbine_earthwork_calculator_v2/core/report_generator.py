@@ -8,6 +8,7 @@ Version: 2.0.0
 """
 
 import base64
+import html
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -892,7 +893,8 @@ class ReportGenerator:
                 with open(png_path, 'rb') as f:
                     img_data = base64.b64encode(f.read()).decode('utf-8')
 
-                profile_name = Path(png_path).stem
+                # Escape profile name (derived from filename, may contain HTML metacharacters)
+                profile_name = html.escape(Path(png_path).stem, quote=True)
                 profile_html.append(f"""
             <div class="profile-item">
                 <img src="data:image/png;base64,{img_data}" alt="{profile_name}">

@@ -15,11 +15,17 @@ import sys
 
 try:
     import ezdxf
+    from ezdxf import recover as ezdxf_recover
     EZDXF_AVAILABLE = True
     EZDXF_ERROR = None
 except ImportError as e:
     EZDXF_AVAILABLE = False
     EZDXF_ERROR = str(e)
+
+# Reject DXF files larger than this before opening — protects against
+# memory-exhaustion attacks via maliciously crafted oversize files.
+# Real-world crane-pad DXFs are typically well under 10 MB; 500 MB is a generous cap.
+MAX_DXF_SIZE_BYTES = 500 * 1024 * 1024
 
 try:
     from shapely.geometry import LineString, Polygon as ShapelyPolygon
@@ -105,12 +111,32 @@ class DXFImporter:
         """
         Load DXF file.
 
+        Uses ezdxf's recover mode so malformed-but-recoverable files still
+        produce a usable document, and enforces a hard size cap to prevent
+        memory-exhaustion DoS via maliciously oversized inputs.
+
         Raises:
+            ValueError: If the DXF file exceeds the configured size limit
             Exception: If DXF file cannot be loaded
         """
         try:
-            self.logger.info(f"Loading DXF file: {self.dxf_path}")
-            self.doc = ezdxf.readfile(self.dxf_path)
+            # Hard size cap before invoking the parser
+            file_size = self.dxf_path.stat().st_size
+            if file_size > MAX_DXF_SIZE_BYTES:
+                raise ValueError(
+                    f"DXF file too large ({file_size / 1024 / 1024:.1f} MB > "
+                    f"{MAX_DXF_SIZE_BYTES / 1024 / 1024:.0f} MB limit): {self.dxf_path}"
+                )
+
+            self.logger.info(f"Loading DXF file: {self.dxf_path} ({file_size / 1024 / 1024:.2f} MB)")
+            # recover.readfile is more tolerant of malformed DXF than readfile()
+            # and never raises on minor structural problems (logs them via auditor).
+            self.doc, auditor = ezdxf_recover.readfile(str(self.dxf_path))
+            if auditor.has_errors:
+                self.logger.warning(
+                    f"DXF audit reported {len(auditor.errors)} structural issues "
+                    f"(file loaded with recover mode)"
+                )
             self.logger.info(f"DXF file loaded successfully: {self.doc.dxfversion}")
         except Exception as e:
             self.logger.error(f"Failed to load DXF file: {e}")

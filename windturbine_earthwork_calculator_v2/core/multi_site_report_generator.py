@@ -8,6 +8,7 @@ Author: Wind Energy Site Planning
 Version: 2.0.0
 """
 
+import html
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -167,7 +168,8 @@ class MultiSiteReportGenerator:
         """
         self.logger.info(f"Generating multi-site HTML report: {output_path}")
 
-        project_name = project_name or "Windpark-Projekt"
+        # Escape user-supplied project name before any HTML interpolation
+        project_name = html.escape(project_name or "Windpark-Projekt", quote=True)
 
         # Generate HTML sections
         html_header = self._generate_header(project_name)
@@ -998,7 +1000,7 @@ class MultiSiteReportGenerator:
         # Generate ranking table rows
         ranking_rows = []
         for i, site in enumerate(ranked_sites, 1):
-            site_name = site.get('site_name', site.get('site_id', f'Site {i}'))
+            site_name = html.escape(str(site.get('site_name', site.get('site_id', f'Site {i}'))), quote=True)
             results = site.get('results', {})
 
             cut = results.get('total_cut', 0)
@@ -1063,7 +1065,7 @@ class MultiSiteReportGenerator:
         comparison_rows = []
 
         for site in self.site_results:
-            site_name = site.get('site_name', site.get('site_id', 'Unknown'))
+            site_name = html.escape(str(site.get('site_name', site.get('site_id', 'Unknown'))), quote=True)
             results = site.get('results', {})
             coords = site.get('coordinates', (0, 0))
 
@@ -1119,7 +1121,7 @@ class MultiSiteReportGenerator:
         site_sections = []
 
         for i, site in enumerate(self.site_results, 1):
-            site_name = site.get('site_name', site.get('site_id', f'Site {i}'))
+            site_name = html.escape(str(site.get('site_name', site.get('site_id', f'Site {i}'))), quote=True)
             results = site.get('results', {})
             coords = site.get('coordinates', (0, 0))
             config = site.get('config', {})
@@ -1369,7 +1371,7 @@ class MultiSiteReportGenerator:
         cost_rows = []
 
         for site in self.site_results:
-            site_name = site.get('site_name', site.get('site_id', 'Unknown'))
+            site_name = html.escape(str(site.get('site_name', site.get('site_id', 'Unknown'))), quote=True)
             results = site.get('results', {})
 
             cut = results.get('total_cut', 0)

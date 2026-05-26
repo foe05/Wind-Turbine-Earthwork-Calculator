@@ -11,6 +11,7 @@ Author: Wind Energy Site Planning
 Version: 2.0.0 - Multi-Surface Extension
 """
 
+import html
 import os
 from pathlib import Path
 
@@ -1486,9 +1487,14 @@ class MainDialog(QDialog):
                 soil_code = result.get('soil_code', '')
                 description = result.get('description', '')
 
+                # Escape externally-sourced BGR fields before rendering as Qt rich text
+                soil_type_safe = html.escape(str(soil_type) if soil_type else '', quote=True)
+                soil_code_safe = html.escape(str(soil_code), quote=True)
+                description_safe = html.escape(str(description)[:100], quote=True)
+
                 self.label_bgr_status.setText(
-                    f"<i>✓ Gefunden: <b>{soil_type}</b> (BGR-Code: {soil_code})<br>"
-                    f"{description[:100]}...</i>"
+                    f"<i>✓ Gefunden: <b>{soil_type_safe}</b> (BGR-Code: {soil_code_safe})<br>"
+                    f"{description_safe}...</i>"
                 )
                 self.label_bgr_status.setStyleSheet("QLabel { color: #006600; }")
 
@@ -1513,7 +1519,7 @@ class MainDialog(QDialog):
                 # Fehler
                 error = result.get('error', 'Unbekannter Fehler')
                 self.label_bgr_status.setText(
-                    f"<i>✗ Fehler: {error}</i>"
+                    f"<i>✗ Fehler: {html.escape(str(error), quote=True)}</i>"
                 )
                 self.label_bgr_status.setStyleSheet("QLabel { color: #cc0000; }")
 
