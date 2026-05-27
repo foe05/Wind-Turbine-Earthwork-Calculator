@@ -502,12 +502,18 @@ Ersparnis: 88% weniger Berechnungen!
 ### Nächste Schritte
 
 Die Logik ist validiert. Für vollständige Integration:
-- Integration in QGIS-UI für Parametereingabe
-- HTML-Report-Erweiterung für neue Optimierungsergebnisse
-- Praxistest mit echten DEM- und DXF-Daten
+- ✅ HTML-Report-Erweiterung für neue Optimierungsergebnisse (erledigt:
+  `multi_site_report_generator.py` zeigt Multi-Param-Ergebnisse pro Standort)
+- 🟡 Integration in QGIS-UI für Parametereingabe (UI existiert; finaler
+  Bedienkomfort-Schliff offen)
+- 🔴 Praxistest mit echten DEM- und DXF-Daten — die `wea45mit3d.zip`-Fixture,
+  die das pinnen sollte, wurde in Commit `5374657` aus dem Repo gelöscht;
+  `test_volume_regression.py` skippt seitdem stillschweigend. Vor dem nächsten
+  Release: Fixture zurückholen oder synthetische Mini-Fixture bauen.
 
 ---
 
 **Test durchgeführt von:** Claude Code
 **Testdauer:** < 1 Sekunde
 **Alle Assertions bestanden:** Ja ✅
+**Letzte Status-Aktualisierung:** 2026-05-27

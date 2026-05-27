@@ -45,7 +45,7 @@ Wir verpflichten uns, eine offene und einladende Umgebung zu schaffen. Wir toler
 
 ### 🐛 Bug Reports
 
-Bugs werden als [GitHub Issues](https://github.com/YOURUSERNAME/Wind-Turbine-Earthwork-Calculator/issues) gemeldet.
+Bugs werden als [GitHub Issues](https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/issues) gemeldet.
 
 **Bevor du einen Bug meldest**:
 1. **Durchsuche existierende Issues**, um Duplikate zu vermeiden
@@ -89,7 +89,7 @@ AttributeError: 'NoneType' object has no attribute 'get'
 
 ### 💡 Feature Requests
 
-Feature Requests sind willkommen! Bitte erstelle ein [GitHub Issue](https://github.com/YOURUSERNAME/Wind-Turbine-Earthwork-Calculator/issues) mit dem Label `enhancement`.
+Feature Requests sind willkommen! Bitte erstelle ein [GitHub Issue](https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/issues) mit dem Label `enhancement`.
 
 **Ein guter Feature Request enthält**:
 - **Problem**: Welches Problem löst das Feature?

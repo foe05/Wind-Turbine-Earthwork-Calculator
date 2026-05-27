@@ -2,9 +2,9 @@
 
 **A QGIS Processing Plugin for Optimizing Wind Turbine Crane Pad Heights**
 
-Version: 2.0.0
+Version: 2.0.0 (released); v3.0 foundations in progress
 Author: Wind Energy Site Planning
-Date: November 2025
+Date: November 2025 (release); foundations updated May 2026
 
 ---
 
@@ -14,13 +14,16 @@ This QGIS plugin optimizes the platform height for wind turbine crane pads by ca
 
 ### Key Features
 
-✅ **DXF Import** - Automatically converts DXF polylines to platform polygons
-✅ **DEM Download** - Fetches 1m-resolution elevation data from hoehendaten.de API
-✅ **Height Optimization** - Tests multiple heights to find minimal earthwork
-✅ **Volume Calculations** - Accurate cut/fill calculations for platform and slopes
-✅ **Terrain Profiles** - Generates cross-section visualizations
-✅ **HTML Reports** - Professional reports with maps and statistics
-✅ **GeoPackage Output** - All data stored in standard GIS format
+✅ **DXF Import** - Automatically converts DXF polylines to platform polygons (ezdxf recover-mode + 500 MB cap)
+✅ **DEM Download** - Fetches 1 m-resolution elevation data from hoehendaten.de API (50 MB/tile cap, TIFF-magic-byte verification)
+✅ **Height Optimization** - Single- and multi-parameter sweeps with parallel `ProcessPoolExecutor` on Linux/macOS
+✅ **Volume Calculations** - Accurate cut/fill for crane pad, foundation, boom area, rotor storage area, road
+✅ **Terrain Profiles** - Cross-section visualisations as PNG
+✅ **Terrain Intersection Lines & Difference Rasters** - 14 LineString layers (2D + 3D) and 7 GeoTIFFs per site
+✅ **HTML / PDF / Excel Reports** - Single-site and multi-site comparisons, with XSS-safe HTML escaping
+✅ **GeoPackage Output** - All vector data in one standard GIS file (DEM kept as side-car GeoTIFF for max compatibility)
+✅ **BGR Soil Data** - Automatic lookup of soil class and stabilisation rating via BGR WFS
+✅ **Opt-in Telemetry** - Four anonymous events forwarded to `log.broetzens.de`; off by default, gitignored API key
 
 ---
 
@@ -286,13 +289,43 @@ Terrain Range: 8.5 m (min: 301.2, max: 309.7)
 
 ## 🐛 Known Issues
 
-1. **GeoPackage Raster Support**: QGIS sometimes has issues with rasters in GeoPackage. DEM is saved as separate GeoTIFF.
-2. **Large DXF Files**: Very complex DXF files (>1000 polylines) may be slow to import.
-3. **Memory Usage**: Processing large DEMs (>10km²) may require significant RAM.
+1. **Raster output format**: The DEM is intentionally written as a separate GeoTIFF (not into the GeoPackage). GeoPackage raster support in QGIS is functional but inconsistent across plugin readers (rasterio/GDAL/QGIS); a side-car GeoTIFF guarantees compatibility.
+2. **Large DXF Files**: Very complex DXF files (>1000 polylines) may be slow to import — the bottleneck is `ezdxf` LWPOLYLINE iteration. Files above 500 MB are rejected outright for safety.
+3. **Memory Usage**: Processing large DEMs (>10 km²) may require significant RAM. The DEM is currently loaded fully into memory for sampling; streaming/windowed reads are on the v3.x roadmap.
 
 ---
 
 ## 🔄 Changelog
+
+For the full per-release log see the repository-root `CHANGELOG.md`.
+
+### Unreleased (Stand 2026-05-27)
+
+**Sicherheits-Härtung:**
+- HTML-Escape für extern beziehbare Strings in allen Reports und Dialog-Labels
+- `log.config` aus dem Git-Index entfernt; nur `log.config.example` ausgeliefert
+- DEM-Downloader: 50 MB-Cap pro hoehendaten.de-Tile + TIFF-Magic-Byte-Prüfung
+- DEM-Downloader: Warnung bei DEM-Anfragen über 10 km²
+- DXF-Importer: 500 MB-Cap und Umstellung auf `ezdxf.recover.readfile`
+- Tile-Name-Regex-Guard im DEM-Downloader
+
+**Terrain-Intersection (Geländeschnittkanten & Differenz-Raster):**
+- Cleanup-Helper (`_safe_remove`, `_safe_remove_shapefile_set`) für robuste Temp-Datei-Entsorgung
+- Umstellung von `tempfile.mktemp` auf `tempfile.mkstemp` (Race-Condition behoben)
+- Test-Skelett `tests/test_terrain_intersection.py` ergänzt
+- `IMPLEMENTATION_TERRAIN_INTERSECTION.md` mit Implementierungs-Status angereichert
+
+**v3-Foundation-Module (eigenständig nutzbar, GUI-Integration folgt):**
+- `core/placement_constraints.py` — Constraint-Validator mit STRtree + Snap-to-Grid (16 Tests)
+- `core/park_optimizer.py` — Park-weite LP-Transport-Optimierung via scipy (9 Tests)
+- `core/mesh_exporter.py` — OBJ-Mesh-Export für DEM und Plattform-Polygone (16 Tests)
+- `docs/plans/V3_ROADMAP.md` — konsolidierter v3-Implementierungsplan
+
+**Repo-Hygiene:**
+- Platzhalter-URLs `yourusername`/`YOURUSERNAME` durchgehend ersetzt
+- `metadata.txt`: tracker/repository/homepage und author-Email
+- CHANGELOG-Linksammlung um v5.x/v6.x ergänzt
+- AGENTS.md-Projektstruktur aktualisiert (alle aktuellen Module gelistet)
 
 ### Version 2.0.0 (November 2025)
 

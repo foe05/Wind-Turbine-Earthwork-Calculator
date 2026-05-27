@@ -123,26 +123,24 @@ def extract_terrain_intersection_sloped(
         dem_path, resolution
     )
 
-    # 2. Erstelle Differenz-Raster: DEM - Target Surface
-    diff_raster = create_difference_raster_from_surfaces(
-        dem_path,
-        target_surface_raster,
-        output_raster_path
-    )
+    try:
+        # 2. Erstelle Differenz-Raster: DEM - Target Surface
+        diff_raster = create_difference_raster_from_surfaces(
+            dem_path,
+            target_surface_raster,
+            output_raster_path
+        )
 
-    # 3. Extrahiere Konturlinie bei Wert = 0
-    line_2d = extract_contour_at_height(diff_raster, polygon, height=0.0)
+        # 3. Extrahiere Konturlinie bei Wert = 0
+        line_2d = extract_contour_at_height(diff_raster, polygon, height=0.0)
 
-    # 4. Erstelle 3D-Version mit Z-Werten aus DEM
-    from ..utils.geometry_3d import line_to_linestringz
-    line_3d = line_to_linestringz(line_2d, dem_path, z_offset=0.0)
-
-    # Cleanup temporäres Target Surface Raster
-    if os.path.exists(target_surface_raster):
-        try:
-            os.remove(target_surface_raster)
-        except:
-            pass
+        # 4. Erstelle 3D-Version mit Z-Werten aus DEM
+        from ..utils.geometry_3d import line_to_linestringz
+        line_3d = line_to_linestringz(line_2d, dem_path, z_offset=0.0)
+    finally:
+        # Stelle sicher, dass der temporäre Target-Surface-Raster auch bei
+        # Exceptions in den Schritten 2–4 entsorgt wird.
+        _safe_remove(target_surface_raster)
 
     logger.info(f"Terrain intersection extracted: {line_2d.length():.1f}m length")
 
@@ -362,8 +360,11 @@ def create_target_surface_raster(
         -resolution           # Pixel height (negative!)
     )
 
-    # Erstelle Output-Raster (temporär)
-    temp_path = tempfile.mktemp(suffix='_target_surface.tif')
+    # Erstelle Output-Raster (temporär).
+    # mkstemp ist sicherer als mktemp (keine Race Condition mit anderen Prozessen).
+    fd, temp_path = tempfile.mkstemp(suffix='_target_surface.tif')
+    os.close(fd)
+    os.remove(temp_path)  # GDAL recreates the file via driver.Create
 
     driver = gdal.GetDriverByName('GTiff')
     target_ds = driver.Create(temp_path, width, height, 1, gdal.GDT_Float32)
@@ -507,82 +508,81 @@ def extract_contour_at_height(
 
     raster_band = raster_ds.GetRasterBand(1)
 
-    # Erstelle temporären Vektor-Layer für Konturen
-    temp_contour_path = tempfile.mktemp(suffix='_contours.shp')
+    # Erstelle temporären Vektor-Layer für Konturen.
+    # mkstemp ist sicherer als das veraltete mktemp (keine Race Condition).
+    fd, temp_contour_path = tempfile.mkstemp(suffix='_contours.shp')
+    os.close(fd)
+    os.remove(temp_contour_path)  # GDAL/OGR will recreate the file itself
 
-    # Erstelle Shapefile für Konturen
-    driver = ogr.GetDriverByName('ESRI Shapefile')
-    contour_ds = driver.CreateDataSource(temp_contour_path)
-
-    srs = osr.SpatialReference()
-    srs.ImportFromWkt(raster_ds.GetProjection())
-
-    contour_layer = contour_ds.CreateLayer('contour', srs=srs, geom_type=ogr.wkbLineString)
-
-    # Feld für Höhenwert
-    field_defn = ogr.FieldDefn('ELEV', ogr.OFTReal)
-    contour_layer.CreateField(field_defn)
-
-    # Extrahiere Konturlinie bei spezifischer Höhe
-    # fixedLevelCount = 1, fixedLevels = [height]
     try:
-        gdal.ContourGenerateEx(
-            raster_band,
-            contour_layer,
-            options={
-                'FIXED_LEVELS': [height],
-                'ELEV_FIELD': 'ELEV'
-            }
-        )
-    except Exception as e:
-        logger.error(f"Contour generation failed: {e}")
+        # Erstelle Shapefile für Konturen
+        driver = ogr.GetDriverByName('ESRI Shapefile')
+        contour_ds = driver.CreateDataSource(temp_contour_path)
+
+        srs = osr.SpatialReference()
+        srs.ImportFromWkt(raster_ds.GetProjection())
+
+        contour_layer = contour_ds.CreateLayer('contour', srs=srs, geom_type=ogr.wkbLineString)
+
+        # Feld für Höhenwert
+        field_defn = ogr.FieldDefn('ELEV', ogr.OFTReal)
+        contour_layer.CreateField(field_defn)
+
+        # Extrahiere Konturlinie bei spezifischer Höhe
+        # fixedLevelCount = 1, fixedLevels = [height]
+        try:
+            gdal.ContourGenerateEx(
+                raster_band,
+                contour_layer,
+                options={
+                    'FIXED_LEVELS': [height],
+                    'ELEV_FIELD': 'ELEV'
+                }
+            )
+        except Exception as e:
+            logger.error(f"Contour generation failed: {e}")
+            contour_ds = None
+            raster_ds = None
+            return QgsGeometry()
+
+        # Cleanup GDAL
         contour_ds = None
         raster_ds = None
-        return QgsGeometry()
 
-    # Cleanup GDAL
-    contour_ds = None
-    raster_ds = None
+        # Lade Konturen als QGIS Layer
+        contour_layer_qgis = QgsVectorLayer(temp_contour_path, 'contours', 'ogr')
 
-    # Lade Konturen als QGIS Layer
-    contour_layer_qgis = QgsVectorLayer(temp_contour_path, 'contours', 'ogr')
+        if not contour_layer_qgis.isValid() or contour_layer_qgis.featureCount() == 0:
+            logger.warning("No contours found")
+            return QgsGeometry()
 
-    if not contour_layer_qgis.isValid() or contour_layer_qgis.featureCount() == 0:
-        logger.warning("No contours found")
-        return QgsGeometry()
+        # Sammle alle Geometrien
+        all_geoms = []
+        for feature in contour_layer_qgis.getFeatures():
+            geom = feature.geometry()
+            if not geom.isEmpty():
+                all_geoms.append(geom)
 
-    # Sammle alle Geometrien
-    all_geoms = []
-    for feature in contour_layer_qgis.getFeatures():
-        geom = feature.geometry()
-        if not geom.isEmpty():
-            all_geoms.append(geom)
+        if not all_geoms:
+            return QgsGeometry()
 
-    if not all_geoms:
-        return QgsGeometry()
+        # Vereinige alle Linien
+        if len(all_geoms) == 1:
+            result = all_geoms[0]
+        else:
+            result = QgsGeometry.unaryUnion(all_geoms)
 
-    # Vereinige alle Linien
-    if len(all_geoms) == 1:
-        result = all_geoms[0]
-    else:
-        result = QgsGeometry.unaryUnion(all_geoms)
+        # Clip mit Polygon
+        if not polygon.isEmpty():
+            result = result.intersection(polygon)
 
-    # Clip mit Polygon
-    if not polygon.isEmpty():
-        result = result.intersection(polygon)
+        logger.info(f"Contour extracted: {result.length():.1f}m length")
 
-    # Cleanup temporäre Dateien
-    try:
-        import shutil
-        import glob
-        for f in glob.glob(temp_contour_path.replace('.shp', '.*')):
-            os.remove(f)
-    except:
-        pass
-
-    logger.info(f"Contour extracted: {result.length():.1f}m length")
-
-    return result
+        return result
+    finally:
+        # Shapefile + Sidecars (.shx, .dbf, .prj, .cpg, …) immer aufräumen,
+        # auch bei Exceptions oder frühen Returns oben.
+        _safe_remove_shapefile_set(temp_contour_path)
 
 
 def line_to_linestringz_constant(line_2d: QgsGeometry, z_value: float) -> QgsGeometry:
@@ -620,3 +620,26 @@ def line_to_linestringz_constant(line_2d: QgsGeometry, z_value: float) -> QgsGeo
         points_3d = [QgsPoint(pt.x(), pt.y(), z_value) for pt in vertices]
 
         return QgsGeometry(QgsLineString(points_3d))
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _safe_remove(path: str) -> None:
+    """Best-effort delete of a single file; never raises."""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError as exc:
+        logger.debug(f"Could not remove temp file {path}: {exc}")
+
+
+def _safe_remove_shapefile_set(shp_path: str) -> None:
+    """Best-effort delete of a Shapefile and all its sidecar files (.shx, .dbf, …)."""
+    if not shp_path:
+        return
+    import glob
+    base = shp_path[:-4] if shp_path.endswith('.shp') else shp_path
+    for f in glob.glob(base + '.*'):
+        _safe_remove(f)

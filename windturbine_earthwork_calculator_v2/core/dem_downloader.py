@@ -134,6 +134,17 @@ class DEMDownloader:
                 tile_name = f"{self.TILE_PREFIX}_{easting_km}_{northing_km}_{self.TILE_RESOLUTION}"
                 tiles.append(tile_name)
 
+        # Warn early about large DEM areas. At 1 m resolution a 10 km² DEM is
+        # already ~400 MB as float32 in RAM, and downstream sampling code
+        # currently materializes the full band (see V3_ROADMAP.md #10).
+        area_km2 = len(tiles)  # each tile is exactly 1 km²
+        if area_km2 > 10:
+            self.logger.warning(
+                f"Large DEM area requested: {area_km2} km² ({len(tiles)} tiles). "
+                f"Sampling currently loads the full DEM into RAM — expect "
+                f"~{area_km2 * 40:.0f} MB per band and possible memory pressure."
+            )
+
         self.logger.info(f"Required tiles: {len(tiles)} - {tiles}")
         return tiles
 

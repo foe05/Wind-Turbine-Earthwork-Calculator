@@ -1,9 +1,9 @@
 # AGENTS.md - Developer & AI Assistant Guide
 
 **Projekt**: Wind Turbine Earthwork Calculator
-**Version**: 2.0.0
-**Datum**: November 2025
-**Zweck**: Informationen für AI-Assistenten (Amp, Cursor, etc.) und Entwickler
+**Version**: 2.0.0 (Plugin); v3.0 in Arbeit
+**Datum**: Mai 2026
+**Zweck**: Informationen für AI-Assistenten (Amp, Cursor, Claude Code, etc.) und Entwickler
 
 ---
 
@@ -18,42 +18,82 @@ Wind-Turbine-Earthwork-Calculator/
 │   ├── install_dependencies.py            # Dependency Installer
 │   ├── requirements.txt                   # Python Dependencies
 │   ├── README.md                          # Plugin Documentation
-│   ├── core/                              # Kern-Module
-│   │   ├── dxf_importer.py               # DXF Import
-│   │   ├── dem_downloader.py             # hoehendaten.de API
-│   │   ├── earthwork_calculator.py       # Volumenberechnung
-│   │   ├── multi_surface_calculator.py   # Multi-Flächen-Berechnung
-│   │   ├── profile_generator.py          # Geländeschnitte
-│   │   ├── report_generator.py           # HTML-Report
+│   ├── log.config.example                 # Telemetry-API-Key-Template (echte log.config ist gitignored)
+│   ├── core/                              # Kern-Module (QGIS-Logik + algorithmische Module)
+│   │   ├── dxf_importer.py               # DXF Import (ezdxf + recover-Mode + 500 MB Cap)
+│   │   ├── dem_downloader.py             # hoehendaten.de API + 50 MB/Tile Cap + Magic-Byte-Check
+│   │   ├── earthwork_calculator.py       # Volumenberechnung (single-surface)
+│   │   ├── multi_surface_calculator.py   # Multi-Flächen-Berechnung + Parallelisierung
+│   │   ├── multi_site_report_generator.py # HTML/PDF/Excel-Report über mehrere WEA-Standorte
+│   │   ├── profile_generator.py          # Geländeschnitte als PNGs
+│   │   ├── report_generator.py           # HTML-Einzelstandort-Report (mit HTML-Escape)
 │   │   ├── workflow_runner.py            # Workflow-Orchestrierung
-│   │   ├── surface_types.py              # Datenstrukturen
-│   │   └── surface_validators.py         # Validierung
+│   │   ├── site_aggregator.py            # Multi-Site-Aggregation für Reports
+│   │   ├── site_data.py                  # Standort-Datenmodelle
+│   │   ├── soil_stabilization_calculator.py # Bodenstabilisierungs-Berechnung
+│   │   ├── surface_types.py              # Datenstrukturen (alle Flächen + Schnittkanten)
+│   │   ├── surface_validators.py         # Validierung
+│   │   ├── bgr_soil_api.py               # BGR-Bodendaten-WFS-Client
+│   │   ├── uncertainty.py                # Unsicherheitsanalyse (Sobol etc.)
+│   │   ├── uncertainty_visualizations.py # Plots für Unsicherheits-Reports
+│   │   ├── placement_constraints.py      # ⭐ v3: Constraint-Validator + Snap-to-Grid (shapely)
+│   │   ├── park_optimizer.py             # ⭐ v3: Park-weite Transport-Optimierung (scipy.linprog)
+│   │   └── mesh_exporter.py              # ⭐ v3: OBJ-Mesh-Export (DEM + Polygon-Triangulation)
 │   ├── gui/                              # GUI-Komponenten
 │   │   └── main_dialog.py                # Tab-basierter Dialog
 │   ├── processing_provider/              # QGIS Processing
 │   │   ├── provider.py                   # Processing Provider
 │   │   └── optimize_algorithm.py         # Haupt-Algorithmus
 │   ├── utils/                            # Hilfsfunktionen
-│   │   ├── geometry_utils.py             # Geometrie-Helfer
-│   │   └── logging_utils.py              # Logging
-│   └── tests/                            # Tests
-│       └── test_multi_param_optimization.py
-├── webapp/                               # Web-Anwendung (Microservices)
-│   ├── docker-compose.yml                # Docker Orchestrierung
-│   ├── services/                         # Microservices
-│   │   ├── api_gateway/                  # API Gateway
-│   │   ├── auth_service/                 # Authentifizierung
-│   │   ├── dem_service/                  # DEM-Daten
-│   │   ├── calculation_service/          # Berechnungen
-│   │   ├── cost_service/                 # Kostenberechnung
-│   │   └── report_service/               # Report-Generierung
-│   └── frontend/                         # React Frontend
-├── prototype/                            # Legacy (veraltet)
-├── AGENTS.md                             # Diese Datei
-├── CHANGELOG.md                          # Versions-Historie
-├── README.md                             # Projekt-README
-└── LICENSE                               # MIT-Lizenz
+│   │   ├── central_logging.py            # Opt-in Telemetrie (file-gated, gitignored Key)
+│   │   ├── error_messages.py             # Lokalisierte Fehlertext-IDs
+│   │   ├── gdal_compat.py                # ReadRaster/WriteRaster-Wrapper (umgeht broken _gdal_array)
+│   │   ├── geometry_3d.py                # 3D-Geometrie-Helfer (PolygonZ, LineStringZ)
+│   │   ├── geometry_utils.py             # 2D-Geometrie-Helfer
+│   │   ├── i18n.py                       # DE/EN-Lokalisierung
+│   │   ├── layer_styling.py              # QGIS-Layer-Styles
+│   │   ├── logging_utils.py              # Plugin-Logger
+│   │   ├── terrain_intersection.py       # Geländeschnittkanten + Differenz-Raster (mit Cleanup-Helfern)
+│   │   └── validation.py                 # Input-Validierung
+│   └── tests/                            # 18 Test-Module + 2 Guides
+│       ├── test_bgr_api.py
+│       ├── test_central_logging.py
+│       ├── test_dem_mosaic.py
+│       ├── test_dxf_import.py
+│       ├── test_gdal_compat.py
+│       ├── test_geometry_3d.py
+│       ├── test_mesh_exporter.py         # ⭐ v3
+│       ├── test_multi_param_optimization.py
+│       ├── test_multi_site_report.py
+│       ├── test_parallel_optimization.py
+│       ├── test_park_optimizer.py        # ⭐ v3
+│       ├── test_placement_constraints.py # ⭐ v3
+│       ├── test_report_fixes.py
+│       ├── test_site_aggregator.py
+│       ├── test_soil_stabilization.py
+│       ├── test_terrain_intersection.py  # ⭐ v3
+│       ├── test_uncertainty.py
+│       ├── test_validation_enhanced.py
+│       ├── test_volume_regression.py     # ⚠ braucht Fixture wea45mit3d.zip (in 5374657 gelöscht)
+│       ├── TEST_RESULTS.md
+│       └── PARALLELIZATION_TEST_GUIDE.md
+├── webapp/                               # Web-Anwendung (Microservices, gesondert betrachtet)
+├── docs/
+│   ├── MULTI_SURFACE_BENUTZERHANDBUCH.md  # User-Handbuch
+│   └── plans/V3_ROADMAP.md                # ⭐ v3-Implementierungsplan
+├── shared/                                # Webapp-only — vom Plugin nicht genutzt
+├── AGENTS.md                              # Diese Datei
+├── CLAUDE.md                              # Claude-Code-spezifischer Kontext (gitignored)
+├── CHANGELOG.md                           # Versions-Historie
+├── CONTRIBUTING.md                        # Contributing-Guide
+├── IMPLEMENTATION_TERRAIN_INTERSECTION.md # Spec + Status #4
+├── RECHERCHE_2026-05-26.md                # Wettbewerbsanalyse + Feature-Ideen
+├── E2E_*.md, MANUAL_*.md                  # Manuelle Test-Guides
+└── LICENSE                                # MIT-Lizenz
 ```
+
+⭐ markiert Module, die in der v3-Foundation-Session (Mai 2026) neu angelegt
+wurden und Kern-APIs für die geplanten Roadmap-Features bereitstellen.
 
 ---
 
@@ -89,11 +129,14 @@ python install_dependencies.py
 - `PyQt5` ✓
 - `matplotlib` ✓
 - `GDAL/OGR` ✓
+- `scipy` ✓ (genutzt von `uncertainty.py`, `park_optimizer.py`)
 
-**Zusätzlich erforderlich**:
-- `ezdxf>=1.1.0` - DXF-Parsing
+**Zusätzlich erforderlich** (siehe `requirements.txt`):
+- `ezdxf>=1.1.0` - DXF-Parsing (mit `recover.readfile` für robustere Tolerance gegen malformed DXF)
 - `requests>=2.28.0` - API-Kommunikation
-- `shapely>=2.0.0` - Geometrie-Operationen
+- `shapely>=2.0.0` - Geometrie-Operationen (auch `placement_constraints.py`)
+- `weasyprint>=56.0` - PDF-Generierung
+- `openpyxl>=3.0.0` - Excel-Export im Multi-Site-Report
 
 ### Architektur
 
@@ -118,22 +161,40 @@ windturbine_earthwork_calculator_v2/
 ```
 1. DXF-Import
    └─→ dxf_importer.py → QgsGeometry (Polygon)
+       (recover-Mode, 500 MB Cap, CRS-Detection)
 
 2. DEM-Download
    └─→ dem_downloader.py → QgsRasterLayer
+       (hoehendaten.de, 50 MB/Tile Cap, TIFF-Magic-Check, >10 km² Warnung)
 
 3. Höhen-Optimierung
-   └─→ earthwork_calculator.py → Dict mit Ergebnissen
-       - optimal_height
-       - total_cut, total_fill
-       - terrain_min, terrain_max
+   └─→ multi_surface_calculator.py → MultiSurfaceCalculationResult
+       - crane_height, total_cut, total_fill, surfaces, …
+       - Parallel via ProcessPoolExecutor (Linux/macOS, Commit abecfcf)
 
-4. Profil-Generierung
+4. Geländeschnittkanten + Differenz-Raster (NEU seit ~2026-05)
+   └─→ utils/terrain_intersection.py → 14 LineString-Layer + 7 GeoTIFFs
+
+5. Profil-Generierung
    └─→ profile_generator.py → List[PNG-Pfade]
 
-5. Report-Generierung
-   └─→ report_generator.py → HTML-Datei
+6. Report-Generierung
+   └─→ report_generator.py / multi_site_report_generator.py → HTML/PDF/Excel
+       (HTML-Escape für project_name, site_name, profile_name, BGR-description)
 ```
+
+### v3-Roadmap-Module (eigenständig nutzbar, GUI-Integration noch offen)
+
+- **`core/placement_constraints.py`** — `PlacementValidator.check_position(x, y)`,
+  `suggest_nearest_valid(x, y, ...)` für Buffer-Constraints (Wohnbebauung,
+  Straßen, Schutzgebiete). STRtree-Indexierung, Hard/Soft-Severity,
+  QgsVectorLayer-Adapter. Siehe `docs/plans/V3_ROADMAP.md` #1.
+- **`core/park_optimizer.py`** — `ParkOptimizer.solve(sites)` löst den
+  park-weiten Material-Transport als LP via `scipy.optimize.linprog`.
+  Baseline-Vergleich + Einsparungsausweis. Siehe V3_ROADMAP #2.
+- **`core/mesh_exporter.py`** — `write_obj()`, `dem_to_mesh()`,
+  `polygon_to_mesh_at_height()` für 3D-Export. Ear-Clipping
+  (konkave Polygone). Siehe V3_ROADMAP #5.
 
 ---
 
@@ -347,5 +408,5 @@ A: Ja, nur `dxf_importer.py` muss angepasst werden. Die anderen Module sind unab
 
 ---
 
-**Letzte Aktualisierung**: November 2025
-**Version dieses Dokuments**: 2.0.0
+**Letzte Aktualisierung**: 2026-05-27
+**Version dieses Dokuments**: 2.1.0 (v3-Foundation-Session)

@@ -384,23 +384,25 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
 
-### In Entwicklung (v5.0)
+### Behoben (Sicherheit)
+- HTML-Escape in Reports und Dialog-Labels gegen XSS-/SSRF-Vektoren (`project_name`,
+  `site_name`, `profile_name`, BGR-`description`)
+- `log.config` aus Git-Index entfernt; `log.config.example` als Vorlage ergänzt
+- DEM-Downloader: 50-MB-Cap und TIFF-Magic-Byte-Prüfung pro hoehendaten.de-Antwort
+- DXF-Importer: 500-MB-Cap, Umstellung auf `ezdxf.recover.readfile`
+- DEM-Downloader: Tile-Name-Regex-Guard
 
-#### Geplant
-- **Constraint-basierte Platzierung**
-  - Buffer um Gebäude/Straßen
-  - Automatische Konflikt-Vermeidung
-  - Snap-to-Grid für standardisierte Platzierung
+### Geplant für v3.0 (siehe `RECHERCHE_2026-05-26.md` und Implementierungspläne unter `docs/plans/`)
+- **Constraint-basierte Platzierung** — Buffer um Gebäude/Straßen, automatische Konflikt-Vermeidung, Snap-to-Grid
+- **Park-weite Batch-Optimierung** — Material-Transport zwischen Standorten minimieren, Park-Gesamtkostenfunktion
+- **Geländeschnittkanten & Differenz-Raster** — vollständige Umsetzung gem. `IMPLEMENTATION_TERRAIN_INTERSECTION.md`
+- **3D-Mesh-Export & 3D-Viewer** — OBJ/STL-Export, Cesium-/Three.js-/Qgis2threejs-Anbindung
 
-- **Batch-Optimierung**
-  - Material-Transport zwischen Standorten minimieren
-  - Kostenfunktion über gesamten Windpark
-  - Multi-Site-Optimierung
-
-- **3D-Visualisierung**
-  - Export für 3D-Viewer (z.B. Cesium, Three.js)
-  - Interaktive Darstellung von Cut/Fill
-  - Export als 3D-Mesh (OBJ, STL)
+### Geplant für v3.1+
+- Rotationswinkel-Optimierung der Kranstellfläche
+- Mass-Haul-Diagramm mit Park-weitem Balancing
+- LandXML/IFC-4.3-Export für Machine-Control
+- ALKIS-Flurstücks-Layer (WFS)
 
 ---
 
@@ -415,7 +417,10 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ---
 
-[4.0.0]: https://github.com/YOURUSERNAME/Wind-Turbine-Earthwork-Calculator/releases/tag/v4.0.0
-[3.0.0]: https://github.com/YOURUSERNAME/Wind-Turbine-Earthwork-Calculator/releases/tag/v3.0.0
-[2.0.0]: https://github.com/YOURUSERNAME/Wind-Turbine-Earthwork-Calculator/releases/tag/v2.0.0
-[1.0.0]: https://github.com/YOURUSERNAME/Wind-Turbine-Earthwork-Calculator/releases/tag/v1.0.0
+[6.0.0]: https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/releases/tag/v6.0.0
+[5.5.0]: https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/releases/tag/v5.5.0
+[5.0.0]: https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/releases/tag/v5.0.0
+[4.0.0]: https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/releases/tag/v4.0.0
+[3.0.0]: https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/releases/tag/v3.0.0
+[2.0.0]: https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/releases/tag/v2.0.0
+[1.0.0]: https://github.com/foe05/Wind-Turbine-Earthwork-Calculator/releases/tag/v1.0.0

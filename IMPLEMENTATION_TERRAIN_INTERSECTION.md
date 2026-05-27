@@ -7,6 +7,29 @@
 
 ---
 
+## ⭐ Status (Stand 2026-05-27)
+
+**Implementierungsstand: ~95 % vollständig.**
+
+| Bereich | Status | Code-Referenz |
+|---|---|---|
+| 14 Schnittkanten-Layer (2D + 3D) | ✅ implementiert | `core/workflow_runner.py:1370–1528` |
+| 7 Differenz-Raster (GeoTIFF) | ✅ implementiert | `core/multi_surface_calculator.py:3316–3443` |
+| `apply_cutfill_styling()` Cut=Rot, Fill=Grün | ✅ implementiert | `core/workflow_runner.py:1696–1752` |
+| QGIS-Integration (`_add_to_qgis`) | ✅ implementiert | `core/workflow_runner.py:1640–1786` |
+| 3D-Geometrien (LineStringZ) | ✅ implementiert | `utils/terrain_intersection.py:588–622`, `utils/geometry_3d.py` |
+| Tests | 🟡 Skelett vorhanden | `tests/test_terrain_intersection.py` (6 Tests, skippen ohne QGIS) |
+| Robuste Temp-Datei-Cleanup | ✅ implementiert | `_safe_remove*` Helper + `try/finally` |
+
+**Verbleibende kleine Punkte:**
+- Volle Integrations-Tests in echter QGIS-Umgebung gegen Referenzdaten
+- 3D-Renderer-Konfiguration im QGIS-Layer-Tree (LineStringZ wird derzeit nativ erkannt, aber kein expliziter `QgsLine3DSymbol` gesetzt)
+- Fallback-Verhalten wenn `create_difference_raster_*` fehlschlägt (Raster-Pfad wird noch optional gespeichert)
+
+Die nachfolgenden Phasen-Häkchen sind historische Planungs-Marker aus dem Ursprungs-Dokument (2025-11-26) und kennzeichneten **nicht** den Erledigt-Status der Arbeit. Der Implementierungs-Diff-Run vom 2026-05-27 hat jede Phase im Code verifiziert.
+
+---
+
 ## Inhaltsverzeichnis
 
 1. [Projektziel](#projektziel)
