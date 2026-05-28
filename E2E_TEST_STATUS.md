@@ -70,11 +70,11 @@ The following automated tests are already in place and passing:
 - **47 zusätzliche Tests** in den v3-Foundation-Modulen (36 grün im plain
   Python-Env, 11 skippen mangels GDAL/QGIS-Bindings)
 
-**Bekannte Lücke:** `test_volume_regression.py` skippt seit Commit `5374657`
-(„delete test files") stillschweigend, weil die 19.5-MB-Fixture
-`wea45mit3d.zip` aus dem Repo entfernt wurde. CLAUDE.md beschreibt sie noch
-als authoritative — bitte zurückholen oder durch synthetische Mini-Fixture
-ersetzen, damit die Cut/Fill-Math wieder gepinnt ist.
+**Behoben (2026-05-28):** Die 19.5-MB-Fixture `wea45mit3d.zip` war in Commit
+`5374657` („delete test files") entfernt worden, wodurch
+`test_volume_regression.py` stillschweigend skippte. Sie wurde aus der
+Git-Historie (`5374657^`) wiederhergestellt; der Regressionstest läuft wieder
+(**4/4 grün** mit rasterio/fiona/shapely) und pinnt die Cut/Fill-Math erneut.
 
 ## Manual Test Requirement
 

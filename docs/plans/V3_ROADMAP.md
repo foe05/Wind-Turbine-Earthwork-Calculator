@@ -51,7 +51,7 @@ Was noch fehlt, um die Features in der GUI nutzbar zu machen:
 
 | Item | Blocker |
 |---|---|
-| #3 Multi-Param-Praxistest gegen Fixture | **Fixture `wea45mit3d.zip` wurde in Commit `5374657` gelöscht** (19.5 MB). `test_volume_regression.py` skippt seither stillschweigend. CLAUDE.md beschreibt sie noch als authoritative — Diskrepanz. **Maßnahme:** Fixture zurückholen oder durch synthetische Mini-Fixture ersetzen. |
+| #3 Multi-Param-Praxistest gegen Fixture | ✅ **Behoben (2026-05-28):** Fixture `wea45mit3d.zip` (19.5 MB) aus der Git-Historie (`5374657^`) wiederhergestellt; `test_volume_regression.py` läuft wieder (4/4 grün mit rasterio/fiona/shapely). |
 | #11 E2E-Manual-Test Multi-Site-Report | Manueller Test, braucht echte DEM/DXF-Daten + Sign-Off. |
 | #13 Manuelle Excel-/PDF-Verifikation | Manueller Test, braucht Augenmerk-Review. |
 
