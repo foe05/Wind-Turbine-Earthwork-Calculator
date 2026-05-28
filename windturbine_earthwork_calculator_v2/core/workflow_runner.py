@@ -52,6 +52,7 @@ from .surface_types import (
 )
 from .surface_validators import validate_project
 from .uncertainty import UncertaintyConfig, TerrainType
+from . import mesh_exporter
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
 from ..utils.central_logging import log_event
@@ -849,6 +850,22 @@ class WorkflowWorker(QObject):
             results
         )
 
+        # === STEP 8.5: Export 3D meshes (OBJ) ===
+        # Optional, non-fatal: writes a terrain mesh and one mesh per surface so
+        # the result can be inspected in external 3D viewers (Three.js, Blender,
+        # Cesium). Controlled by the 'export_obj' param (default on).
+        if self.params.get('export_obj', True):
+            try:
+                self.progress_updated.emit(92, "🧊 3D-Meshes (OBJ) werden exportiert...")
+                obj_paths = self._export_meshes(
+                    results_dir, x_coord, y_coord,
+                    project, dem_path, optimal_crane_height
+                )
+                self.logger.info(f"Exported {len(obj_paths)} OBJ mesh(es)")
+            except Exception as e:
+                # Never let mesh export break the main workflow.
+                self.logger.warning(f"OBJ mesh export skipped due to error: {e}")
+
         # === STEP 9: Add to QGIS ===
         self.progress_updated.emit(95, "🗺️ Layer werden zu QGIS hinzugefügt...")
         self.logger.info("Adding layers to QGIS project")
@@ -1069,6 +1086,79 @@ class WorkflowWorker(QObject):
         layers['profile_lines'] = profile_lines_layer
 
         return layers
+
+    @staticmethod
+    def _polygon_exterior_xy(geometry):
+        """Extract the exterior ring of a QgsGeometry polygon as [(x, y), ...].
+
+        Returns an empty list for empty/non-polygon geometries. Handles both
+        single polygons and multipolygons (first part only).
+        """
+        if geometry is None or geometry.isEmpty():
+            return []
+        if geometry.isMultipart():
+            multi = geometry.asMultiPolygon()
+            if not multi:
+                return []
+            rings = multi[0]
+        else:
+            rings = geometry.asPolygon()
+        if not rings:
+            return []
+        exterior = rings[0]
+        return [(pt.x(), pt.y()) for pt in exterior]
+
+    def _export_meshes(self, results_dir, x_coord, y_coord,
+                       project: MultiSurfaceProject, dem_path, optimal_crane_height):
+        """Write a terrain OBJ plus one OBJ per surface, returns list of paths.
+
+        Heights:
+          - crane pad   → optimal_crane_height
+          - foundation  → fok - foundation_depth (Fundamentsohle)
+          - boom/rotor/road → optimal_crane_height as a flat approximation
+            (sloped surfaces would need the per-pixel target raster; the flat
+            mesh is sufficient for a first-pass 3D overview)
+
+        Each export is individually guarded so one bad surface does not abort
+        the rest.
+        """
+        written: list[str] = []
+        base = f"WKA_{x_coord}_{y_coord}"
+        mesh_dir = Path(results_dir) / f"{base}_meshes"
+
+        # Terrain mesh from the DEM (decimated for a manageable file size).
+        try:
+            terrain_mesh = mesh_exporter.dem_to_mesh(str(dem_path), decimation=4, name="terrain")
+            if terrain_mesh.triangle_count > 0:
+                out = mesh_exporter.write_obj(str(mesh_dir / "terrain.obj"), terrain_mesh)
+                written.append(out)
+        except Exception as e:
+            self.logger.warning(f"Terrain mesh export failed: {e}")
+
+        # Surface meshes: (attribute, target height, name)
+        fok = float(project.fok)
+        surface_specs = [
+            (getattr(project, "crane_pad", None), float(optimal_crane_height), "kranstellflaeche"),
+            (getattr(project, "foundation", None), fok - float(project.foundation_depth), "fundamentsohle"),
+            (getattr(project, "boom", None), float(optimal_crane_height), "auslegerflaeche"),
+            (getattr(project, "rotor_storage", None), float(optimal_crane_height), "rotorflaeche"),
+            (getattr(project, "road_access", None), float(optimal_crane_height), "zufahrt"),
+        ]
+        for surface, height, name in surface_specs:
+            if surface is None or getattr(surface, "geometry", None) is None:
+                continue
+            try:
+                coords = self._polygon_exterior_xy(surface.geometry)
+                if len(coords) < 3:
+                    continue
+                mesh = mesh_exporter.polygon_to_mesh_at_height(coords, height, name=name)
+                if mesh.triangle_count > 0:
+                    out = mesh_exporter.write_obj(str(mesh_dir / f"{name}.obj"), mesh)
+                    written.append(out)
+            except Exception as e:
+                self.logger.warning(f"Mesh export for {name} failed: {e}")
+
+        return written
 
     def _save_to_geopackage(self, gpkg_path, project: MultiSurfaceProject,
                            profiles, dem_path, optimal_crane_height, results):

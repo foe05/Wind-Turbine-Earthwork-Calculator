@@ -318,7 +318,9 @@ For the full per-release log see the repository-root `CHANGELOG.md`.
 **v3-Foundation-Module (eigenständig nutzbar, GUI-Integration folgt):**
 - `core/placement_constraints.py` — Constraint-Validator mit STRtree + Snap-to-Grid (16 Tests)
 - `core/park_optimizer.py` — Park-weite LP-Transport-Optimierung via scipy (9 Tests)
-- `core/mesh_exporter.py` — OBJ-Mesh-Export für DEM und Plattform-Polygone (16 Tests)
+- `core/mesh_exporter.py` — OBJ-Mesh-Export für DEM und Plattform-Polygone (16 Tests),
+  **im Workflow verdrahtet:** jeder Lauf schreibt Terrain + Flächen als OBJ nach
+  `WKA_<x>_<y>_meshes/` (auto-on, per Param `export_obj=False` abschaltbar)
 - `docs/plans/V3_ROADMAP.md` — konsolidierter v3-Implementierungsplan
 
 **Repo-Hygiene:**

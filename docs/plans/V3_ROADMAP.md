@@ -17,7 +17,7 @@ plus die zwei größeren Performance-Punkte aus den Known Issues.
 | #1 Constraint-basierte Platzierung | 🟡 **Core-Modul fertig** (`core/placement_constraints.py` + 16 Tests grün); GUI/Workflow-Anbindung noch offen | mittel (GUI) |
 | #2 Park-weite Batch-Optimierung | 🟡 **Transport-LP fertig** (`core/park_optimizer.py` + 9 Tests grün); MILP über Kandidaten + Workflow-Anbindung noch offen | mittel (MILP-Erweiterung + GUI) |
 | #4 Terrain-Intersection & Differenz-Raster | ✅ **~95 % implementiert** (`utils/terrain_intersection.py`, 622 LOC; wired in `multi_surface_calculator.py:3301+`); 14-Layer/7-Raster-Output, Cleanup-Härtung + Test-Skelett ergänzt | klein (3D-Renderer-Konfig optional) |
-| #5 3D-Mesh-Export & 3D-Viewer | 🟡 **OBJ-Export fertig** (`core/mesh_exporter.py` + 16 Tests, 11 grün/5 gdal-skip); STL/glTF + Three.js-Viewer noch offen | mittel (zusätzliche Formate + Viewer) |
+| #5 3D-Mesh-Export & 3D-Viewer | 🟢 **OBJ-Export fertig + im Workflow verdrahtet** (`core/mesh_exporter.py` + 16 Tests; `workflow_runner._export_meshes` schreibt Terrain + Flächen nach `WKA_*_meshes/`); STL/glTF + Three.js-Viewer noch offen | mittel (zusätzliche Formate + Viewer) |
 | #9 DXF-Import langsam (>1000 Polylinien) | nicht profiliert | mittel |
 | #10 DEM-RAM (>10 km²) | DEM komplett im RAM via `gdal_compat.read_band_as_array`; Warn-Log bei >10 km² eingebaut | mittel (windowed reads) |
 
@@ -42,10 +42,14 @@ Was noch fehlt, um die Features in der GUI nutzbar zu machen:
 2. **#2 MILP-Stufe:** N-Best-Kandidaten aus `MultiSurfaceCalculator` (statt
    nur 1-Best) sammeln, dann Kandidaten + Transport als MILP über
    `scipy.optimize.milp` lösen.
-3. **#5 Workflow-Anbindung:** `core/workflow_runner.py` so erweitern, dass
-   die berechneten Plattform-Polygone + das DEM zusätzlich als OBJ ins
-   Output-Verzeichnis geschrieben werden; optional zusätzliche Writer für
-   STL und glTF.
+3. **#5 Workflow-Anbindung:** ✅ **Erledigt (2026-05-28).**
+   `core/workflow_runner.py::_export_meshes()` schreibt nach der
+   GeoPackage-Speicherung ein Terrain-OBJ (decimated DEM) plus je ein OBJ
+   pro Fläche (Kranstellfläche, Fundamentsohle, Ausleger, Rotor, Zufahrt)
+   in `WKA_<x>_<y>_meshes/`. Auto-on, per Param `export_obj=False` abschaltbar,
+   non-fatal (Fehler brechen den Hauptlauf nicht ab). **Noch offen:**
+   zusätzliche Writer für STL und glTF + Three.js-Viewer-Template; geneigte
+   Flächen werden aktuell als flaches Mesh auf Kranhöhe approximiert.
 
 ### Blockierte Items (außerhalb Code-Reichweite)
 
