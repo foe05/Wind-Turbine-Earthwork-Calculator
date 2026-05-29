@@ -316,7 +316,9 @@ For the full per-release log see the repository-root `CHANGELOG.md`.
 - `IMPLEMENTATION_TERRAIN_INTERSECTION.md` mit Implementierungs-Status angereichert
 
 **v3-Foundation-Module (eigenständig nutzbar, GUI-Integration folgt):**
-- `core/placement_constraints.py` — Constraint-Validator mit STRtree + Snap-to-Grid (16 Tests)
+- `core/placement_constraints.py` — Constraint-Validator mit STRtree + Snap-to-Grid (16 Tests),
+  **GUI-Tab „🚧 Restriktionen"** in `gui/main_dialog.py` (Layer-Picker pro Kategorie,
+  Distanz, Hard/Soft, interaktiver Positions-Checker + Vorschlag nächster gültiger Position)
 - `core/park_optimizer.py` — Park-weite LP-Transport-Optimierung via scipy (9 Tests)
 - `core/mesh_exporter.py` — OBJ-Mesh-Export für DEM und Plattform-Polygone (16 Tests),
   **im Workflow verdrahtet:** jeder Lauf schreibt Terrain + Flächen als OBJ nach

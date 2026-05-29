@@ -183,18 +183,19 @@ windturbine_earthwork_calculator_v2/
        (HTML-Escape für project_name, site_name, profile_name, BGR-description)
 ```
 
-### v3-Roadmap-Module (eigenständig nutzbar, GUI-Integration noch offen)
+### v3-Roadmap-Module
 
 - **`core/placement_constraints.py`** — `PlacementValidator.check_position(x, y)`,
   `suggest_nearest_valid(x, y, ...)` für Buffer-Constraints (Wohnbebauung,
   Straßen, Schutzgebiete). STRtree-Indexierung, Hard/Soft-Severity,
-  QgsVectorLayer-Adapter. Siehe `docs/plans/V3_ROADMAP.md` #1.
+  QgsVectorLayer-Adapter. **GUI: Tab „🚧 Restriktionen"** in `main_dialog.py`
+  (`_create_constraints_tab`). Workflow-Preflight noch offen. V3_ROADMAP #1.
 - **`core/park_optimizer.py`** — `ParkOptimizer.solve(sites)` löst den
   park-weiten Material-Transport als LP via `scipy.optimize.linprog`.
-  Baseline-Vergleich + Einsparungsausweis. Siehe V3_ROADMAP #2.
+  Baseline-Vergleich + Einsparungsausweis. GUI/MILP-Stufe offen. V3_ROADMAP #2.
 - **`core/mesh_exporter.py`** — `write_obj()`, `dem_to_mesh()`,
-  `polygon_to_mesh_at_height()` für 3D-Export. Ear-Clipping
-  (konkave Polygone). Siehe V3_ROADMAP #5.
+  `polygon_to_mesh_at_height()` für 3D-Export. Ear-Clipping (konkave Polygone).
+  **Im Workflow verdrahtet** (`workflow_runner._export_meshes`). V3_ROADMAP #5.
 
 ---
 

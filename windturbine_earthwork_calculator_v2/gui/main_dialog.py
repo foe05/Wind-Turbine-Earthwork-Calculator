@@ -24,6 +24,13 @@ from qgis.PyQt.QtWidgets import (
 from qgis.PyQt.QtCore import Qt, pyqtSignal, QUrl
 from qgis.PyQt.QtGui import QIcon, QDesktopServices
 
+try:
+    from qgis.gui import QgsMapLayerComboBox
+    from qgis.core import QgsMapLayerProxyModel
+    _MAP_LAYER_COMBO_AVAILABLE = True
+except ImportError:
+    _MAP_LAYER_COMBO_AVAILABLE = False
+
 from ..utils.logging_utils import get_plugin_logger
 from ..utils.validation import (
     ValidationError,
@@ -80,6 +87,7 @@ class MainDialog(QDialog):
         # Create tabs
         self.tab_input = self._create_input_tab()
         self.tab_optimization = self._create_optimization_tab()
+        self.tab_constraints = self._create_constraints_tab()
         self.tab_profiles = self._create_profiles_tab()
         self.tab_stabilization = self._create_soil_stabilization_tab()
         self.tab_output = self._create_output_tab()
@@ -87,6 +95,7 @@ class MainDialog(QDialog):
 
         self.tabs.addTab(self.tab_input, "📂 Eingabe")
         self.tabs.addTab(self.tab_optimization, "⚙️ Optimierung")
+        self.tabs.addTab(self.tab_constraints, "🚧 Restriktionen")
         self.tabs.addTab(self.tab_profiles, "📊 Geländeschnitte")
         self.tabs.addTab(self.tab_stabilization, "🏗️ Bodenstabilisierung")
         self.tabs.addTab(self.tab_output, "💾 Ausgabe")
@@ -519,6 +528,244 @@ class MainDialog(QDialog):
         self.input_terrain_type.setEnabled(enabled)
         self.input_foundation_depth_std.setEnabled(enabled)
         self.input_slope_angle_std.setEnabled(enabled)
+
+    # ------------------------------------------------------------------
+    # Restriktionen (placement constraints) tab
+    # ------------------------------------------------------------------
+
+    # (label, default min-distance in m) for the three standard DACH categories
+    _CONSTRAINT_CATEGORIES = [
+        ("Wohnbebauung", 600.0),
+        ("Straßen / Verkehrswege", 50.0),
+        ("Schutzgebiete (NSG/FFH)", 200.0),
+    ]
+
+    def _create_constraints_tab(self):
+        """Create the placement-constraints tab.
+
+        Lets the user pick existing QGIS vector layers as obstacle sources,
+        define a minimum clearance per category, and interactively check a
+        candidate WEA position against them (or get the nearest valid spot).
+        Backed by core/placement_constraints.py.
+        """
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        info = QLabel(
+            "<b>Restriktionsprüfung</b><br><br>"
+            "<i>Prüft eine geplante WEA-Position gegen Mindestabstände zu "
+            "Hindernissen (Wohnbebauung, Straßen, Schutzgebiete). Wählen Sie "
+            "pro Kategorie eine vorhandene QGIS-Vektorebene und den geforderten "
+            "Abstand. Koordinaten in UTM (EPSG:25832–25836).</i>"
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        if not _MAP_LAYER_COMBO_AVAILABLE:
+            warn = QLabel(
+                "<b style='color:#cc0000'>QgsMapLayerComboBox nicht verfügbar.</b> "
+                "Die Restriktionsprüfung benötigt eine vollständige QGIS-GUI-Umgebung."
+            )
+            warn.setWordWrap(True)
+            layout.addWidget(warn)
+            layout.addStretch()
+            widget.setLayout(layout)
+            scroll.setWidget(widget)
+            return scroll
+
+        # --- Constraint category rows ---
+        group = QGroupBox("Restriktionsflächen")
+        form = QFormLayout()
+
+        # Each entry: dict(enabled, layer_combo, distance, severity)
+        self.constraint_rows = []
+        for label, default_dist in self._CONSTRAINT_CATEGORIES:
+            enabled = QCheckBox("aktiv")
+            enabled.setChecked(False)
+
+            layer_combo = QgsMapLayerComboBox()
+            layer_combo.setFilters(QgsMapLayerProxyModel.VectorLayer)
+            layer_combo.setAllowEmptyLayer(True)
+
+            distance = QDoubleSpinBox()
+            distance.setRange(0.0, 100000.0)
+            distance.setDecimals(1)
+            distance.setSingleStep(10.0)
+            distance.setValue(default_dist)
+            distance.setSuffix(" m")
+
+            severity = QComboBox()
+            severity.addItems(["Hart (blockiert)", "Weich (Warnung)"])
+
+            row_layout = QHBoxLayout()
+            row_layout.addWidget(enabled)
+            row_layout.addWidget(layer_combo, stretch=1)
+            row_layout.addWidget(distance)
+            row_layout.addWidget(severity)
+            row_container = QWidget()
+            row_container.setLayout(row_layout)
+
+            form.addRow(f"{label}:", row_container)
+            self.constraint_rows.append({
+                "label": label,
+                "enabled": enabled,
+                "layer_combo": layer_combo,
+                "distance": distance,
+                "severity": severity,
+            })
+
+        group.setLayout(form)
+        layout.addWidget(group)
+
+        # --- Interactive position check ---
+        group_check = QGroupBox("Position prüfen")
+        form_check = QFormLayout()
+
+        self.input_check_x = QDoubleSpinBox()
+        self.input_check_x.setRange(0.0, 10_000_000.0)
+        self.input_check_x.setDecimals(2)
+        self.input_check_x.setSingleStep(1.0)
+        self.input_check_x.setValue(0.0)
+        form_check.addRow("Rechtswert (X, UTM):", self.input_check_x)
+
+        self.input_check_y = QDoubleSpinBox()
+        self.input_check_y.setRange(0.0, 10_000_000.0)
+        self.input_check_y.setDecimals(2)
+        self.input_check_y.setSingleStep(1.0)
+        self.input_check_y.setValue(0.0)
+        form_check.addRow("Hochwert (Y, UTM):", self.input_check_y)
+
+        btn_layout = QHBoxLayout()
+        self.btn_constraint_check = QPushButton("Position prüfen")
+        self.btn_constraint_check.clicked.connect(self._on_constraint_check)
+        self.btn_constraint_suggest = QPushButton("Nächste gültige Position")
+        self.btn_constraint_suggest.clicked.connect(self._on_constraint_suggest)
+        btn_layout.addWidget(self.btn_constraint_check)
+        btn_layout.addWidget(self.btn_constraint_suggest)
+        btn_container = QWidget()
+        btn_container.setLayout(btn_layout)
+        form_check.addRow("", btn_container)
+
+        self.label_constraint_result = QLabel("")
+        self.label_constraint_result.setWordWrap(True)
+        self.label_constraint_result.setStyleSheet("QLabel { font-size: 10pt; }")
+        form_check.addRow("Ergebnis:", self.label_constraint_result)
+
+        group_check.setLayout(form_check)
+        layout.addWidget(group_check)
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        scroll.setWidget(widget)
+        return scroll
+
+    def _build_placement_validator(self):
+        """Construct a PlacementValidator from the configured constraint rows.
+
+        Returns (validator, error_message). validator is None if nothing is
+        configured or shapely is missing; error_message is a user-facing string
+        in that case.
+        """
+        try:
+            from ..core.placement_constraints import (
+                PlacementValidator, constraint_from_qgis_layer, Severity
+            )
+        except ImportError as exc:
+            return None, f"placement_constraints nicht ladbar: {exc}"
+
+        constraints = []
+        for row in getattr(self, "constraint_rows", []):
+            if not row["enabled"].isChecked():
+                continue
+            layer = row["layer_combo"].currentLayer()
+            if layer is None:
+                continue
+            severity = (Severity.HARD if row["severity"].currentIndex() == 0
+                        else Severity.SOFT)
+            try:
+                constraints.append(constraint_from_qgis_layer(
+                    name=row["label"],
+                    layer=layer,
+                    min_distance_m=row["distance"].value(),
+                    severity=severity,
+                ))
+            except Exception as exc:
+                return None, f"Layer '{row['label']}' konnte nicht gelesen werden: {exc}"
+
+        if not constraints:
+            return None, ("Keine aktiven Restriktionsebenen konfiguriert. "
+                          "Mindestens eine Kategorie aktivieren und eine Ebene wählen.")
+
+        try:
+            return PlacementValidator(constraints), None
+        except ImportError as exc:
+            return None, f"shapely fehlt: {exc}"
+
+    def _on_constraint_check(self):
+        """Check the entered position against the configured constraints."""
+        validator, error = self._build_placement_validator()
+        if validator is None:
+            self.label_constraint_result.setText(
+                f"<span style='color:#cc6600'>{html.escape(str(error))}</span>"
+            )
+            return
+
+        x = self.input_check_x.value()
+        y = self.input_check_y.value()
+        violations = validator.check_position(x, y)
+
+        if not violations:
+            self.label_constraint_result.setText(
+                "<span style='color:#006600'>✓ Position ist konfliktfrei "
+                "(keine Restriktion verletzt).</span>"
+            )
+            return
+
+        lines = []
+        for v in violations:
+            colour = "#cc0000" if v.severity.value == "hard" else "#cc6600"
+            kind = "HART" if v.severity.value == "hard" else "weich"
+            lines.append(
+                f"<span style='color:{colour}'>✗ {html.escape(v.layer_name)} "
+                f"({kind}): {v.actual_distance_m:.1f} m vorhanden, "
+                f"{v.required_distance_m:.1f} m gefordert "
+                f"(fehlen {v.shortfall_m:.1f} m)</span>"
+            )
+        self.label_constraint_result.setText("<br>".join(lines))
+
+    def _on_constraint_suggest(self):
+        """Suggest the nearest constraint-respecting position."""
+        validator, error = self._build_placement_validator()
+        if validator is None:
+            self.label_constraint_result.setText(
+                f"<span style='color:#cc6600'>{html.escape(str(error))}</span>"
+            )
+            return
+
+        x = self.input_check_x.value()
+        y = self.input_check_y.value()
+        suggestion = validator.suggest_nearest_valid(
+            x, y, search_radius_m=500.0, grid_step_m=10.0
+        )
+        if suggestion is None:
+            self.label_constraint_result.setText(
+                "<span style='color:#cc0000'>Keine gültige Position innerhalb "
+                "von 500 m gefunden. Suchradius erhöhen oder Restriktionen prüfen.</span>"
+            )
+            return
+
+        sx, sy = suggestion
+        import math
+        dist = math.hypot(sx - x, sy - y)
+        self.label_constraint_result.setText(
+            f"<span style='color:#006600'>✓ Nächste gültige Position: "
+            f"X={sx:.2f}, Y={sy:.2f} ({dist:.1f} m vom Eingabepunkt).</span>"
+        )
 
     def _create_profiles_tab(self):
         """Create profiles tab."""
@@ -995,7 +1242,7 @@ class MainDialog(QDialog):
 
     def _on_tab_changed(self, index):
         """Handle tab change - show/hide appropriate buttons."""
-        # Last tab (index 3) shows "Start" button, others show "Next" button
+        # The last tab shows the "Start" button, all others show "Next".
         is_last_tab = (index == self.tabs.count() - 1)
 
         self.btn_next.setVisible(not is_last_tab)

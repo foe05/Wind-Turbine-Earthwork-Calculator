@@ -14,7 +14,7 @@ plus die zwei größeren Performance-Punkte aus den Known Issues.
 
 | Roadmap-Item | Code-Realität | Restaufwand |
 |---|---|---|
-| #1 Constraint-basierte Platzierung | 🟡 **Core-Modul fertig** (`core/placement_constraints.py` + 16 Tests grün); GUI/Workflow-Anbindung noch offen | mittel (GUI) |
+| #1 Constraint-basierte Platzierung | 🟢 **Core-Modul + GUI-Tab fertig** (`core/placement_constraints.py` + 16 Tests; Tab „🚧 Restriktionen" in `gui/main_dialog.py` mit Layer-Picker, Distanz, Hard/Soft + interaktivem Positions-Checker); Workflow-Preflight (Kran-Centroid automatisch prüfen) noch offen | klein (Workflow-Preflight) |
 | #2 Park-weite Batch-Optimierung | 🟡 **Transport-LP fertig** (`core/park_optimizer.py` + 9 Tests grün); MILP über Kandidaten + Workflow-Anbindung noch offen | mittel (MILP-Erweiterung + GUI) |
 | #4 Terrain-Intersection & Differenz-Raster | ✅ **~95 % implementiert** (`utils/terrain_intersection.py`, 622 LOC; wired in `multi_surface_calculator.py:3301+`); 14-Layer/7-Raster-Output, Cleanup-Härtung + Test-Skelett ergänzt | klein (3D-Renderer-Konfig optional) |
 | #5 3D-Mesh-Export & 3D-Viewer | 🟢 **OBJ-Export fertig + im Workflow verdrahtet** (`core/mesh_exporter.py` + 16 Tests; `workflow_runner._export_meshes` schreibt Terrain + Flächen nach `WKA_*_meshes/`); STL/glTF + Three.js-Viewer noch offen | mittel (zusätzliche Formate + Viewer) |
@@ -36,9 +36,13 @@ dienen:
   skippen in CI ohne osgeo-Bindings.**
 
 Was noch fehlt, um die Features in der GUI nutzbar zu machen:
-1. **#1 GUI:** Tab „Restriktionen" in `gui/main_dialog.py` (Layer-Picker,
-   Distanz-Spinbox, Hard/Soft-Toggle) + Hook in `core/workflow_runner.py`
-   vor DEM-Download.
+1. **#1 GUI:** ✅ **Tab erledigt (2026-05-29).** „🚧 Restriktionen" in
+   `gui/main_dialog.py`: drei Kategorien (Wohnbebauung/Straßen/Schutzgebiete)
+   mit QgsMapLayerComboBox + Distanz + Hard/Soft, plus interaktiver
+   Positions-Checker (`_on_constraint_check`, `_on_constraint_suggest`).
+   **Noch offen:** automatischer Preflight des Kran-Centroids in
+   `core/workflow_runner.py` vor dem DEM-Download (heute prüft der Nutzer die
+   Position manuell im Tab).
 2. **#2 MILP-Stufe:** N-Best-Kandidaten aus `MultiSurfaceCalculator` (statt
    nur 1-Best) sammeln, dann Kandidaten + Transport als MILP über
    `scipy.optimize.milp` lösen.
