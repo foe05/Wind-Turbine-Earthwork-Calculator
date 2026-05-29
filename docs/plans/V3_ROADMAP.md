@@ -35,6 +35,29 @@ dienen:
   DEM-zu-Mesh mit Decimation. **11/11 Pure-Python-Tests grün; 5 GDAL-Tests
   skippen in CI ohne osgeo-Bindings.**
 
+### Konkurrenz-Features als Neuentwicklung (Stand 2026-05-29)
+
+Vier weitere QGIS-unabhängige Kern-Module aus der Wettbewerbsanalyse
+(`RECHERCHE_2026-05-26.md` Teil 3), jeweils mit plain-Python-Tests:
+
+- **`core/mass_haul.py`** — Mass-Haul-Diagramm: kumulative Massenkurve
+  (Compaction-adjustiert), Balance-Punkte, Free-Haul/Overhaul-Split. **11/11.**
+  *(Inspiration: DynaRoad, Carlson Takeoff.)*
+- **`core/rotation_optimizer.py`** — Kranstellflächen-Rotation: Polygon-Rotation
+  um Centroid + Winkel-Sweep mit injiziertem Evaluate-Callback (QGIS-aware
+  Caller liefert die DEM-Bewertung). **16/16.** *(Inspiration: windfarmbop,
+  Wind Farm Optimizer.)*
+- **`core/co2_balance.py`** — CO₂-Bilanz: Erdmassen × LKW-km × Faktor +
+  Beton/Stahl, konfigurierbare Emissionsfaktoren. **8/8.** *(Inspiration: EC3,
+  One Click LCA.)*
+- **`core/landxml_export.py`** — LandXML-1.2-TIN-Surface-Export für
+  Machine-Control (Trimble/Topcon/Leica) + BIM. Stdlib-XML, Adapter aus
+  `MeshData`. **9/9.** *(Inspiration: RoadEng, Civil 3D.)*
+
+**Offen:** GUI-/Workflow-Anbindung dieser vier (Solver/Writer stehen + sind
+getestet; analog zu #1/#2/#5 fehlt nur die Verdrahtung in Dialog/Report/Run).
+Geneigte Rotation + per-pixel Mass-Haul-Sampling brauchen QGIS-Bewertung.
+
 Was noch fehlt, um die Features in der GUI nutzbar zu machen:
 1. **#1 GUI + Preflight:** ✅ **Komplett (2026-05-29).** Tab „🚧 Restriktionen"
    in `gui/main_dialog.py` (drei Kategorien mit QgsMapLayerComboBox + Distanz +

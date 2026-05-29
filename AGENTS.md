@@ -200,6 +200,17 @@ windturbine_earthwork_calculator_v2/
   `polygon_to_mesh_at_height` (Ear-Clipping). **Im Workflow verdrahtet**
   (`workflow_runner._export_meshes` → OBJ + scene.gltf + viewer.html). V3_ROADMAP #5.
 
+Konkurrenz-Feature-Module (Solver/Writer fertig + getestet, GUI-Anbindung offen):
+
+- **`core/mass_haul.py`** — `MassHaulDiagram.compute()`: kumulative Massenkurve,
+  Balance-Punkte, Free-Haul/Overhaul. Compaction-adjustiert.
+- **`core/rotation_optimizer.py`** — `RotationOptimizer.optimize(points, evaluate)`:
+  Kranstellflächen-Rotation per Centroid + Winkel-Sweep, DEM-Bewertung als Callback.
+- **`core/co2_balance.py`** — `CO2Calculator.compute()`: Erdmassen/Beton/Stahl-CO₂
+  mit konfigurierbaren `EmissionFactors`.
+- **`core/landxml_export.py`** — `write_landxml()`: LandXML-1.2-TIN-Surfaces für
+  Machine-Control/BIM; `surface_from_mesh()`-Adapter aus `MeshData`.
+
 ---
 
 ## 🌐 Web-Anwendung
