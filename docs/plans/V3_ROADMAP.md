@@ -17,7 +17,7 @@ plus die zwei größeren Performance-Punkte aus den Known Issues.
 | #1 Constraint-basierte Platzierung | ✅ **Komplett** — Core-Modul (17 Tests) + GUI-Tab „🚧 Restriktionen" + Workflow-Preflight: `workflow_runner._run_constraint_preflight` prüft den Kran-Centroid vor dem DEM-Download, harte Verletzung bricht ab, weiche warnt | — |
 | #2 Park-weite Batch-Optimierung | ✅ **Komplett** — Transport-LP + Kandidaten-MILP + N-Best-Extraktion + Report-Anbindung (`park_optimizer.solve`/`solve_milp`; `MultiSurfaceCalculator.find_n_best`; Multi-Site-Report zeigt Park-Transport-Sektion via LP; 24 Tests grün). MILP-im-Report (statt LP) bräuchte Kandidaten-Persistierung pro Lauf — optionaler Ausbau | — |
 | #4 Terrain-Intersection & Differenz-Raster | ✅ **~95 % implementiert** (`utils/terrain_intersection.py`, 622 LOC; wired in `multi_surface_calculator.py:3301+`); 14-Layer/7-Raster-Output, Cleanup-Härtung + Test-Skelett ergänzt | klein (3D-Renderer-Konfig optional) |
-| #5 3D-Mesh-Export & 3D-Viewer | 🟢 **OBJ-Export fertig + im Workflow verdrahtet** (`core/mesh_exporter.py` + 16 Tests; `workflow_runner._export_meshes` schreibt Terrain + Flächen nach `WKA_*_meshes/`); STL/glTF + Three.js-Viewer noch offen | mittel (zusätzliche Formate + Viewer) |
+| #5 3D-Mesh-Export & 3D-Viewer | ✅ **Komplett** — OBJ + STL (ASCII/binär) + glTF + selbst-enthaltener Three.js-Viewer (`core/mesh_exporter.py`, 25 Tests); `workflow_runner._export_meshes` schreibt OBJ je Fläche + `scene.gltf` + `viewer.html` nach `WKA_*_meshes/`. Geneigte Flächen werden noch flach approximiert (optionaler Ausbau) | — |
 | #9 DXF-Import langsam (>1000 Polylinien) | nicht profiliert | mittel |
 | #10 DEM-RAM (>10 km²) | DEM komplett im RAM via `gdal_compat.read_band_as_array`; Warn-Log bei >10 km² eingebaut | mittel (windowed reads) |
 
@@ -56,14 +56,17 @@ Was noch fehlt, um die Features in der GUI nutzbar zu machen:
    + Einsparung. **Optionaler Ausbau:** MILP statt LP im Report — bräuchte
    Persistierung der `find_n_best`-Kandidaten pro Lauf (heute hält `SiteData`
    nur die eine gewählte Bilanz).
-3. **#5 Workflow-Anbindung:** ✅ **Erledigt (2026-05-28).**
+3. **#5 Workflow-Anbindung + Formate:** ✅ **Komplett (2026-05-29).**
    `core/workflow_runner.py::_export_meshes()` schreibt nach der
-   GeoPackage-Speicherung ein Terrain-OBJ (decimated DEM) plus je ein OBJ
-   pro Fläche (Kranstellfläche, Fundamentsohle, Ausleger, Rotor, Zufahrt)
-   in `WKA_<x>_<y>_meshes/`. Auto-on, per Param `export_obj=False` abschaltbar,
-   non-fatal (Fehler brechen den Hauptlauf nicht ab). **Noch offen:**
-   zusätzliche Writer für STL und glTF + Three.js-Viewer-Template; geneigte
-   Flächen werden aktuell als flaches Mesh auf Kranhöhe approximiert.
+   GeoPackage-Speicherung je ein OBJ pro Fläche + Terrain-OBJ (decimated DEM),
+   dazu ein kombiniertes `scene.gltf` (Y-up, recentred, farbige Materialien
+   pro Fläche) und einen selbst-enthaltenen `viewer.html` (Three.js via CDN,
+   glTF inline eingebettet → kein lokales CORS-Problem) in `WKA_<x>_<y>_meshes/`.
+   Writer in `mesh_exporter`: `write_obj`, `write_stl` (ASCII/binär),
+   `write_gltf`/`build_gltf_dict`, `write_three_js_viewer`. Auto-on, per Param
+   `export_obj=False` abschaltbar, non-fatal. **Optionaler Ausbau:** geneigte
+   Flächen werden noch flach auf Kranhöhe approximiert (per-pixel Soll-Raster
+   nötig für exakte Schrägmeshes).
 
 ### Blockierte Items (außerhalb Code-Reichweite)
 

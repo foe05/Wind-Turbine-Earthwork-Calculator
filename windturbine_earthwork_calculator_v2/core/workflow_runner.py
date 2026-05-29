@@ -1174,7 +1174,12 @@ class WorkflowWorker(QObject):
 
     def _export_meshes(self, results_dir, x_coord, y_coord,
                        project: MultiSurfaceProject, dem_path, optimal_crane_height):
-        """Write a terrain OBJ plus one OBJ per surface, returns list of paths.
+        """Export 3D meshes (OBJ per surface + combined glTF + Three.js viewer).
+
+        Writes into ``WKA_<x>_<y>_meshes/``:
+          - one ``.obj`` per surface and ``terrain.obj`` (universal interchange)
+          - ``scene.gltf`` combining all meshes with per-surface colours
+          - ``viewer.html`` — self-contained Three.js viewer of scene.gltf
 
         Heights:
           - crane pad   → optimal_crane_height
@@ -1183,10 +1188,11 @@ class WorkflowWorker(QObject):
             (sloped surfaces would need the per-pixel target raster; the flat
             mesh is sufficient for a first-pass 3D overview)
 
-        Each export is individually guarded so one bad surface does not abort
-        the rest.
+        Each export is individually guarded so one failure does not abort the
+        rest. Returns the list of written file paths.
         """
         written: list[str] = []
+        collected = []  # MeshData objects for the combined glTF
         base = f"WKA_{x_coord}_{y_coord}"
         mesh_dir = Path(results_dir) / f"{base}_meshes"
 
@@ -1196,6 +1202,7 @@ class WorkflowWorker(QObject):
             if terrain_mesh.triangle_count > 0:
                 out = mesh_exporter.write_obj(str(mesh_dir / "terrain.obj"), terrain_mesh)
                 written.append(out)
+                collected.append(terrain_mesh)
         except Exception as e:
             self.logger.warning(f"Terrain mesh export failed: {e}")
 
@@ -1219,8 +1226,23 @@ class WorkflowWorker(QObject):
                 if mesh.triangle_count > 0:
                     out = mesh_exporter.write_obj(str(mesh_dir / f"{name}.obj"), mesh)
                     written.append(out)
+                    collected.append(mesh)
             except Exception as e:
                 self.logger.warning(f"Mesh export for {name} failed: {e}")
+
+        # Combined glTF + self-contained Three.js viewer over all meshes.
+        if collected:
+            try:
+                gltf = mesh_exporter.build_gltf_dict(collected)
+                gltf_path = mesh_exporter.write_gltf(str(mesh_dir / "scene.gltf"), collected)
+                written.append(gltf_path)
+                viewer_path = mesh_exporter.write_three_js_viewer(
+                    str(mesh_dir / "viewer.html"), gltf,
+                    title=f"WEA {x_coord}/{y_coord} — 3D-Ansicht"
+                )
+                written.append(viewer_path)
+            except Exception as e:
+                self.logger.warning(f"glTF/viewer export failed: {e}")
 
         return written
 

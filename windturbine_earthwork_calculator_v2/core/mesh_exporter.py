@@ -5,23 +5,26 @@ Exports DEM rasters and constructed surfaces (crane pad, foundation, …) as
 Wavefront OBJ meshes for use in external 3D viewers (Three.js, Cesium,
 Blender, Sketchfab, etc.) and for downstream BIM workflows.
 
-OBJ was chosen for the first iteration because it is:
-  - human-readable (easy to debug),
-  - universally supported by 3D tools,
-  - free of binary-encoding dependencies.
+Supported output formats:
+  - OBJ  — ``write_obj`` (human-readable, universal)
+  - STL  — ``write_stl`` (ASCII or binary; CAD/3D-printing interchange)
+  - glTF — ``write_gltf`` / ``build_gltf_dict`` (native web/Three.js format,
+    multiple coloured meshes in one file, recentred + Y-up)
+  - HTML — ``write_three_js_viewer`` (self-contained Three.js viewer that
+    embeds the glTF inline, so no local-file CORS issues)
 
-STL and glTF can be added later by extending the small `MeshData` data class
-with format-specific writers. See `docs/plans/V3_ROADMAP.md` Section #5.
-
-The core helpers (write_obj, polygon_to_mesh_at_height) are
-QGIS-independent and unit-testable in plain Python. The DEM helper uses GDAL
-but does not load qgis.core.
+The writers and the DEM/polygon mesh builders are QGIS-independent and
+unit-testable in plain Python. The DEM helper uses GDAL but does not load
+qgis.core. See `docs/plans/V3_ROADMAP.md` Section #5.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import math
 import os
+import struct
 from dataclasses import dataclass, field
 from typing import Iterable, Optional, Sequence
 
@@ -278,3 +281,319 @@ def _is_ear(pts: Sequence[tuple[float, float]],
         if _point_in_triangle(pts[idx], a, b, c):
             return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# STL writer
+# ---------------------------------------------------------------------------
+
+
+def _triangle_normal(v0, v1, v2):
+    """Unit normal of triangle (v0, v1, v2); (0,0,0) for degenerate triangles."""
+    ux, uy, uz = v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]
+    vx, vy, vz = v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]
+    nx = uy * vz - uz * vy
+    ny = uz * vx - ux * vz
+    nz = ux * vy - uy * vx
+    length = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if length == 0:
+        return (0.0, 0.0, 0.0)
+    return (nx / length, ny / length, nz / length)
+
+
+def write_stl(path: str, mesh: MeshData, binary: bool = False) -> str:
+    """Write a `MeshData` to an STL file (ASCII by default, binary optional).
+
+    STL has no concept of objects or colours, so one mesh maps to one file.
+    Binary STL is far more compact for large terrain meshes; ASCII is
+    human-readable. Returns the absolute output path.
+    """
+    abs_path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
+    name = mesh.name or "mesh"
+
+    if binary:
+        with open(abs_path, "wb") as fh:
+            header = f"STL {name}".encode("ascii", "replace")[:80]
+            fh.write(header + b" " * (80 - len(header)))
+            fh.write(struct.pack("<I", mesh.triangle_count))
+            for i, j, k in mesh.faces:
+                v0, v1, v2 = mesh.vertices[i], mesh.vertices[j], mesh.vertices[k]
+                nx, ny, nz = _triangle_normal(v0, v1, v2)
+                fh.write(struct.pack("<fff", nx, ny, nz))
+                for v in (v0, v1, v2):
+                    fh.write(struct.pack("<fff", v[0], v[1], v[2]))
+                fh.write(struct.pack("<H", 0))  # attribute byte count
+        return abs_path
+
+    lines = [f"solid {name}"]
+    for i, j, k in mesh.faces:
+        v0, v1, v2 = mesh.vertices[i], mesh.vertices[j], mesh.vertices[k]
+        nx, ny, nz = _triangle_normal(v0, v1, v2)
+        lines.append(f"  facet normal {nx:.6e} {ny:.6e} {nz:.6e}")
+        lines.append("    outer loop")
+        for v in (v0, v1, v2):
+            lines.append(f"      vertex {v[0]:.6e} {v[1]:.6e} {v[2]:.6e}")
+        lines.append("    endloop")
+        lines.append("  endfacet")
+    lines.append(f"endsolid {name}")
+
+    with open(abs_path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    return abs_path
+
+
+# ---------------------------------------------------------------------------
+# glTF writer
+# ---------------------------------------------------------------------------
+
+
+# Per-surface base colours (RGBA 0..1) for the glTF materials / viewer.
+_GLTF_COLORS = {
+    "terrain": [0.70, 0.68, 0.62, 1.0],
+    "kranstellflaeche": [0.85, 0.20, 0.20, 1.0],
+    "fundamentsohle": [0.55, 0.27, 0.07, 1.0],
+    "auslegerflaeche": [0.10, 0.65, 0.20, 1.0],
+    "rotorflaeche": [0.65, 0.10, 0.65, 1.0],
+    "zufahrt": [0.10, 0.30, 0.80, 1.0],
+}
+_GLTF_COLOR_DEFAULT = [0.50, 0.50, 0.55, 1.0]
+
+
+def build_gltf_dict(meshes: Sequence[MeshData], recenter: bool = True) -> dict:
+    """Build a glTF 2.0 document (as a dict) from one or more meshes.
+
+    - Multiple meshes become separate nodes with per-name PBR materials, so a
+      terrain + several surfaces render as distinct coloured objects.
+    - Coordinates are converted from the project's Z-up (x=easting, y=northing,
+      z=elevation) to glTF's right-handed Y-up: ``(x, z, -y)``.
+    - When ``recenter`` is True the min corner is subtracted before writing, so
+      large UTM coordinates do not lose precision in float32 and the model sits
+      near the origin for easy camera framing.
+
+    All geometry shares a single base64-embedded binary buffer, so the result
+    is a self-contained ``.gltf`` needing no sidecar ``.bin``.
+    """
+    non_empty = [m for m in meshes if m.triangle_count > 0 and m.vertex_count > 0]
+    if not non_empty:
+        return {
+            "asset": {"version": "2.0", "generator": "windturbine-mesh-exporter"},
+            "scenes": [{"nodes": []}], "scene": 0, "nodes": [], "meshes": [],
+        }
+
+    if recenter:
+        ox = min(v[0] for m in non_empty for v in m.vertices)
+        oy = min(v[1] for m in non_empty for v in m.vertices)
+        oz = min(v[2] for m in non_empty for v in m.vertices)
+    else:
+        ox = oy = oz = 0.0
+
+    blob = bytearray()
+    buffer_views = []
+    accessors = []
+    gltf_meshes = []
+    materials = []
+    nodes = []
+
+    for mi, mesh in enumerate(non_empty):
+        # Positions: Z-up → Y-up, recentred.
+        gx_list, gy_list, gz_list = [], [], []
+        pos_bytes = bytearray()
+        for (x, y, z) in mesh.vertices:
+            gx = x - ox
+            gy = z - oz       # elevation becomes Y (up)
+            gz = -(y - oy)    # northing becomes -Z (right-handed)
+            pos_bytes += struct.pack("<fff", gx, gy, gz)
+            gx_list.append(gx)
+            gy_list.append(gy)
+            gz_list.append(gz)
+        pos_offset = len(blob)
+        blob += pos_bytes
+
+        idx_bytes = bytearray()
+        for (a, b, c) in mesh.faces:
+            idx_bytes += struct.pack("<III", a, b, c)
+        idx_offset = len(blob)
+        blob += idx_bytes
+
+        pos_bv = len(buffer_views)
+        buffer_views.append({"buffer": 0, "byteOffset": pos_offset,
+                             "byteLength": len(pos_bytes), "target": 34962})
+        idx_bv = len(buffer_views)
+        buffer_views.append({"buffer": 0, "byteOffset": idx_offset,
+                             "byteLength": len(idx_bytes), "target": 34963})
+
+        pos_acc = len(accessors)
+        accessors.append({
+            "bufferView": pos_bv, "componentType": 5126,  # FLOAT
+            "count": mesh.vertex_count, "type": "VEC3",
+            "min": [min(gx_list), min(gy_list), min(gz_list)],
+            "max": [max(gx_list), max(gy_list), max(gz_list)],
+        })
+        idx_acc = len(accessors)
+        accessors.append({
+            "bufferView": idx_bv, "componentType": 5125,  # UNSIGNED_INT
+            "count": mesh.triangle_count * 3, "type": "SCALAR",
+        })
+
+        mat_idx = len(materials)
+        colour = _GLTF_COLORS.get(mesh.name, _GLTF_COLOR_DEFAULT)
+        materials.append({
+            "name": f"{mesh.name}_mat",
+            "pbrMetallicRoughness": {
+                "baseColorFactor": colour,
+                "metallicFactor": 0.1,
+                "roughnessFactor": 0.85,
+            },
+            "doubleSided": True,
+        })
+
+        gltf_meshes.append({
+            "name": mesh.name,
+            "primitives": [{
+                "attributes": {"POSITION": pos_acc},
+                "indices": idx_acc,
+                "material": mat_idx,
+            }],
+        })
+        nodes.append({"mesh": mi, "name": mesh.name})
+
+    uri = "data:application/octet-stream;base64," + base64.b64encode(bytes(blob)).decode("ascii")
+
+    return {
+        "asset": {"version": "2.0", "generator": "windturbine-mesh-exporter"},
+        "scene": 0,
+        "scenes": [{"nodes": list(range(len(nodes)))}],
+        "nodes": nodes,
+        "meshes": gltf_meshes,
+        "materials": materials,
+        "accessors": accessors,
+        "bufferViews": buffer_views,
+        "buffers": [{"uri": uri, "byteLength": len(blob)}],
+        "extras": {"recenter_offset": [ox, oy, oz]},
+    }
+
+
+def write_gltf(path: str, meshes: Sequence[MeshData], recenter: bool = True) -> str:
+    """Write one or more meshes to a self-contained ``.gltf`` file."""
+    abs_path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
+    gltf = build_gltf_dict(meshes, recenter=recenter)
+    with open(abs_path, "w", encoding="utf-8") as fh:
+        json.dump(gltf, fh)
+    return abs_path
+
+
+# ---------------------------------------------------------------------------
+# Three.js viewer
+# ---------------------------------------------------------------------------
+
+
+def write_three_js_viewer(path: str, gltf_dict: dict,
+                          title: str = "WEA 3D-Ansicht") -> str:
+    """Write a self-contained HTML viewer that renders ``gltf_dict`` with Three.js.
+
+    The glTF document is embedded inline as JSON and parsed via
+    ``GLTFLoader.parse`` — so the viewer has no local-file CORS problems and
+    needs no sidecar mesh files. Three.js itself is loaded from a CDN
+    (jsDelivr) via an ES-module import map, so opening the file requires
+    internet access once (the browser caches it afterwards).
+    """
+    import html as _html
+
+    abs_path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
+
+    gltf_json = json.dumps(gltf_dict)
+    safe_title = _html.escape(title)
+    # Keep the embedded JSON out of a <script> close-tag injection.
+    gltf_json_safe = gltf_json.replace("</", "<\\/")
+
+    template = """<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>__TITLE__</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: sans-serif; }
+  #info { position: absolute; top: 8px; left: 8px; padding: 6px 10px;
+          background: rgba(255,255,255,0.8); border-radius: 4px; font-size: 12px; }
+  #c { width: 100vw; height: 100vh; display: block; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="info">__TITLE__ — Maus: drehen / zoomen / verschieben</div>
+<canvas id="c"></canvas>
+<script id="gltf-data" type="application/json">__GLTF__</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xeef1f4);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 100000);
+const controls = new OrbitControls(camera, renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+sun.position.set(1, 2, 1);
+scene.add(sun);
+
+const data = JSON.parse(document.getElementById('gltf-data').textContent);
+const loader = new GLTFLoader();
+loader.parse(JSON.stringify(data), '', (gltf) => {
+  scene.add(gltf.scene);
+  // Frame the camera to the model bounding box.
+  const box = new THREE.Box3().setFromObject(gltf.scene);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  camera.position.set(center.x + maxDim, center.y + maxDim, center.z + maxDim);
+  camera.near = maxDim / 1000;
+  camera.far = maxDim * 1000;
+  camera.updateProjectionMatrix();
+  controls.target.copy(center);
+  controls.update();
+}, (err) => {
+  document.getElementById('info').textContent = 'Fehler beim Laden der 3D-Daten: ' + err;
+});
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
+"""
+    html_out = (template
+                .replace("__TITLE__", safe_title)
+                .replace("__GLTF__", gltf_json_safe))
+
+    with open(abs_path, "w", encoding="utf-8") as fh:
+        fh.write(html_out)
+    return abs_path

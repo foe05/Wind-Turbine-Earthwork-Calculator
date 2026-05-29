@@ -38,7 +38,7 @@ Wind-Turbine-Earthwork-Calculator/
 │   │   ├── uncertainty_visualizations.py # Plots für Unsicherheits-Reports
 │   │   ├── placement_constraints.py      # ⭐ v3: Constraint-Validator + Snap-to-Grid (shapely)
 │   │   ├── park_optimizer.py             # ⭐ v3: Park-weite Transport-Optimierung (scipy.linprog)
-│   │   └── mesh_exporter.py              # ⭐ v3: OBJ-Mesh-Export (DEM + Polygon-Triangulation)
+│   │   └── mesh_exporter.py              # ⭐ v3: 3D-Export OBJ/STL/glTF + Three.js-Viewer
 │   ├── gui/                              # GUI-Komponenten
 │   │   └── main_dialog.py                # Tab-basierter Dialog
 │   ├── processing_provider/              # QGIS Processing
@@ -195,9 +195,10 @@ windturbine_earthwork_calculator_v2/
   `scipy.optimize.milp`, wählt Höhen-Kandidat pro Standort + Transport gemeinsam).
   Datenquelle: `MultiSurfaceCalculator.find_n_best(n, min_spacing_m)` liefert die
   Top-N Höhen-Kandidaten. Reine GUI-/Report-Anbindung offen. V3_ROADMAP #2.
-- **`core/mesh_exporter.py`** — `write_obj()`, `dem_to_mesh()`,
-  `polygon_to_mesh_at_height()` für 3D-Export. Ear-Clipping (konkave Polygone).
-  **Im Workflow verdrahtet** (`workflow_runner._export_meshes`). V3_ROADMAP #5.
+- **`core/mesh_exporter.py`** — 3D-Export: `write_obj`, `write_stl` (ASCII/binär),
+  `write_gltf`/`build_gltf_dict`, `write_three_js_viewer`; `dem_to_mesh`,
+  `polygon_to_mesh_at_height` (Ear-Clipping). **Im Workflow verdrahtet**
+  (`workflow_runner._export_meshes` → OBJ + scene.gltf + viewer.html). V3_ROADMAP #5.
 
 ---
 

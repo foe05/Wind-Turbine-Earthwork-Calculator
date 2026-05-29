@@ -321,9 +321,11 @@ For the full per-release log see the repository-root `CHANGELOG.md`.
   Distanz, Hard/Soft, interaktiver Positions-Checker + Vorschlag nächster gültiger Position)
 - `core/park_optimizer.py` — Park-weite Optimierung via scipy: Transport-LP (`solve`)
   + Kandidaten-MILP (`solve_milp`, wählt Höhen-Kandidat pro Standort + Transport gemeinsam); 16 Tests
-- `core/mesh_exporter.py` — OBJ-Mesh-Export für DEM und Plattform-Polygone (16 Tests),
-  **im Workflow verdrahtet:** jeder Lauf schreibt Terrain + Flächen als OBJ nach
-  `WKA_<x>_<y>_meshes/` (auto-on, per Param `export_obj=False` abschaltbar)
+- `core/mesh_exporter.py` — 3D-Export für DEM und Plattform-Polygone in OBJ, STL
+  (ASCII/binär) und glTF + selbst-enthaltener Three.js-Viewer (25 Tests),
+  **im Workflow verdrahtet:** jeder Lauf schreibt Terrain + Flächen als OBJ,
+  ein kombiniertes `scene.gltf` und `viewer.html` nach `WKA_<x>_<y>_meshes/`
+  (auto-on, per Param `export_obj=False` abschaltbar)
 - `docs/plans/V3_ROADMAP.md` — konsolidierter v3-Implementierungsplan
 
 **Repo-Hygiene:**
