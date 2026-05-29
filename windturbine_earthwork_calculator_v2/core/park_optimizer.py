@@ -7,13 +7,18 @@ problem**: how much earth to haul from each surplus site to each deficit site
 so that the park-wide total cost (transport + remaining disposal + remaining
 external gravel) is minimised.
 
-This is the *transport-only* foundation of the larger park-wide optimisation
-described in `docs/plans/V3_ROADMAP.md` Section #2. Once a per-site n-best
-candidate list is available from the single-site optimiser, this module can be
-extended to a MILP that jointly chooses candidates and transport flows.
+Two solvers are provided (see `docs/plans/V3_ROADMAP.md` Section #2):
 
-The core math (LP via scipy.optimize.linprog) is QGIS-independent; the result
-data classes can be fed into the existing report generators.
+  - ``ParkOptimizer.solve()`` — transport-only LP (scipy.optimize.linprog).
+    Each site has a single fixed cut/fill balance; only the haul plan is
+    optimised.
+  - ``ParkOptimizer.solve_milp()`` — joint MILP (scipy.optimize.milp). Each
+    site offers several platform-height *candidates* (different cut/fill
+    balances + intrinsic cost); the solver picks one candidate per site AND
+    the transport plan together, minimising true park-wide total cost.
+
+The core math is QGIS-independent; the result data classes can be fed into the
+existing report generators.
 """
 
 from __future__ import annotations
@@ -44,6 +49,43 @@ class SiteEarthwork:
                 f"cut_excess and fill_need must be non-negative; got "
                 f"cut={self.cut_excess_m3}, fill={self.fill_need_m3}"
             )
+
+
+@dataclass(frozen=True)
+class SiteCandidate:
+    """One platform-height option for a site, with its earthwork balance.
+
+    `site_cost_eur` is the intrinsic cost of choosing this candidate (e.g.
+    excavation + platform construction at that height), excluding dump and
+    external-gravel costs — those are derived from cut/fill in the MILP
+    objective so that transport savings are accounted for consistently.
+    """
+
+    cut_excess_m3: float
+    fill_need_m3: float
+    site_cost_eur: float = 0.0
+    label: str = ""
+
+    def __post_init__(self) -> None:
+        if self.cut_excess_m3 < 0 or self.fill_need_m3 < 0:
+            raise ValueError(
+                f"cut_excess and fill_need must be non-negative; got "
+                f"cut={self.cut_excess_m3}, fill={self.fill_need_m3}"
+            )
+
+
+@dataclass(frozen=True)
+class SiteWithCandidates:
+    """A site location plus the set of platform-height candidates to choose from."""
+
+    site_id: str
+    x: float
+    y: float
+    candidates: Sequence[SiteCandidate]
+
+    def __post_init__(self) -> None:
+        if not self.candidates:
+            raise ValueError(f"site {self.site_id} has no candidates")
 
 
 @dataclass(frozen=True)
@@ -86,13 +128,38 @@ class ParkSolution:
         return self.total_transport_eur + self.total_dump_eur + self.total_gravel_eur
 
 
+@dataclass
+class ParkMILPSolution:
+    """Result of the joint candidate-selection + transport optimisation."""
+
+    chosen_index: dict[str, int] = field(default_factory=dict)       # site_id -> candidate index
+    chosen_candidate: dict[str, SiteCandidate] = field(default_factory=dict)
+    flows: list[TransportFlow] = field(default_factory=list)
+    residual_dump_m3: dict[str, float] = field(default_factory=dict)
+    residual_gravel_m3: dict[str, float] = field(default_factory=dict)
+    total_site_cost_eur: float = 0.0
+    total_transport_eur: float = 0.0
+    total_dump_eur: float = 0.0
+    total_gravel_eur: float = 0.0
+    solver_status: str = ""
+
+    @property
+    def total_cost_eur(self) -> float:
+        return (self.total_site_cost_eur + self.total_transport_eur
+                + self.total_dump_eur + self.total_gravel_eur)
+
+
 # ---------------------------------------------------------------------------
 # Distance helpers
 # ---------------------------------------------------------------------------
 
 
-def euclidean_distance_km(a: SiteEarthwork, b: SiteEarthwork) -> float:
-    """Distance in km between two sites (coordinates in metres)."""
+def euclidean_distance_km(a, b) -> float:
+    """Distance in km between two sites (coordinates in metres).
+
+    Accepts any objects with ``.x`` and ``.y`` attributes (SiteEarthwork or
+    SiteWithCandidates).
+    """
     return math.hypot(a.x - b.x, a.y - b.y) / 1000.0
 
 
@@ -263,3 +330,184 @@ class ParkOptimizer:
         solution.savings_eur = baseline - solution.total_cost_eur
 
         return solution
+
+    def solve_milp(self, sites: Sequence[SiteWithCandidates]) -> ParkMILPSolution:
+        """Jointly choose one platform-height candidate per site and the optimal
+        material transport plan, minimising park-wide total cost.
+
+        Variables:
+          - ``y[s, k] in {0, 1}`` — candidate k chosen for site s
+          - ``t[i, j] >= 0`` — m³ transported from site i to site j
+
+        Constraints:
+          - exactly one candidate per site: ``sum_k y[s, k] == 1``
+          - export bounded by chosen cut: ``sum_j t[i, j] <= sum_k y[i, k]·cut[i, k]``
+          - import bounded by chosen fill: ``sum_i t[i, j] <= sum_k y[j, k]·fill[j, k]``
+          - ``t[i, j] = 0`` for i == j or distance > max_distance_km
+
+        Objective (true total cost):
+          ``y[s, k]`` coeff = ``site_cost[s, k] + cut·dump + fill·gravel``
+          ``t[i, j]`` coeff = ``transport_cost·distance - dump - gravel``
+        The transport term claws back the dump+gravel cost that is otherwise
+        charged on the chosen candidate's full cut/fill.
+        """
+        if not sites:
+            return ParkMILPSolution(solver_status="empty input")
+
+        try:
+            import numpy as np
+            from scipy.optimize import milp, LinearConstraint, Bounds
+        except ImportError as exc:
+            raise ImportError(
+                "scipy>=1.9 (with optimize.milp) and numpy are required for "
+                "ParkOptimizer.solve_milp(); both ship with QGIS."
+            ) from exc
+
+        n = len(sites)
+        cand_counts = [len(s.candidates) for s in sites]
+        num_y = sum(cand_counts)
+
+        # y index map: y_offset[s] is the start index of site s's candidate vars.
+        y_offset = [0] * n
+        acc = 0
+        for s in range(n):
+            y_offset[s] = acc
+            acc += cand_counts[s]
+
+        def y_idx(s: int, k: int) -> int:
+            return y_offset[s] + k
+
+        def t_idx(i: int, j: int) -> int:
+            return num_y + i * n + j
+
+        num_t = n * n
+        num_vars = num_y + num_t
+
+        dump = self.config.dump_cost_per_m3
+        gravel = self.config.external_gravel_cost_per_m3
+
+        # Distances + allowed transport pairs.
+        distances = [[0.0] * n for _ in range(n)]
+        allowed = [[True] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    allowed[i][j] = False
+                    continue
+                d = self.distance_fn(sites[i], sites[j])
+                distances[i][j] = d
+                if self.config.max_distance_km is not None and d > self.config.max_distance_km:
+                    allowed[i][j] = False
+
+        # Objective coefficients.
+        c = np.zeros(num_vars)
+        for s in range(n):
+            for k, cand in enumerate(sites[s].candidates):
+                c[y_idx(s, k)] = (
+                    cand.site_cost_eur
+                    + cand.cut_excess_m3 * dump
+                    + cand.fill_need_m3 * gravel
+                )
+        for i in range(n):
+            for j in range(n):
+                if allowed[i][j]:
+                    c[t_idx(i, j)] = self.config.cost_per_m3_km * distances[i][j] - dump - gravel
+
+        # Bounds: y in [0, 1]; t in [0, inf) if allowed else [0, 0].
+        lb = np.zeros(num_vars)
+        ub = np.ones(num_vars)  # y upper = 1
+        for i in range(n):
+            for j in range(n):
+                idx = t_idx(i, j)
+                ub[idx] = np.inf if allowed[i][j] else 0.0
+        bounds = Bounds(lb, ub)
+
+        # Integrality: 1 for y (binary), 0 for t (continuous).
+        integrality = np.zeros(num_vars)
+        integrality[:num_y] = 1
+
+        constraints = []
+
+        # 1. Exactly one candidate per site.
+        for s in range(n):
+            row = np.zeros(num_vars)
+            for k in range(cand_counts[s]):
+                row[y_idx(s, k)] = 1.0
+            constraints.append(LinearConstraint(row, lb=1, ub=1))
+
+        # 2. Export <= chosen cut:  sum_j t[i,j] - sum_k y[i,k]·cut[i,k] <= 0
+        for i in range(n):
+            row = np.zeros(num_vars)
+            for j in range(n):
+                if allowed[i][j]:
+                    row[t_idx(i, j)] = 1.0
+            for k, cand in enumerate(sites[i].candidates):
+                row[y_idx(i, k)] = -cand.cut_excess_m3
+            constraints.append(LinearConstraint(row, lb=-np.inf, ub=0))
+
+        # 3. Import <= chosen fill:  sum_i t[i,j] - sum_k y[j,k]·fill[j,k] <= 0
+        for j in range(n):
+            row = np.zeros(num_vars)
+            for i in range(n):
+                if allowed[i][j]:
+                    row[t_idx(i, j)] = 1.0
+            for k, cand in enumerate(sites[j].candidates):
+                row[y_idx(j, k)] = -cand.fill_need_m3
+            constraints.append(LinearConstraint(row, lb=-np.inf, ub=0))
+
+        result = milp(c, constraints=constraints, integrality=integrality, bounds=bounds)
+
+        sol = ParkMILPSolution(
+            solver_status=result.message or ("ok" if result.success else "failed")
+        )
+        if not result.success or result.x is None:
+            return sol
+
+        x = result.x
+
+        # Recover chosen candidate per site (highest y[s,k], should be ~1).
+        for s in range(n):
+            best_k, best_val = 0, -1.0
+            for k in range(cand_counts[s]):
+                val = x[y_idx(s, k)]
+                if val > best_val:
+                    best_val, best_k = val, k
+            sol.chosen_index[sites[s].site_id] = best_k
+            sol.chosen_candidate[sites[s].site_id] = sites[s].candidates[best_k]
+
+        # Build flows + consumed totals.
+        consumed_out = [0.0] * n
+        consumed_in = [0.0] * n
+        flows: list[TransportFlow] = []
+        for i in range(n):
+            for j in range(n):
+                vol = float(x[t_idx(i, j)])
+                if vol <= 1e-6:
+                    continue
+                consumed_out[i] += vol
+                consumed_in[j] += vol
+                t_cost = self.config.cost_per_m3_km * distances[i][j] * vol
+                flows.append(TransportFlow(
+                    from_site=sites[i].site_id,
+                    to_site=sites[j].site_id,
+                    volume_m3=vol,
+                    distance_km=distances[i][j],
+                    transport_cost_eur=t_cost,
+                ))
+        sol.flows = flows
+        sol.total_transport_eur = sum(f.transport_cost_eur for f in flows)
+
+        # Site costs + residual dump/gravel based on chosen candidates.
+        for s in range(n):
+            cand = sol.chosen_candidate[sites[s].site_id]
+            sol.total_site_cost_eur += cand.site_cost_eur
+
+            residual_dump = max(0.0, cand.cut_excess_m3 - consumed_out[s])
+            sol.residual_dump_m3[sites[s].site_id] = residual_dump
+            sol.total_dump_eur += residual_dump * dump
+
+            residual_gravel = max(0.0, cand.fill_need_m3 - consumed_in[s])
+            sol.residual_gravel_m3[sites[s].site_id] = residual_gravel
+            sol.total_gravel_eur += residual_gravel * gravel
+
+        return sol

@@ -15,7 +15,7 @@ plus die zwei größeren Performance-Punkte aus den Known Issues.
 | Roadmap-Item | Code-Realität | Restaufwand |
 |---|---|---|
 | #1 Constraint-basierte Platzierung | 🟢 **Core-Modul + GUI-Tab fertig** (`core/placement_constraints.py` + 16 Tests; Tab „🚧 Restriktionen" in `gui/main_dialog.py` mit Layer-Picker, Distanz, Hard/Soft + interaktivem Positions-Checker); Workflow-Preflight (Kran-Centroid automatisch prüfen) noch offen | klein (Workflow-Preflight) |
-| #2 Park-weite Batch-Optimierung | 🟡 **Transport-LP fertig** (`core/park_optimizer.py` + 9 Tests grün); MILP über Kandidaten + Workflow-Anbindung noch offen | mittel (MILP-Erweiterung + GUI) |
+| #2 Park-weite Batch-Optimierung | 🟢 **Transport-LP + Kandidaten-MILP fertig** (`core/park_optimizer.py::solve` + `solve_milp` via `scipy.optimize.milp`; 16 Tests grün); GUI-Anbindung + N-Best-Sammlung aus `MultiSurfaceCalculator` noch offen | mittel (GUI + N-Best-Extraktion) |
 | #4 Terrain-Intersection & Differenz-Raster | ✅ **~95 % implementiert** (`utils/terrain_intersection.py`, 622 LOC; wired in `multi_surface_calculator.py:3301+`); 14-Layer/7-Raster-Output, Cleanup-Härtung + Test-Skelett ergänzt | klein (3D-Renderer-Konfig optional) |
 | #5 3D-Mesh-Export & 3D-Viewer | 🟢 **OBJ-Export fertig + im Workflow verdrahtet** (`core/mesh_exporter.py` + 16 Tests; `workflow_runner._export_meshes` schreibt Terrain + Flächen nach `WKA_*_meshes/`); STL/glTF + Three.js-Viewer noch offen | mittel (zusätzliche Formate + Viewer) |
 | #9 DXF-Import langsam (>1000 Polylinien) | nicht profiliert | mittel |
@@ -43,9 +43,13 @@ Was noch fehlt, um die Features in der GUI nutzbar zu machen:
    **Noch offen:** automatischer Preflight des Kran-Centroids in
    `core/workflow_runner.py` vor dem DEM-Download (heute prüft der Nutzer die
    Position manuell im Tab).
-2. **#2 MILP-Stufe:** N-Best-Kandidaten aus `MultiSurfaceCalculator` (statt
-   nur 1-Best) sammeln, dann Kandidaten + Transport als MILP über
-   `scipy.optimize.milp` lösen.
+2. **#2 MILP-Stufe:** ✅ **Solver erledigt (2026-05-29).**
+   `core/park_optimizer.py::solve_milp()` wählt per `scipy.optimize.milp`
+   gemeinsam einen Höhen-Kandidaten pro Standort UND den Transportplan
+   (Datenklassen `SiteCandidate`, `SiteWithCandidates`, `ParkMILPSolution`;
+   5 MILP-Tests grün). **Noch offen:** N-Best-Kandidaten aus
+   `MultiSurfaceCalculator` extrahieren (heute liefert er nur das 1-Best) und
+   GUI-/Report-Anbindung der Park-Optimierung.
 3. **#5 Workflow-Anbindung:** ✅ **Erledigt (2026-05-28).**
    `core/workflow_runner.py::_export_meshes()` schreibt nach der
    GeoPackage-Speicherung ein Terrain-OBJ (decimated DEM) plus je ein OBJ

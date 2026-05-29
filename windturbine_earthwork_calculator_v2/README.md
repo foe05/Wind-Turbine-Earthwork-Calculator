@@ -319,7 +319,8 @@ For the full per-release log see the repository-root `CHANGELOG.md`.
 - `core/placement_constraints.py` — Constraint-Validator mit STRtree + Snap-to-Grid (16 Tests),
   **GUI-Tab „🚧 Restriktionen"** in `gui/main_dialog.py` (Layer-Picker pro Kategorie,
   Distanz, Hard/Soft, interaktiver Positions-Checker + Vorschlag nächster gültiger Position)
-- `core/park_optimizer.py` — Park-weite LP-Transport-Optimierung via scipy (9 Tests)
+- `core/park_optimizer.py` — Park-weite Optimierung via scipy: Transport-LP (`solve`)
+  + Kandidaten-MILP (`solve_milp`, wählt Höhen-Kandidat pro Standort + Transport gemeinsam); 16 Tests
 - `core/mesh_exporter.py` — OBJ-Mesh-Export für DEM und Plattform-Polygone (16 Tests),
   **im Workflow verdrahtet:** jeder Lauf schreibt Terrain + Flächen als OBJ nach
   `WKA_<x>_<y>_meshes/` (auto-on, per Param `export_obj=False` abschaltbar)
