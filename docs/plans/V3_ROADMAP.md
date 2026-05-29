@@ -18,8 +18,8 @@ plus die zwei größeren Performance-Punkte aus den Known Issues.
 | #2 Park-weite Batch-Optimierung | ✅ **Komplett** — Transport-LP + Kandidaten-MILP + N-Best-Extraktion + Report-Anbindung (`park_optimizer.solve`/`solve_milp`; `MultiSurfaceCalculator.find_n_best`; Multi-Site-Report zeigt Park-Transport-Sektion via LP; 24 Tests grün). MILP-im-Report (statt LP) bräuchte Kandidaten-Persistierung pro Lauf — optionaler Ausbau | — |
 | #4 Terrain-Intersection & Differenz-Raster | ✅ **~95 % implementiert** (`utils/terrain_intersection.py`, 622 LOC; wired in `multi_surface_calculator.py:3301+`); 14-Layer/7-Raster-Output, Cleanup-Härtung + Test-Skelett ergänzt | klein (3D-Renderer-Konfig optional) |
 | #5 3D-Mesh-Export & 3D-Viewer | ✅ **Komplett** — OBJ + STL (ASCII/binär) + glTF + selbst-enthaltener Three.js-Viewer (`core/mesh_exporter.py`, 25 Tests); `workflow_runner._export_meshes` schreibt OBJ je Fläche + `scene.gltf` + `viewer.html` nach `WKA_*_meshes/`. Geneigte Flächen werden noch flach approximiert (optionaler Ausbau) | — |
-| #9 DXF-Import langsam (>1000 Polylinien) | nicht profiliert | mittel |
-| #10 DEM-RAM (>10 km²) | DEM komplett im RAM via `gdal_compat.read_band_as_array`; Warn-Log bei >10 km² eingebaut | mittel (windowed reads) |
+| #9 DXF-Import langsam (>1000 Polylinien) | 🟢 **Großteils entschärft:** `connect_polylines` nutzt im Normalfall effizientes Shapely (`linemerge`/`unary_union`); die O(n²)-Sequenz ist nur selten erreichter Fallback. Die vektorisierten Volumen-Schleifen beschleunigen zusätzlich große Flächen | klein (Fallback-Index optional) |
+| #10 DEM-RAM (>10 km²) | 🟢 **Großteils entschärft:** DEM-Sampling liest bereits nur das Polygon-Fenster (`_sample_dem_vectorized`), nicht das ganze Band; LRU-Cache vermeidet N-faches Re-Sampling im Sweep; Cut/Fill-Schleifen vektorisiert; Warn-Log bei >10 km² | klein (Legacy-Pfad + terrain_intersection windowen) |
 
 ### Stand nach Foundation-Session (2026-05-27)
 
@@ -276,60 +276,48 @@ Embed-HTML-Template (Single-File mit Inline-Mesh-Daten) wird vom
 
 ## #9 — DXF-Import-Performance bei >1000 Polylinien
 
-### Profiling-Hypothesen (ungeprüft)
-- `detect_coordinate_system` (Zeilen 175–190 in `dxf_importer.py`): Python-Schleife
-  mit `.append()` pro Vertex. Bei 1000 Polylinien × 50 Vertices = 50 000 Appends
-  → 0.5–1 s, vermutlich nicht der Hotspot.
-- Vermutlicher Hotspot: die Polyline-zu-Polygon-Konvertierung mit Shapely
-  `unary_union` und `polygonize`, weil O(n²) im Worst Case.
+### Stand (2026-05-29)
+Nach Code-Audit ist der Engpass kleiner als befürchtet:
+- `connect_polylines` nutzt im **Normalfall** Shapelys `linemerge`/`unary_union`
+  (`_connect_with_shapely`) und einen Graph-Ansatz — beide effizient.
+- Die O(n²)-Methode `_connect_polylines_sequential` ist nur **Last-Resort-Fallback**,
+  wenn sowohl Shapely- als auch Graph-Ansatz scheitern (selten).
+- `detect_coordinate_system` ist ein einzelner O(n)-Vertex-Scan, kein O(n²).
 
-### Vorgeschlagene Schritte
-1. **Profilen** mit `cProfile` gegen eine 1000+-Polylinien-Testdatei
-2. Engste Schleifen vectorisieren: `np.fromiter(entity.get_points('xy'), dtype=...)`
-3. STRtree für nächste-Punkt-Suche statt linearer Scan (Shapely 2.x hat es bereits)
-4. Falls Connect-Polylines-Schritt der Engpass ist: parallele Polygonisierung
-   pro Layer/Color
+### Verbleibend (optional, niedrige Priorität)
+- Endpoint-Hash-/Grid-Index für die Sequenz-Fallback-Verbindung (O(n²)→~O(n)),
+  nur falls echte Dateien diesen Pfad häufig treffen — vorher mit `cProfile`
+  gegen eine reale 1000+-Polylinien-Datei profilen.
+- Vertex-Extraktion via `np.fromiter` statt `.append()`.
 
-### Aufwand
-- Profiling: 0.5 Tag
-- Optimierungen: 2–4 Tage (abhängig vom Profilergebnis)
+**Aufwand:** klein, nur bei nachgewiesenem Bedarf.
 
 ---
 
 ## #10 — DEM-RAM bei >10 km²
 
-### Aktueller Stand
-`utils/gdal_compat.read_band_as_array` lädt das gesamte Band als float32-Array.
-Bei 10 km² × 1 m = 10 000 × 10 000 Pixel = **400 MB pro DEM**. Mit Maske,
-Differenz-Raster und Kopien beim Sampling kommt man schnell auf 2–3 GB.
+### Stand (2026-05-29)
+Mehrere Maßnahmen umgesetzt:
+- ✅ **Windowed Reads:** `_sample_dem_vectorized` liest schon immer nur das
+  Polygon-Bounding-Box-Fenster (`read_band_as_array(band, x_off, y_off, w, h)`),
+  nicht das gesamte 10 000×10 000-Band. Der RAM-Peak skaliert mit der
+  Flächengröße, nicht der DEM-Größe.
+- ✅ **Sample-Cache:** kleiner LRU-Cache (`MultiSurfaceCalculator._dem_sample_cache`,
+  maxsize 16) verhindert N-faches Re-Sampling derselben (höhen-invarianten)
+  Flächen-Polygone über den Höhen-Sweep. Bounded → kein RAM-Blowup durch
+  transiente Böschungs-Buffer.
+- ✅ **Vektorisierte Cut/Fill-Schleifen** (Kranstellfläche, Fundament): keine
+  Python-Schleife über jeden Pixel mehr → weniger temporäre Objekte, schneller.
+  Math-Äquivalenz mit `tests/test_cutfill_vectorization.py` bewiesen (10 Tests).
+- ✅ **Warn-Log** bei >10 km² in `dem_downloader.calculate_tiles`.
 
-### Vorgeschlagene Architektur
-
-**Refactoring:** Sampling-Operationen auf *Windowed Reads* umstellen.
-
-```python
-# utils/gdal_compat.py — neu
-def read_band_in_window(ds, x_off, y_off, x_size, y_size) -> np.ndarray: ...
-
-def sample_dem_at_polygon(ds, polygon: QgsGeometry) -> np.ndarray:
-    """Read only the bounding box of `polygon` from disk, mask, return values."""
-```
-
-**Betroffene Module:**
-- `core/earthwork_calculator.py:_sample_dem_vectorized`
-- `core/multi_surface_calculator.py` (alle `_calculate_*` Funktionen)
-- `utils/terrain_intersection.py` (4 GDAL-Open-Stellen)
-
-### Aufwand
-- Helper schreiben + Tests: 2 Tage
-- Migration der 5+ Aufrufer: 3 Tage
-- Regression-Test (Multi-Param-Sweep auf großem DEM): 1 Tag
-- **Summe: ~1 Woche**
-
-### Sicherheitsnetz
-Solange #10 nicht umgesetzt ist, sollte `dem_downloader.py` einen
-Warn-Log werfen, wenn die berechnete DEM-Fläche > 10 km². Quick-Win
-(<30 Min), Hilft Anwendern, Out-of-Memory zu antizipieren.
+### Verbleibend (optional, niedrige Priorität)
+- `_sample_dem_legacy` (Fallback) und die 4 `gdal.Open`-Stellen in
+  `utils/terrain_intersection.py` lesen noch volle Bänder — windowing dort
+  würde den seltenen Fallback/Großflächen-Fall weiter entschärfen.
+- Geneigte Cut/Fill-Schleifen (Ausleger/Rotor/Zufahrt) sind noch
+  Python-Schleifen (per-Pixel-Zielhöhe); Vektorisierung möglich, aber
+  korrektheitskritischer — vor Umsetzung gegen die Fixture absichern.
 
 ---
 

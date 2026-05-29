@@ -16,6 +16,7 @@ import time
 import copy
 import os
 import platform
+from collections import OrderedDict
 from typing import Optional, Tuple, Dict, List
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -533,6 +534,16 @@ class MultiSurfaceCalculator:
         # Vectorization setting (can be overridden)
         self._use_vectorized = True
 
+        # Small LRU cache of DEM samples keyed by geometry WKT. The height
+        # sweep samples the same height-invariant surface polygons once per
+        # scenario; caching avoids re-reading + re-rasterising the DEM N times.
+        # The bounded size keeps RAM in check — transient per-height slope
+        # buffers churn out while frequently-requested surface geometries stay
+        # hot. (Only helps the in-process/sequential path; ProcessPool workers
+        # have their own instances.)
+        self._dem_sample_cache: "OrderedDict[str, np.ndarray]" = OrderedDict()
+        self._dem_sample_cache_maxsize = 16
+
         # Pre-calculate connection edges (for boom surface)
         self.boom_connection_edge = None
         self.boom_slope_direction = None
@@ -845,10 +856,29 @@ class MultiSurfaceCalculator:
         if use_vectorized is None:
             use_vectorized = self._use_vectorized
 
+        # LRU cache lookup (keyed by geometry WKT). Returns the cached array
+        # directly; all current callers treat the samples read-only.
+        cache_key = None
+        try:
+            cache_key = geometry.asWkt()
+        except Exception:
+            cache_key = None
+        if cache_key is not None and cache_key in self._dem_sample_cache:
+            self._dem_sample_cache.move_to_end(cache_key)
+            return self._dem_sample_cache[cache_key]
+
         if use_vectorized and GDAL_AVAILABLE:
-            return self._sample_dem_vectorized(geometry)
+            result = self._sample_dem_vectorized(geometry)
         else:
-            return self._sample_dem_legacy(geometry)
+            result = self._sample_dem_legacy(geometry)
+
+        if cache_key is not None:
+            self._dem_sample_cache[cache_key] = result
+            self._dem_sample_cache.move_to_end(cache_key)
+            while len(self._dem_sample_cache) > self._dem_sample_cache_maxsize:
+                self._dem_sample_cache.popitem(last=False)
+
+        return result
 
     def _sample_dem_vectorized(self, geometry: QgsGeometry) -> np.ndarray:
         """
@@ -1161,15 +1191,10 @@ class MultiSurfaceCalculator:
         # Foundation bottom elevation
         foundation_bottom = self.project.foundation_bottom_elevation
 
-        # Calculate excavation volume
-        # Volume = area × depth, but we calculate it pixel by pixel for accuracy
-        cut_volume = 0.0
-
-        for elevation in elevations:
-            # Excavate from terrain to foundation bottom
-            depth = elevation - foundation_bottom
-            if depth > 0:
-                cut_volume += depth * self.pixel_area
+        # Calculate excavation volume (vectorised; equivalent to summing
+        # max(0, terrain - foundation_bottom) per pixel × pixel_area).
+        depth = np.asarray(elevations, dtype=float) - foundation_bottom
+        cut_volume = float(np.sum(depth[depth > 0])) * self.pixel_area
 
         # Minimal fill (for reference - actual fill is concrete)
         # Just the volume of the foundation itself as placeholder
@@ -1243,16 +1268,11 @@ class MultiSurfaceCalculator:
         # Planum height (below crane surface due to gravel layer)
         planum_height = crane_height - self.project.gravel_thickness
 
-        # Calculate cut/fill on platform
-        cut_volume = 0.0
-        fill_volume = 0.0
-
-        for elevation in elevations:
-            diff = elevation - planum_height
-            if diff > 0:  # Cut (existing terrain is higher than planum)
-                cut_volume += diff * self.pixel_area
-            else:  # Fill (existing terrain is lower than planum)
-                fill_volume += abs(diff) * self.pixel_area
+        # Calculate cut/fill on platform (vectorised; identical to the
+        # per-pixel split — diff==0 contributes nothing to either side).
+        diff = np.asarray(elevations, dtype=float) - planum_height
+        cut_volume = float(np.sum(diff[diff > 0])) * self.pixel_area
+        fill_volume = float(np.sum(-diff[diff < 0])) * self.pixel_area
 
         # Calculate slope area around crane pad
         max_height_diff = max(abs(terrain_max - planum_height), abs(terrain_min - planum_height))

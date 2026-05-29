@@ -290,8 +290,8 @@ Terrain Range: 8.5 m (min: 301.2, max: 309.7)
 ## 🐛 Known Issues
 
 1. **Raster output format**: The DEM is intentionally written as a separate GeoTIFF (not into the GeoPackage). GeoPackage raster support in QGIS is functional but inconsistent across plugin readers (rasterio/GDAL/QGIS); a side-car GeoTIFF guarantees compatibility.
-2. **Large DXF Files**: Very complex DXF files (>1000 polylines) may be slow to import — the bottleneck is `ezdxf` LWPOLYLINE iteration. Files above 500 MB are rejected outright for safety.
-3. **Memory Usage**: Processing large DEMs (>10 km²) may require significant RAM. The DEM is currently loaded fully into memory for sampling; streaming/windowed reads are on the v3.x roadmap.
+2. **Large DXF Files**: Very complex DXF files (>1000 polylines) may be slow to import. The common path uses Shapely `linemerge`/`unary_union` (efficient); only a rarely-reached fallback is O(n²). Files above 500 MB are rejected outright for safety.
+3. **Memory Usage**: DEM sampling reads only the polygon's bounding-box window (not the whole band), so RAM scales with the construction area rather than the full DEM. A bounded LRU cache avoids re-sampling the same surface across the height sweep, and the cut/fill volume math is vectorised. Very large areas in the legacy fallback path can still be RAM-heavy.
 
 ---
 
