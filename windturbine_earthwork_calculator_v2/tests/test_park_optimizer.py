@@ -292,5 +292,42 @@ class TestParkOptimizerMILP(unittest.TestCase):
         self.assertAlmostEqual(sol.total_cost_eur, 200.0, places=2)
 
 
+@unittest.skipUnless(SCIPY_AVAILABLE, "scipy not installed")
+class TestParkSolutionReportContract(unittest.TestCase):
+    """Guards the attributes that multi_site_report_generator._generate_park_optimization
+    reads off a ParkSolution / TransportFlow. If park_optimizer is refactored and
+    an attribute is renamed, this fails before the (QGIS-only) report code does."""
+
+    def _solve_two_site(self):
+        po = _load_po_module()
+        a = po.SiteEarthwork(site_id="A", x=0, y=0, cut_excess_m3=100.0)
+        b = po.SiteEarthwork(site_id="B", x=1000.0, y=0, fill_need_m3=100.0)
+        cfg = po.TransportConfig(
+            cost_per_m3_km=0.5, dump_cost_per_m3=0.0,
+            external_gravel_cost_per_m3=45.0,
+        )
+        return po.ParkOptimizer(cfg).solve([a, b])
+
+    def test_solution_has_report_attributes(self):
+        sol = self._solve_two_site()
+        # Attributes read by _generate_park_optimization
+        for attr in ("flows", "savings_eur", "baseline_cost_eur",
+                     "total_transport_eur", "solver_status"):
+            self.assertTrue(hasattr(sol, attr), f"ParkSolution missing {attr}")
+        self.assertIsInstance(sol.flows, list)
+        self.assertIsInstance(sol.savings_eur, float)
+
+    def test_flow_has_report_attributes(self):
+        sol = self._solve_two_site()
+        self.assertGreaterEqual(len(sol.flows), 1)
+        flow = sol.flows[0]
+        for attr in ("from_site", "to_site", "volume_m3", "distance_km",
+                     "transport_cost_eur"):
+            self.assertTrue(hasattr(flow, attr), f"TransportFlow missing {attr}")
+        # The gravel saving (45) far exceeds 0.5 €/m³·km × 1 km, so transport happens
+        self.assertGreater(sol.savings_eur, 0.0)
+        self.assertAlmostEqual(sol.flows[0].volume_m3, 100.0, places=2)
+
+
 if __name__ == "__main__":
     unittest.main()

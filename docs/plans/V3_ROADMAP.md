@@ -15,7 +15,7 @@ plus die zwei größeren Performance-Punkte aus den Known Issues.
 | Roadmap-Item | Code-Realität | Restaufwand |
 |---|---|---|
 | #1 Constraint-basierte Platzierung | 🟢 **Core-Modul + GUI-Tab fertig** (`core/placement_constraints.py` + 16 Tests; Tab „🚧 Restriktionen" in `gui/main_dialog.py` mit Layer-Picker, Distanz, Hard/Soft + interaktivem Positions-Checker); Workflow-Preflight (Kran-Centroid automatisch prüfen) noch offen | klein (Workflow-Preflight) |
-| #2 Park-weite Batch-Optimierung | 🟢 **Transport-LP + Kandidaten-MILP + N-Best-Extraktion fertig** (`park_optimizer.solve`/`solve_milp`; `MultiSurfaceCalculator.find_n_best`; 22 Tests grün); reine GUI-/Report-Anbindung der Park-Optimierung noch offen | klein (GUI/Report) |
+| #2 Park-weite Batch-Optimierung | ✅ **Komplett** — Transport-LP + Kandidaten-MILP + N-Best-Extraktion + Report-Anbindung (`park_optimizer.solve`/`solve_milp`; `MultiSurfaceCalculator.find_n_best`; Multi-Site-Report zeigt Park-Transport-Sektion via LP; 24 Tests grün). MILP-im-Report (statt LP) bräuchte Kandidaten-Persistierung pro Lauf — optionaler Ausbau | — |
 | #4 Terrain-Intersection & Differenz-Raster | ✅ **~95 % implementiert** (`utils/terrain_intersection.py`, 622 LOC; wired in `multi_surface_calculator.py:3301+`); 14-Layer/7-Raster-Output, Cleanup-Härtung + Test-Skelett ergänzt | klein (3D-Renderer-Konfig optional) |
 | #5 3D-Mesh-Export & 3D-Viewer | 🟢 **OBJ-Export fertig + im Workflow verdrahtet** (`core/mesh_exporter.py` + 16 Tests; `workflow_runner._export_meshes` schreibt Terrain + Flächen nach `WKA_*_meshes/`); STL/glTF + Three.js-Viewer noch offen | mittel (zusätzliche Formate + Viewer) |
 | #9 DXF-Import langsam (>1000 Polylinien) | nicht profiliert | mittel |
@@ -47,12 +47,15 @@ Was noch fehlt, um die Features in der GUI nutzbar zu machen:
    `core/park_optimizer.py::solve_milp()` wählt per `scipy.optimize.milp`
    gemeinsam einen Höhen-Kandidaten pro Standort UND den Transportplan
    (Datenklassen `SiteCandidate`, `SiteWithCandidates`, `ParkMILPSolution`).
-   `MultiSurfaceCalculator.find_n_best(n, min_spacing_m)` liefert jetzt die
+   `MultiSurfaceCalculator.find_n_best(n, min_spacing_m)` liefert die
    Top-N Höhen-Kandidaten (Metrik-sortiert, Spacing-gefiltert) als Datenquelle.
    Mapping: `cut_excess = max(0, net_volume)`, `fill_need = max(0, -net_volume)`.
-   **Noch offen:** reine GUI-/Report-Anbindung — Multi-Site sammeln,
-   `find_n_best` je Standort aufrufen, `SiteWithCandidates` bauen, `solve_milp`
-   aufrufen, Park-Optimum im Multi-Site-Report ausweisen.
+   **Report-Anbindung erledigt (2026-05-29):** der Multi-Site-Report ruft
+   `_compute_park_optimization` (LP über die ausgewählten Standort-Bilanzen)
+   auf und zeigt die Sektion „🚚 Park-Transport-Optimierung" mit Transportplan
+   + Einsparung. **Optionaler Ausbau:** MILP statt LP im Report — bräuchte
+   Persistierung der `find_n_best`-Kandidaten pro Lauf (heute hält `SiteData`
+   nur die eine gewählte Bilanz).
 3. **#5 Workflow-Anbindung:** ✅ **Erledigt (2026-05-28).**
    `core/workflow_runner.py::_export_meshes()` schreibt nach der
    GeoPackage-Speicherung ein Terrain-OBJ (decimated DEM) plus je ein OBJ

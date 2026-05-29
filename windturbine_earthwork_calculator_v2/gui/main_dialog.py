@@ -2275,6 +2275,56 @@ class MainDialog(QDialog):
             'cost_gravel': self.input_cost_gravel.value()
         }
 
+    def _compute_park_optimization(self, selected_sites, cost_params):
+        """Run the park-wide transport LP over the selected sites.
+
+        Maps each site's net balance to a surplus (cut_excess) or deficit
+        (fill_need) and optimises inter-site haulage. Returns a ParkSolution,
+        or None if the optimiser is unavailable or fails (non-fatal — the
+        report is still generated without the park section).
+
+        Cost mapping: external gravel cost is the dominant saving, so it is the
+        gravel rate; dump_cost is set to 0 (conservative — on-site surplus
+        disposal is assumed cost-neutral), so transport only happens when it
+        beats buying external gravel.
+        """
+        try:
+            from ..core.park_optimizer import (
+                ParkOptimizer, SiteEarthwork, TransportConfig
+            )
+        except ImportError as exc:
+            self.logger.warning(f"park_optimizer unavailable: {exc}")
+            return None
+
+        sites = []
+        for sd in selected_sites:
+            try:
+                net = sd.net_volume  # cut - fill
+                sites.append(SiteEarthwork(
+                    site_id=sd.site_id,
+                    x=sd.location.x(),
+                    y=sd.location.y(),
+                    cut_excess_m3=max(0.0, net),
+                    fill_need_m3=max(0.0, -net),
+                ))
+            except Exception as exc:
+                self.logger.warning(f"Skipping site in park optimisation: {exc}")
+
+        if len(sites) < 2:
+            # Transport optimisation only makes sense with >= 2 sites.
+            return None
+
+        config = TransportConfig(
+            cost_per_m3_km=0.5,
+            dump_cost_per_m3=0.0,
+            external_gravel_cost_per_m3=cost_params['cost_gravel'],
+        )
+        try:
+            return ParkOptimizer(config).solve(sites)
+        except Exception as exc:
+            self.logger.warning(f"Park optimisation failed: {exc}")
+            return None
+
     def _on_generate_multisite_report(self):
         """Handle generate multi-site report button click."""
         try:
@@ -2348,12 +2398,16 @@ class MainDialog(QDialog):
                 'transport_cost_per_m3_km': 0.5  # Default transport cost
             }
 
+            # Park-wide transport optimisation (optional, non-fatal)
+            park_solution = self._compute_park_optimization(selected_sites, cost_params)
+
             # Import report generator
             from ..core.multi_site_report_generator import MultiSiteReportGenerator
 
             # Create report generator
             self.logger.info(f"Generating multi-site report for {len(selected_sites)} sites...")
-            generator = MultiSiteReportGenerator(site_results, cost_config)
+            generator = MultiSiteReportGenerator(site_results, cost_config,
+                                                 park_solution=park_solution)
 
             # Generate report based on format
             if report_format == 'html':
