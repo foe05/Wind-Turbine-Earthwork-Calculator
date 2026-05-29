@@ -2050,6 +2050,17 @@ class MainDialog(QDialog):
             'optimum_water': self.input_optimum_water.value()
         }
 
+        # Placement-constraint preflight validator. Built here on the main
+        # thread (reads QgsVectorLayer geometries → shapely); passed into the
+        # worker so it can check the crane-pad centroid before DEM download.
+        # None when the Restriktionen tab is not configured → preflight skipped.
+        try:
+            validator, _err = self._build_placement_validator()
+            params['placement_validator'] = validator
+        except Exception as e:
+            self.logger.warning(f"Could not build placement validator: {e}")
+            params['placement_validator'] = None
+
         # Emit signal
         self.processing_requested.emit(params)
 

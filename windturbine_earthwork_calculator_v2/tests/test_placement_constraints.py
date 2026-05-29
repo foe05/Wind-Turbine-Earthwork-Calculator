@@ -57,6 +57,14 @@ class TestConstraintLayer(unittest.TestCase):
         c = pc.ConstraintLayer(name="x", geometries=[], min_distance_m=0.0)
         self.assertEqual(c.min_distance_m, 0.0)
 
+    def test_severity_value_is_string_contract(self):
+        # The GUI (_build_placement_validator) and the workflow preflight
+        # (_run_constraint_preflight) both classify violations via
+        # `v.severity.value == "hard"/"soft"`. Lock that contract here.
+        pc = _load_pc_module()
+        self.assertEqual(pc.Severity.HARD.value, "hard")
+        self.assertEqual(pc.Severity.SOFT.value, "soft")
+
 
 @unittest.skipUnless(SHAPELY_AVAILABLE, "shapely not installed")
 class TestPlacementValidator(unittest.TestCase):

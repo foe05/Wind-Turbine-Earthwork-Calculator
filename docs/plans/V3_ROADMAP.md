@@ -14,7 +14,7 @@ plus die zwei größeren Performance-Punkte aus den Known Issues.
 
 | Roadmap-Item | Code-Realität | Restaufwand |
 |---|---|---|
-| #1 Constraint-basierte Platzierung | 🟢 **Core-Modul + GUI-Tab fertig** (`core/placement_constraints.py` + 16 Tests; Tab „🚧 Restriktionen" in `gui/main_dialog.py` mit Layer-Picker, Distanz, Hard/Soft + interaktivem Positions-Checker); Workflow-Preflight (Kran-Centroid automatisch prüfen) noch offen | klein (Workflow-Preflight) |
+| #1 Constraint-basierte Platzierung | ✅ **Komplett** — Core-Modul (17 Tests) + GUI-Tab „🚧 Restriktionen" + Workflow-Preflight: `workflow_runner._run_constraint_preflight` prüft den Kran-Centroid vor dem DEM-Download, harte Verletzung bricht ab, weiche warnt | — |
 | #2 Park-weite Batch-Optimierung | ✅ **Komplett** — Transport-LP + Kandidaten-MILP + N-Best-Extraktion + Report-Anbindung (`park_optimizer.solve`/`solve_milp`; `MultiSurfaceCalculator.find_n_best`; Multi-Site-Report zeigt Park-Transport-Sektion via LP; 24 Tests grün). MILP-im-Report (statt LP) bräuchte Kandidaten-Persistierung pro Lauf — optionaler Ausbau | — |
 | #4 Terrain-Intersection & Differenz-Raster | ✅ **~95 % implementiert** (`utils/terrain_intersection.py`, 622 LOC; wired in `multi_surface_calculator.py:3301+`); 14-Layer/7-Raster-Output, Cleanup-Härtung + Test-Skelett ergänzt | klein (3D-Renderer-Konfig optional) |
 | #5 3D-Mesh-Export & 3D-Viewer | 🟢 **OBJ-Export fertig + im Workflow verdrahtet** (`core/mesh_exporter.py` + 16 Tests; `workflow_runner._export_meshes` schreibt Terrain + Flächen nach `WKA_*_meshes/`); STL/glTF + Three.js-Viewer noch offen | mittel (zusätzliche Formate + Viewer) |
@@ -36,13 +36,13 @@ dienen:
   skippen in CI ohne osgeo-Bindings.**
 
 Was noch fehlt, um die Features in der GUI nutzbar zu machen:
-1. **#1 GUI:** ✅ **Tab erledigt (2026-05-29).** „🚧 Restriktionen" in
-   `gui/main_dialog.py`: drei Kategorien (Wohnbebauung/Straßen/Schutzgebiete)
-   mit QgsMapLayerComboBox + Distanz + Hard/Soft, plus interaktiver
-   Positions-Checker (`_on_constraint_check`, `_on_constraint_suggest`).
-   **Noch offen:** automatischer Preflight des Kran-Centroids in
-   `core/workflow_runner.py` vor dem DEM-Download (heute prüft der Nutzer die
-   Position manuell im Tab).
+1. **#1 GUI + Preflight:** ✅ **Komplett (2026-05-29).** Tab „🚧 Restriktionen"
+   in `gui/main_dialog.py` (drei Kategorien mit QgsMapLayerComboBox + Distanz +
+   Hard/Soft, interaktiver Positions-Checker). **Workflow-Preflight erledigt:**
+   `_on_start` baut den Validator im Main-Thread und reicht ihn als
+   `params['placement_validator']` weiter; `workflow_runner._run_constraint_preflight`
+   prüft den Kran-Centroid nach dem DXF-Import / vor dem DEM-Download — harte
+   Verletzung wirft (Abbruch), weiche warnt nur.
 2. **#2 MILP-Stufe + N-Best:** ✅ **Solver + Datenquelle erledigt (2026-05-29).**
    `core/park_optimizer.py::solve_milp()` wählt per `scipy.optimize.milp`
    gemeinsam einen Höhen-Kandidaten pro Standort UND den Transportplan

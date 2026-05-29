@@ -190,6 +190,63 @@ class WorkflowWorker(QObject):
         """Cancel workflow."""
         self.is_cancelled = True
 
+    def _run_constraint_preflight(self, crane_geometry):
+        """Check the crane-pad centroid against configured placement constraints.
+
+        The validator (if any) is a pure-shapely PlacementValidator built on the
+        main thread and passed via ``params['placement_validator']`` — see
+        ``gui/main_dialog._build_placement_validator``. No-op when not configured.
+
+        Hard violations raise (aborting the run before the DEM download); soft
+        violations are logged and surfaced as a progress warning but do not stop
+        the workflow.
+        """
+        validator = self.params.get('placement_validator')
+        if validator is None:
+            return
+
+        try:
+            centroid = crane_geometry.centroid().asPoint()
+            cx, cy = centroid.x(), centroid.y()
+        except Exception as e:
+            self.logger.warning(f"Restriktions-Preflight übersprungen (Centroid-Fehler: {e})")
+            return
+
+        self.progress_updated.emit(31, "🚧 Restriktionsprüfung der Kranstellflächen-Position...")
+        try:
+            violations = validator.check_position(cx, cy)
+        except Exception as e:
+            # A failure while checking should never block the calculation.
+            self.logger.warning(f"Restriktions-Preflight übersprungen (Prüffehler: {e})")
+            return
+
+        def _sev(v):
+            return getattr(v.severity, "value", v.severity)
+
+        hard = [v for v in violations if _sev(v) == "hard"]
+        soft = [v for v in violations if _sev(v) == "soft"]
+
+        for v in soft:
+            msg = (f"Weiche Restriktion verletzt: {v.layer_name} "
+                   f"({v.actual_distance_m:.0f} m vorhanden, "
+                   f"{v.required_distance_m:.0f} m gefordert)")
+            self.logger.warning(msg)
+            self.progress_updated.emit(31, f"⚠️ {msg}")
+
+        if hard:
+            details = "; ".join(
+                f"{v.layer_name} ({v.actual_distance_m:.0f} m < {v.required_distance_m:.0f} m)"
+                for v in hard
+            )
+            self.logger.error(f"Harte Restriktion(en) verletzt: {details}")
+            raise Exception(
+                "Restriktionsprüfung fehlgeschlagen — die Kranstellflächen-Position "
+                f"verletzt harte Mindestabstände: {details}. "
+                "Position anpassen oder Restriktion im Tab 'Restriktionen' lockern."
+            )
+
+        self.logger.info("Restriktions-Preflight bestanden (keine harten Verletzungen)")
+
     def _run_workflow(self):
         """Run the complete multi-surface workflow."""
         self.logger.info("Starting multi-surface workflow execution...")
@@ -305,6 +362,13 @@ class WorkflowWorker(QObject):
             current_progress += progress_per_dxf
 
         self.progress_updated.emit(30, "✓ DXF-Dateien importiert")
+
+        # === STEP 1.5: Placement constraint preflight ===
+        # If the user configured restriction layers in the GUI, a
+        # PlacementValidator (pure shapely, built on the main thread) is passed
+        # via params. Check the crane-pad centroid here, before the expensive
+        # DEM download. Hard violations abort the run; soft ones only warn.
+        self._run_constraint_preflight(surfaces['crane']['geometry'])
 
         # === STEP 2: Create MultiSurfaceProject ===
         self.progress_updated.emit(32, "🔧 Erstelle Multi-Surface Projekt...")
