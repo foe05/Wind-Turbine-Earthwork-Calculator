@@ -53,6 +53,8 @@ from .surface_types import (
 from .surface_validators import validate_project
 from .uncertainty import UncertaintyConfig, TerrainType
 from . import mesh_exporter
+from . import landxml_export
+from .mass_haul import MassHaulStation, MassHaulDiagram
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
 from ..utils.central_logging import log_event
@@ -681,10 +683,27 @@ class WorkflowWorker(QObject):
             self.logger.error(f"Optimization failed: {e}", exc_info=True)
             raise
 
+        # === STEP 5.5: Optional crane-pad rotation analysis ===
+        # Opt-in, informational, non-fatal: reports the orientation that would
+        # minimise cut/fill. Does not change the chosen geometry or height.
+        rotation_analysis = None
+        if self.params.get('analyze_rotation', False):
+            try:
+                self.progress_updated.emit(71, "🧭 Analysiere optimale Plattform-Ausrichtung...")
+                rotation_analysis = calculator.analyze_crane_rotation()
+                if rotation_analysis:
+                    self.logger.info(
+                        f"Best crane-pad orientation: {rotation_analysis['best_angle_deg']:.0f}° "
+                        f"(saving {rotation_analysis['savings_m3']:.0f} m³ vs current)"
+                    )
+            except Exception as e:
+                self.logger.warning(f"Rotation analysis skipped: {e}")
+
         # === STEP 6: Profile Generation ===
         self.progress_updated.emit(72, "📊 Geländeschnitte werden erstellt...")
         self.logger.info(f"Generating profiles in: {profiles_dir}")
 
+        mass_haul_summary = None
         try:
             # Get boom connection info from calculator
             boom_connection_edge = None
@@ -781,6 +800,17 @@ class WorkflowWorker(QObject):
                 all_profiles.extend(long_profiles)
                 self.logger.info(f"Generated {len(long_profiles)} longitudinal profiles")
 
+                # Optional mass-haul analysis along the representative
+                # longitudinal profile (opt-in, non-fatal, per-strip-width).
+                if self.params.get('mass_haul_analysis', False) and long_profiles_raw:
+                    try:
+                        strip_width = float(self.params.get('long_profile_spacing', 10.0))
+                        mass_haul_summary = self._compute_mass_haul(
+                            long_profiles_raw[0], strip_width
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Mass-haul analysis skipped: {e}")
+
             profiles = all_profiles
             profile_pngs = [p['png_path'] for p in profiles if 'png_path' in p]
             self.logger.info(f"Total: Generated {len(profile_pngs)} profile images")
@@ -873,6 +903,10 @@ class WorkflowWorker(QObject):
 
         results_for_report = results.to_dict()
         results_for_report['stabilization'] = stabilization_data
+        if rotation_analysis:
+            results_for_report['rotation_analysis'] = rotation_analysis
+        if mass_haul_summary:
+            results_for_report['mass_haul'] = mass_haul_summary
         report_gen = ReportGenerator(
             results_for_report,
             project.crane_pad.geometry,
@@ -1152,6 +1186,56 @@ class WorkflowWorker(QObject):
         return layers
 
     @staticmethod
+    def _compute_mass_haul(profile: dict, strip_width: float) -> Optional[dict]:
+        """Build a mass-haul summary from a longitudinal profile dict.
+
+        Per station the earthwork is ``(existing_z - bottom_z) × strip_width ×
+        step``; NaN/None entries (outside any surface) contribute nothing. The
+        diagram is for the representative longitudinal strip — a per-corridor
+        approximation, not the full 3D volume.
+        """
+        distances = profile.get('distances')
+        existing = profile.get('existing_z')
+        bottom = profile.get('bottom_z')
+        if distances is None or existing is None or bottom is None:
+            return None
+        n = len(distances)
+        if n < 2:
+            return None
+
+        step = float(distances[1]) - float(distances[0])
+        if step <= 0:
+            step = 1.0
+
+        stations = []
+        for i in range(n):
+            d = float(distances[i])
+            e = existing[i]
+            b = bottom[i]
+            # Skip NaN / None (masked stations outside surfaces).
+            if e is None or b is None or e != e or b != b:
+                stations.append(MassHaulStation(d, 0.0, 0.0))
+                continue
+            diff = float(e) - float(b)
+            vol = abs(diff) * strip_width * step
+            cut = vol if diff > 0 else 0.0
+            fill = vol if diff < 0 else 0.0
+            stations.append(MassHaulStation(d, cut, fill))
+
+        res = MassHaulDiagram(stations).compute()
+        return {
+            "total_cut_m3": res.total_cut_m3,
+            "total_fill_m3": res.total_fill_m3,
+            "net_m3": res.net_m3,
+            "num_balance_points": len(res.balance_points),
+            "balance_points_m": [round(bp.station_m, 1) for bp in res.balance_points],
+            "total_haul_m3km": res.total_haul_m3km,
+            "max_ordinate_m3": res.max_ordinate_m3,
+            "min_ordinate_m3": res.min_ordinate_m3,
+            "strip_width_m": strip_width,
+        }
+
+    @staticmethod
     def _polygon_exterior_xy(geometry):
         """Extract the exterior ring of a QgsGeometry polygon as [(x, y), ...].
 
@@ -1243,6 +1327,19 @@ class WorkflowWorker(QObject):
                 written.append(viewer_path)
             except Exception as e:
                 self.logger.warning(f"glTF/viewer export failed: {e}")
+
+            # LandXML TIN surfaces for machine control (Trimble/Topcon/Leica) + BIM.
+            try:
+                landxml_surfaces = [
+                    landxml_export.surface_from_mesh(m.name, m) for m in collected
+                ]
+                landxml_path = landxml_export.write_landxml(
+                    str(mesh_dir / "surfaces.xml"), landxml_surfaces,
+                    project_name=f"WKA_{x_coord}_{y_coord}",
+                )
+                written.append(landxml_path)
+            except Exception as e:
+                self.logger.warning(f"LandXML export failed: {e}")
 
         return written
 

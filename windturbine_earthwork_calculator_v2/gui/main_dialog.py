@@ -447,6 +447,33 @@ class MainDialog(QDialog):
         group_slope.setLayout(form_slope)
         layout.addWidget(group_slope)
 
+        # Advanced analyses (opt-in, informational, non-fatal)
+        group_advanced = QGroupBox("Erweiterte Analysen (optional)")
+        form_advanced = QFormLayout()
+
+        self.input_analyze_rotation = QCheckBox(
+            "Optimale Plattform-Ausrichtung analysieren"
+        )
+        self.input_analyze_rotation.setChecked(False)
+        self.input_analyze_rotation.setToolTip(
+            "Untersucht die Rotation der Kranstellfläche zur Minimierung der "
+            "Erdbewegungen. Informativ — ändert die berechnete Geometrie nicht."
+        )
+        form_advanced.addRow(self.input_analyze_rotation)
+
+        self.input_mass_haul = QCheckBox(
+            "Massenmassenkurve (Mass-Haul) berechnen"
+        )
+        self.input_mass_haul.setChecked(False)
+        self.input_mass_haul.setToolTip(
+            "Erstellt eine Mass-Haul-Auswertung entlang des Längsprofils "
+            "(Massenausgleichspunkte, Transportbilanz)."
+        )
+        form_advanced.addRow(self.input_mass_haul)
+
+        group_advanced.setLayout(form_advanced)
+        layout.addWidget(group_advanced)
+
         # Uncertainty Analysis
         group_uncertainty = QGroupBox("Unsicherheitsanalyse (Monte Carlo)")
         form_uncertainty = QFormLayout()
@@ -2020,6 +2047,10 @@ class MainDialog(QDialog):
             # Optimization parameters
             'height_step': self.input_height_step.value(),
             'slope_angle': self.input_slope_angle.value(),
+
+            # Advanced opt-in analyses
+            'analyze_rotation': self.input_analyze_rotation.isChecked(),
+            'mass_haul_analysis': self.input_mass_haul.isChecked(),
 
             # Profile parameters
             'bbox_buffer': self.input_bbox_buffer.value(),

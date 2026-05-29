@@ -54,9 +54,22 @@ Vier weitere QGIS-unabhängige Kern-Module aus der Wettbewerbsanalyse
   Machine-Control (Trimble/Topcon/Leica) + BIM. Stdlib-XML, Adapter aus
   `MeshData`. **9/9.** *(Inspiration: RoadEng, Civil 3D.)*
 
-**Offen:** GUI-/Workflow-Anbindung dieser vier (Solver/Writer stehen + sind
-getestet; analog zu #1/#2/#5 fehlt nur die Verdrahtung in Dialog/Report/Run).
-Geneigte Rotation + per-pixel Mass-Haul-Sampling brauchen QGIS-Bewertung.
+**GUI-/Workflow-Anbindung erledigt (2026-05-29):**
+- **LandXML:** `workflow_runner._export_meshes` schreibt zusätzlich `surfaces.xml`
+  (TIN je Fläche) aus den gesammelten MeshData.
+- **CO₂:** `report_generator._generate_co2_section` zeigt die CO₂-Bilanz im
+  Einzelstandort-Report (Beton aus Fundamentfläche×-tiefe, Stahl 120 kg/m³,
+  Transport 5 km Default).
+- **Rotation:** opt-in Checkbox „Optimale Plattform-Ausrichtung" →
+  `calculator.analyze_crane_rotation` (non-fatal) → Report-Sektion mit bestem
+  Winkel + Einsparung. Ändert die berechnete Geometrie nicht.
+- **Mass-Haul:** opt-in Checkbox „Massenmassenkurve" →
+  `workflow_runner._compute_mass_haul` aus dem repräsentativen Längsprofil
+  (per-Streifenbreite) → Report-Sektion mit Bilanz + Ausgleichspunkten.
+
+Beide opt-in Analysen sind default aus, non-fatal gekapselt, und ändern den
+Hauptlauf nicht. **Restrisiko:** die QGIS-abhängigen Pfade (DEM-Sampling der
+rotierten Fläche, Profil-Stationierung) sind erst im echten QGIS testbar.
 
 Was noch fehlt, um die Features in der GUI nutzbar zu machen:
 1. **#1 GUI + Preflight:** ✅ **Komplett (2026-05-29).** Tab „🚧 Restriktionen"

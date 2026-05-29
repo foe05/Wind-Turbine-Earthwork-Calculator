@@ -2118,6 +2118,72 @@ class MultiSurfaceCalculator:
 
         return self._select_diverse_candidates(scored, n, min_spacing_m)
 
+    def analyze_crane_rotation(self, angles_deg=None, reference_height=None) -> Optional[dict]:
+        """Informational crane-pad orientation analysis (does NOT change the
+        main optimisation). Rotates the crane-pad footprint around its centroid
+        through a set of angles, samples the DEM for each, and reports the
+        orientation that minimises flat cut/fill against the local mean terrain.
+
+        Returns a dict with best_angle_deg, best/baseline volume moved and the
+        saving, or None if it cannot run (e.g. degenerate geometry / no DEM).
+        The heavy lifting is delegated to the unit-tested
+        core.rotation_optimizer; this method only supplies the DEM-aware
+        evaluation. Wrapped by the caller as a non-fatal, opt-in step.
+        """
+        from .rotation_optimizer import (
+            RotationOptimizer, polygon_centroid, rotate_points
+        )
+
+        geom = self.project.crane_pad.geometry
+        if geom is None or geom.isEmpty():
+            return None
+        # Exterior ring as (x, y) tuples.
+        if geom.isMultipart():
+            multi = geom.asMultiPolygon()
+            rings = multi[0] if multi else None
+        else:
+            rings = geom.asPolygon()
+        if not rings or len(rings[0]) < 3:
+            return None
+        pts = [(p.x(), p.y()) for p in rings[0]]
+        pivot = polygon_centroid(pts)
+
+        def evaluate(rotated_xy):
+            rgeom = QgsGeometry.fromPolygonXY([[QgsPointXY(x, y) for (x, y) in rotated_xy]])
+            elevations = self.sample_dem_in_polygon(rgeom)
+            if elevations is None or len(elevations) == 0:
+                raise ValueError("no DEM data in rotated footprint")
+            elevations = np.asarray(elevations, dtype=float)
+            planum = (float(np.mean(elevations)) if reference_height is None
+                      else float(reference_height))
+            diff = elevations - planum
+            cut = float(np.sum(diff[diff > 0])) * self.pixel_area
+            fill = float(np.sum(-diff[diff < 0])) * self.pixel_area
+            return cut + fill, {"cut": cut, "fill": fill, "planum": planum}
+
+        try:
+            optimizer = (RotationOptimizer(angles_deg) if angles_deg
+                         else RotationOptimizer())
+            best = optimizer.optimize(pts, evaluate, pivot=pivot)
+            # Baseline at 0° (identity rotation) for a saving comparison.
+            baseline_metric, _ = evaluate(rotate_points(pts, 0.0, pivot))
+        except Exception as e:
+            self.logger.warning(f"analyze_crane_rotation failed: {e}")
+            return None
+
+        savings = baseline_metric - best.metric
+        self.logger.info(
+            f"Rotation analysis: best={best.angle_deg:.0f}° "
+            f"(moved {best.metric:.0f} m³ vs baseline {baseline_metric:.0f} m³, "
+            f"saving {savings:.0f} m³)"
+        )
+        return {
+            "best_angle_deg": best.angle_deg,
+            "best_volume_moved_m3": best.metric,
+            "baseline_volume_moved_m3": baseline_metric,
+            "savings_m3": savings,
+        }
+
     def _find_optimum_multi_parameter(self, feedback: Optional[QgsProcessingFeedback],
                                       use_parallel: bool, max_workers: int) -> Tuple[float, MultiSurfaceCalculationResult]:
         """

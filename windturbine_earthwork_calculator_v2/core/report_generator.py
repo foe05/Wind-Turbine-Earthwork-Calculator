@@ -30,6 +30,7 @@ from qgis.PyQt.QtCore import QSize, QRect, Qt
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
 from .uncertainty import UncertaintyAnalysisResult
+from .co2_balance import CO2Calculator
 
 
 class ReportGenerator:
@@ -121,6 +122,9 @@ class ReportGenerator:
         html_uncertainty = self._generate_uncertainty_section()
         html_stabilization = self._generate_stabilization_section()
         html_quality = self._generate_quality_assurance_section() if self.results.get('stabilization') else ""
+        html_rotation = self._generate_rotation_section()
+        html_mass_haul = self._generate_mass_haul_section()
+        html_co2 = self._generate_co2_section(config)
         html_overview = self._generate_overview_section(overview_map_path)
         html_profiles = self._generate_profiles_section(profile_pngs)
         html_footer = self._generate_footer()
@@ -143,6 +147,9 @@ class ReportGenerator:
         {html_uncertainty}
         {html_stabilization}
         {html_quality}
+        {html_rotation}
+        {html_mass_haul}
+        {html_co2}
         {html_overview}
         {html_profiles}
     </div>
@@ -1460,6 +1467,156 @@ class ReportGenerator:
         </div>
     </div>
     """
+
+    def _generate_rotation_section(self) -> str:
+        """Render the optional crane-pad rotation analysis, if present."""
+        ra = self.results.get('rotation_analysis')
+        if not ra:
+            return ""
+        try:
+            angle = float(ra.get('best_angle_deg', 0.0))
+            best = float(ra.get('best_volume_moved_m3', 0.0))
+            baseline = float(ra.get('baseline_volume_moved_m3', 0.0))
+            savings = float(ra.get('savings_m3', 0.0))
+        except Exception:
+            return ""
+
+        savings_pct = (savings / baseline * 100.0) if baseline > 0 else 0.0
+        return f"""
+    <div class="section">
+        <h2>🧭 Ausrichtungs-Analyse Kranstellfläche</h2>
+        <p>Untersuchung der optimalen Plattform-Ausrichtung zur Minimierung der
+        Erdbewegungen. Informativ — die berechnete Höhe und Geometrie bleiben
+        unverändert.</p>
+
+        <div class="highlight-box optimal">
+            <div class="highlight-value">{angle:.0f}°</div>
+            <p>Optimaler Rotationswinkel (um den Flächen-Mittelpunkt)</p>
+        </div>
+
+        <table>
+            <tr><th>Kennwert</th><th>Wert</th></tr>
+            <tr><td>Erdbewegung bei aktueller Ausrichtung (0°)</td><td>{baseline:,.0f} m³</td></tr>
+            <tr><td>Erdbewegung bei optimaler Ausrichtung</td><td>{best:,.0f} m³</td></tr>
+            <tr style="font-weight: bold;"><td>Einsparpotenzial</td><td>{savings:,.0f} m³ ({savings_pct:.1f} %)</td></tr>
+        </table>
+
+        <p style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
+            <strong>Hinweis:</strong> Bewertet wird die flache Kranstellfläche
+            gegen das mittlere Gelände je Ausrichtung. Eine Drehung der
+            Plattform muss mit den übrigen Flächen (Fundament, Ausleger)
+            abgestimmt werden.
+        </p>
+    </div>
+"""
+
+    def _generate_mass_haul_section(self) -> str:
+        """Render the optional mass-haul summary, if present."""
+        mh = self.results.get('mass_haul')
+        if not mh:
+            return ""
+        try:
+            total_cut = float(mh.get('total_cut_m3', 0.0))
+            total_fill = float(mh.get('total_fill_m3', 0.0))
+            net = float(mh.get('net_m3', 0.0))
+            haul = float(mh.get('total_haul_m3km', 0.0))
+            n_balance = int(mh.get('num_balance_points', 0))
+            balance_points = mh.get('balance_points_m', []) or []
+            strip_width = float(mh.get('strip_width_m', 0.0))
+        except Exception:
+            return ""
+
+        balance_str = (", ".join(f"{p:.0f} m" for p in balance_points)
+                       if balance_points else "keine")
+        net_label = "Überschuss (Abtransport)" if net > 0 else "Defizit (Anlieferung)"
+        return f"""
+    <div class="section">
+        <h2>📈 Massenmassenkurve (Mass-Haul)</h2>
+        <p>Massenausgleich entlang des repräsentativen Längsprofils
+        (Streifenbreite {strip_width:.0f} m). Zeigt Massenüberschuss/-defizit
+        und die optimalen Massenausgleichspunkte für die Bauphasenplanung.</p>
+
+        <table>
+            <tr><th>Kennwert</th><th>Wert</th></tr>
+            <tr><td>Abtrag entlang Profil</td><td>{total_cut:,.0f} m³</td></tr>
+            <tr><td>Auftrag entlang Profil</td><td>{total_fill:,.0f} m³</td></tr>
+            <tr><td>Netto-Bilanz</td><td>{net:,.0f} m³ ({net_label})</td></tr>
+            <tr><td>Massentransport (Haul)</td><td>{haul:,.2f} m³·km</td></tr>
+            <tr><td>Massenausgleichspunkte ({n_balance})</td><td>{balance_str}</td></tr>
+        </table>
+
+        <p style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
+            <strong>Hinweis:</strong> Näherung pro Profilstreifen, nicht das
+            volle 3D-Volumen. Für eine echte Trassenbetrachtung ein
+            Zufahrts-Längsprofil verwenden.
+        </p>
+    </div>
+"""
+
+    def _generate_co2_section(self, config: Optional[Dict] = None) -> str:
+        """Generate the CO₂ balance section (supplementary, never fatal).
+
+        Estimates CO₂e from the earthwork volumes plus an approximate
+        foundation concrete/steel contribution. Uses default emission factors;
+        returns an empty string on any error so the report still renders.
+        """
+        try:
+            config = config or {}
+            cut = float(self.results.get('total_cut', 0.0) or 0.0)
+            fill = float(self.results.get('total_fill', 0.0) or 0.0)
+            gravel = float(self.results.get('gravel_fill_external', 0.0) or 0.0)
+
+            # Foundation concrete ≈ foundation area × depth; steel ≈ 120 kg/m³.
+            foundation_depth = float(config.get('foundation_depth', 0.0) or 0.0)
+            foundation_area = 0.0
+            surfaces = self.results.get('surfaces', {}) or {}
+            found = surfaces.get('fundamentflaeche', {}) or {}
+            foundation_area = float(found.get('area', 0.0) or 0.0)
+            concrete_m3 = foundation_area * foundation_depth
+            steel_kg = concrete_m3 * 120.0
+
+            # Average one-way haul distance (km); consistent with cost defaults.
+            haul_km = float(config.get('avg_haul_distance_km', 5.0) or 5.0)
+
+            result = CO2Calculator().compute(
+                cut_m3=cut, fill_m3=fill, gravel_m3=gravel,
+                haul_distance_km=haul_km,
+                concrete_m3=concrete_m3, steel_kg=steel_kg,
+            )
+            bd = result.as_breakdown()
+        except Exception as e:
+            self.logger.warning(f"CO2 section skipped: {e}")
+            return ""
+
+        return f"""
+    <div class="section">
+        <h2>🌍 CO₂-Bilanz (Schätzung)</h2>
+        <p>Geschätzte CO₂-Emissionen aus Erdbewegung, Materialtransport und
+        Gründung. Basiert auf Standard-Emissionsfaktoren — für EPD-genaue
+        Werte projektspezifische Faktoren hinterlegen.</p>
+
+        <div class="highlight-box">
+            <div class="highlight-value">{bd['total_t']:,.1f} t CO₂e</div>
+            <p>Gesamte geschätzte Emissionen für diesen Standort</p>
+        </div>
+
+        <table>
+            <tr><th>Komponente</th><th>CO₂e (kg)</th></tr>
+            <tr><td>Aushub / Einbau (Maschinen)</td><td>{bd['excavation_kg']:,.0f}</td></tr>
+            <tr><td>Materialtransport (LKW)</td><td>{bd['haul_kg']:,.0f}</td></tr>
+            <tr><td>Schotterproduktion</td><td>{bd['gravel_kg']:,.0f}</td></tr>
+            <tr><td>Fundamentbeton</td><td>{bd['concrete_kg']:,.0f}</td></tr>
+            <tr><td>Bewehrungsstahl</td><td>{bd['steel_kg']:,.0f}</td></tr>
+            <tr style="font-weight: bold;"><td>Gesamt</td><td>{bd['total_kg']:,.0f}</td></tr>
+        </table>
+
+        <p style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
+            <strong>Hinweis:</strong> Transportdistanz angenommen mit
+            {haul_km:.0f} km (einfach). Beton aus Fundamentfläche × -tiefe,
+            Stahl mit 120 kg/m³ geschätzt.
+        </p>
+    </div>
+"""
 
     def _generate_footer(self) -> str:
         """Generate HTML footer."""
