@@ -2003,6 +2003,101 @@ class MultiSurfaceCalculator:
             )
             return self._find_optimum_multi_parameter(feedback, use_parallel, max_workers)
 
+    @staticmethod
+    def _select_diverse_candidates(scored, n, min_spacing_m):
+        """Pick up to ``n`` candidates, best metric first, spaced apart in height.
+
+        Args:
+            scored: iterable of ``(metric, height, payload)`` tuples. Lower
+                metric is better.
+            n: maximum number of candidates to return.
+            min_spacing_m: minimum height difference (m) between selected
+                candidates. 0 disables the spacing filter. This avoids
+                returning several near-identical adjacent heights, which would
+                give a downstream park optimiser no meaningful trade-off.
+
+        Returns:
+            list of ``(height, payload)`` ordered best-first.
+        """
+        ordered = sorted(scored, key=lambda item: item[0])
+        selected = []
+        chosen_heights = []
+        for _metric, height, payload in ordered:
+            if min_spacing_m > 0 and any(
+                abs(height - h) < min_spacing_m for h in chosen_heights
+            ):
+                continue
+            selected.append((height, payload))
+            chosen_heights.append(height)
+            if len(selected) >= n:
+                break
+        return selected
+
+    def find_n_best(self, n: int = 5, min_spacing_m: float = 0.0,
+                    feedback: Optional[QgsProcessingFeedback] = None
+                    ) -> List[Tuple[float, MultiSurfaceCalculationResult]]:
+        """Return the top-``n`` crane-pad height candidates, best first.
+
+        Sweeps the configured crane-height search range (the single-parameter
+        space) and ranks every height by the active optimisation metric
+        (``abs(net_volume)`` when optimising for net earthwork, else
+        ``total_volume_moved``). Useful for feeding a per-site candidate list
+        into ``core.park_optimizer.ParkOptimizer.solve_milp``.
+
+        Each returned ``MultiSurfaceCalculationResult`` exposes ``total_cut`` /
+        ``total_fill`` / ``net_volume``; a caller mapping to a park
+        ``SiteCandidate`` typically uses
+        ``cut_excess = max(0, net_volume)`` and
+        ``fill_need = max(0, -net_volume)``.
+
+        Args:
+            n: number of candidates to return (>= 1).
+            min_spacing_m: minimum height spacing between candidates to ensure
+                they are meaningfully different (0 = no spacing filter).
+            feedback: optional QGIS feedback.
+
+        Returns:
+            list of ``(height, result)`` tuples, best metric first. Never empty
+            on success; raises ValueError if no scenario could be evaluated.
+
+        Note: this intentionally covers only the crane-height dimension. Boom
+        slope / rotor offset multi-parameter candidates are out of scope here.
+        """
+        if n < 1:
+            raise ValueError(f"n must be >= 1, got {n}")
+
+        min_height = self.project.search_min_height
+        max_height = self.project.search_max_height
+        step = self.project.search_step
+        heights = np.arange(min_height, max_height + step, step)
+
+        self.logger.info(
+            f"find_n_best: evaluating {len(heights)} heights "
+            f"({min_height:.2f}-{max_height:.2f} m, step {step:.3f} m), "
+            f"returning top {n} (min spacing {min_spacing_m:.2f} m)"
+        )
+
+        optimize_for_net = self.project.optimize_for_net_earthwork
+        scored = []
+        for height in heights:
+            if feedback and feedback.isCanceled():
+                break
+            try:
+                result = self.calculate_scenario(float(height), feedback)
+                metric = (abs(result.net_volume) if optimize_for_net
+                          else result.total_volume_moved)
+                scored.append((metric, float(height), result))
+            except Exception as e:
+                self.logger.error(f"find_n_best: scenario h={height:.2f}m failed: {e}")
+
+        if not scored:
+            raise ValueError(
+                "find_n_best: no valid scenarios in the configured height range "
+                f"({min_height:.2f}-{max_height:.2f} m)"
+            )
+
+        return self._select_diverse_candidates(scored, n, min_spacing_m)
+
     def _find_optimum_multi_parameter(self, feedback: Optional[QgsProcessingFeedback],
                                       use_parallel: bool, max_workers: int) -> Tuple[float, MultiSurfaceCalculationResult]:
         """

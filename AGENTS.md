@@ -193,7 +193,8 @@ windturbine_earthwork_calculator_v2/
 - **`core/park_optimizer.py`** — `ParkOptimizer.solve(sites)` (Transport-LP via
   `scipy.optimize.linprog`) + `solve_milp(sites)` (Kandidaten-MILP via
   `scipy.optimize.milp`, wählt Höhen-Kandidat pro Standort + Transport gemeinsam).
-  GUI + N-Best-Extraktion aus `MultiSurfaceCalculator` offen. V3_ROADMAP #2.
+  Datenquelle: `MultiSurfaceCalculator.find_n_best(n, min_spacing_m)` liefert die
+  Top-N Höhen-Kandidaten. Reine GUI-/Report-Anbindung offen. V3_ROADMAP #2.
 - **`core/mesh_exporter.py`** — `write_obj()`, `dem_to_mesh()`,
   `polygon_to_mesh_at_height()` für 3D-Export. Ear-Clipping (konkave Polygone).
   **Im Workflow verdrahtet** (`workflow_runner._export_meshes`). V3_ROADMAP #5.
