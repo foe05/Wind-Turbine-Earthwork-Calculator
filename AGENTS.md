@@ -210,6 +210,16 @@ Konkurrenz-Feature-Module (Solver/Writer fertig + getestet, GUI-Anbindung offen)
   mit konfigurierbaren `EmissionFactors`.
 - **`core/landxml_export.py`** — `write_landxml()`: LandXML-1.2-TIN-Surfaces für
   Machine-Control/BIM; `surface_from_mesh()`-Adapter aus `MeshData`.
+- **`core/strata_quantities.py`** — `StrataCalculator.split()`: Erdmassen pro
+  Bodenschicht (Mutterboden/Frostschutz/Schotter), inkl. Kosten + CO₂.
+- **`core/construction_phases.py`** — `PhasePlanner.plan()`: Verteilung über
+  WEA-Bauphasen mit Zeitachse.
+- **`core/slope_stability_export.py`** — `write_slope_xml()`: Querschnitt-XML
+  als Slide/GeoStudio-Interchange.
+- **`core/variant_comparison.py`** — `VariantComparisonReport.write()`:
+  Side-by-Side HTML mehrerer Planungs-Varianten.
+
+API-Dokumentation: `windturbine_earthwork_calculator_v2/docs/PYTHON_API.md`
 
 ---
 

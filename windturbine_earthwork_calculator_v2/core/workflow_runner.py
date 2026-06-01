@@ -54,6 +54,7 @@ from .surface_validators import validate_project
 from .uncertainty import UncertaintyConfig, TerrainType
 from . import mesh_exporter
 from . import landxml_export
+from . import slope_stability_export
 from .mass_haul import MassHaulStation, MassHaulDiagram
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
@@ -508,64 +509,89 @@ class WorkflowWorker(QObject):
 
         self.progress_updated.emit(38, "✓ Alle Validierungen bestanden")
 
-        # === STEP 4: DEM Download ===
-        self.progress_updated.emit(40, "🌍 DEM-Daten werden heruntergeladen...")
-        self.logger.info("Starting DEM download...")
+        # === STEP 4: DEM acquisition ===
+        # If the user supplied a local DEM (e.g. drone-derived GeoTIFF) skip
+        # the hoehendaten.de download entirely and use it as-is.
+        local_dem_path = self.params.get('local_dem_path') or None
 
-        try:
-            # Use crane pad as reference for DEM extent (it should cover all surfaces)
-            # But we buffer generously to cover all surfaces
-            # Only include geometries that exist (boom and rotor are optional)
-            all_geoms = [
-                surfaces['crane']['geometry'],
-                surfaces['foundation']['geometry'],
-            ]
-
-            # Add optional surfaces if they exist
-            if surfaces['boom'] is not None:
-                all_geoms.append(surfaces['boom']['geometry'])
-            if surfaces['rotor'] is not None:
-                all_geoms.append(surfaces['rotor']['geometry'])
-            if surfaces['road'] is not None:
-                all_geoms.append(surfaces['road']['geometry'])
-
-            # Create union of all geometries
-            combined_geom = all_geoms[0]
-            for geom in all_geoms[1:]:
-                combined_geom = combined_geom.combine(geom)
-
-            temp_dem_path = tempfile.mktemp(suffix='.tif', prefix='dem_mosaic_')
-            self.logger.info(f"Temp DEM path: {temp_dem_path}")
-
-            downloader = DEMDownloader(
-                cache_dir=str(cache_dir),
-                force_refresh=self.params['force_refresh']
-            )
-
-            self.progress_updated.emit(42, "⬇️ Lade DEM-Kacheln...")
-            dem_path = downloader.download_for_geometry(
-                combined_geom,
-                temp_dem_path,
-                buffer_m=250
-            )
-
-            self.logger.info(f"DEM downloaded: {dem_path}")
-
-            dem_layer = QgsRasterLayer(dem_path, "DGM Mosaik")
+        if local_dem_path:
+            self.progress_updated.emit(40, "🛰️ Lokales DEM wird geladen...")
+            self.logger.info(f"Using local DEM (skipping hoehendaten.de): {local_dem_path}")
+            if not os.path.exists(local_dem_path):
+                raise Exception(f"Lokales DEM nicht gefunden: {local_dem_path}")
+            dem_layer = QgsRasterLayer(local_dem_path, "DGM (lokal)")
             if not dem_layer.isValid():
-                raise Exception(f"DEM konnte nicht geladen werden: {dem_path}")
-
-            # Save DEM mosaic to results directory
-            dem_result_name = f"WKA_{int(get_centroid(surfaces['crane']['geometry']).x())}_{int(get_centroid(surfaces['crane']['geometry']).y())}_DEM.tif"
+                raise Exception(f"Lokales DEM ist ungültig: {local_dem_path}")
+            dem_path = local_dem_path
+            dem_result_name = (
+                f"WKA_{int(get_centroid(surfaces['crane']['geometry']).x())}_"
+                f"{int(get_centroid(surfaces['crane']['geometry']).y())}_DEM.tif"
+            )
             dem_result_path = results_dir / dem_result_name
-            shutil.copy2(dem_path, dem_result_path)
-            self.logger.info(f"DEM mosaic saved to results: {dem_result_path}")
+            try:
+                shutil.copy2(local_dem_path, dem_result_path)
+            except Exception as e:
+                self.logger.warning(f"Could not copy local DEM into results: {e}")
+            self.progress_updated.emit(50, "✓ Lokales DEM geladen")
+        else:
+            self.progress_updated.emit(40, "🌍 DEM-Daten werden heruntergeladen...")
+            self.logger.info("Starting DEM download...")
 
-            self.progress_updated.emit(50, "✓ DGM-Mosaik erstellt")
+        if not local_dem_path:
+            try:
+                # Use crane pad as reference for DEM extent (it should cover all surfaces)
+                # But we buffer generously to cover all surfaces
+                # Only include geometries that exist (boom and rotor are optional)
+                all_geoms = [
+                    surfaces['crane']['geometry'],
+                    surfaces['foundation']['geometry'],
+                ]
 
-        except Exception as e:
-            self.logger.error(f"DEM Download failed: {e}", exc_info=True)
-            raise
+                # Add optional surfaces if they exist
+                if surfaces['boom'] is not None:
+                    all_geoms.append(surfaces['boom']['geometry'])
+                if surfaces['rotor'] is not None:
+                    all_geoms.append(surfaces['rotor']['geometry'])
+                if surfaces['road'] is not None:
+                    all_geoms.append(surfaces['road']['geometry'])
+
+                # Create union of all geometries
+                combined_geom = all_geoms[0]
+                for geom in all_geoms[1:]:
+                    combined_geom = combined_geom.combine(geom)
+
+                temp_dem_path = tempfile.mktemp(suffix='.tif', prefix='dem_mosaic_')
+                self.logger.info(f"Temp DEM path: {temp_dem_path}")
+
+                downloader = DEMDownloader(
+                    cache_dir=str(cache_dir),
+                    force_refresh=self.params['force_refresh']
+                )
+
+                self.progress_updated.emit(42, "⬇️ Lade DEM-Kacheln...")
+                dem_path = downloader.download_for_geometry(
+                    combined_geom,
+                    temp_dem_path,
+                    buffer_m=250
+                )
+
+                self.logger.info(f"DEM downloaded: {dem_path}")
+
+                dem_layer = QgsRasterLayer(dem_path, "DGM Mosaik")
+                if not dem_layer.isValid():
+                    raise Exception(f"DEM konnte nicht geladen werden: {dem_path}")
+
+                # Save DEM mosaic to results directory
+                dem_result_name = f"WKA_{int(get_centroid(surfaces['crane']['geometry']).x())}_{int(get_centroid(surfaces['crane']['geometry']).y())}_DEM.tif"
+                dem_result_path = results_dir / dem_result_name
+                shutil.copy2(dem_path, dem_result_path)
+                self.logger.info(f"DEM mosaic saved to results: {dem_result_path}")
+
+                self.progress_updated.emit(50, "✓ DGM-Mosaik erstellt")
+
+            except Exception as e:
+                self.logger.error(f"DEM Download failed: {e}", exc_info=True)
+                raise
 
         # === STEP 5: Multi-Surface Optimization ===
         self.progress_updated.emit(52, "⚙️ Optimiere Kranstellflächen-Höhe...")
@@ -810,6 +836,26 @@ class WorkflowWorker(QObject):
                         )
                     except Exception as e:
                         self.logger.warning(f"Mass-haul analysis skipped: {e}")
+
+                # Optional slope-stability XML export — one section per
+                # longitudinal profile, suitable as Slide/GeoStudio interchange.
+                if self.params.get('export_slope_stability', False) and long_profiles_raw:
+                    try:
+                        sections = []
+                        for i, p in enumerate(long_profiles_raw):
+                            sections.append(slope_stability_export.section_from_profile(
+                                name=f"long_profile_{i+1}",
+                                profile=p,
+                                materials=slope_stability_export.default_materials(),
+                            ))
+                        slope_path = Path(results_dir) / "slope_stability.xml"
+                        slope_stability_export.write_slope_xml(
+                            str(slope_path), sections,
+                            project_name=f"WKA_{int(get_centroid(surfaces['crane']['geometry']).x())}",
+                        )
+                        self.logger.info(f"Slope-stability XML written: {slope_path}")
+                    except Exception as e:
+                        self.logger.warning(f"Slope-stability export skipped: {e}")
 
             profiles = all_profiles
             profile_pngs = [p['png_path'] for p in profiles if 'png_path' in p]

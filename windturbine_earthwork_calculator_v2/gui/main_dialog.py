@@ -1083,10 +1083,54 @@ class MainDialog(QDialog):
         group_options.setLayout(form_options)
         layout.addWidget(group_options)
 
+        # Local DEM (drone-derived GeoTIFF) — skips hoehendaten.de download.
+        group_local_dem = QGroupBox("Lokales DEM (z. B. Drohnenbefliegung)")
+        form_local = QFormLayout()
+        self.input_local_dem = QLineEdit()
+        self.input_local_dem.setPlaceholderText(
+            "Optional: Pfad zu einer eigenen DEM-Datei (GeoTIFF). "
+            "Wenn gesetzt, wird die hoehendaten.de-Abfrage übersprungen."
+        )
+        btn_browse_dem = QPushButton("Durchsuchen...")
+        btn_browse_dem.clicked.connect(self._browse_local_dem)
+        local_dem_row = QHBoxLayout()
+        local_dem_row.addWidget(self.input_local_dem)
+        local_dem_row.addWidget(btn_browse_dem)
+        form_local.addRow("DEM-Datei:", local_dem_row)
+        group_local_dem.setLayout(form_local)
+        layout.addWidget(group_local_dem)
+
+        # Extra exports / analyses (opt-in, non-fatal).
+        group_extra = QGroupBox("Zusätzliche Auswertungen / Exporte (optional)")
+        form_extra = QFormLayout()
+        self.input_export_slope_stability = QCheckBox(
+            "Slope-Stability-XML (Querschnitt für Slide/GeoStudio) exportieren"
+        )
+        self.input_export_slope_stability.setChecked(False)
+        form_extra.addRow(self.input_export_slope_stability)
+        info_extra = QLabel(
+            "<i>Strata- und Bauphasen-Auswertung erscheinen automatisch im "
+            "Bericht, sofern Volumen und Flächen verfügbar sind.</i>"
+        )
+        info_extra.setWordWrap(True)
+        info_extra.setStyleSheet("color: gray; font-size: 10px;")
+        form_extra.addRow(info_extra)
+        group_extra.setLayout(form_extra)
+        layout.addWidget(group_extra)
+
         layout.addStretch()
         widget.setLayout(layout)
         scroll.setWidget(widget)
         return scroll
+
+    def _browse_local_dem(self):
+        """File picker for a user-supplied DEM (GeoTIFF)."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Lokales DEM auswählen", "",
+            "GeoTIFF (*.tif *.tiff);;Alle Dateien (*)",
+        )
+        if path:
+            self.input_local_dem.setText(path)
 
     def _create_multisite_report_tab(self):
         """Create multi-site comparison report tab."""
@@ -2063,6 +2107,8 @@ class MainDialog(QDialog):
             # Output parameters
             'workspace': self.input_workspace.text().strip(),
             'force_refresh': self.input_force_refresh.isChecked(),
+            'local_dem_path': self.input_local_dem.text().strip() or None,
+            'export_slope_stability': self.input_export_slope_stability.isChecked(),
 
             # Uncertainty analysis parameters
             'uncertainty_enabled': self.input_uncertainty_enabled.isChecked(),

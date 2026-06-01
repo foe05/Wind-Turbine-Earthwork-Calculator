@@ -54,6 +54,32 @@ Vier weitere QGIS-unabhängige Kern-Module aus der Wettbewerbsanalyse
   Machine-Control (Trimble/Topcon/Leica) + BIM. Stdlib-XML, Adapter aus
   `MeshData`. **9/9.** *(Inspiration: RoadEng, Civil 3D.)*
 
+### Weitere Feature-Module (Stand 2026-06-01)
+
+Fünf zusätzliche QGIS-unabhängige Module aus der erweiterten Recherche,
+jeweils mit plain-Python-Tests:
+
+- **`core/strata_quantities.py`** — Bodenschichten-Aufschlüsselung
+  (Mutterboden → Frostschutz → Schotter), Kosten + CO₂ je Schicht. **14/14.**
+- **`core/construction_phases.py`** — Bauphasen-Planung mit Default-Plan
+  (Wegebau → Kranstellfläche → Fundament → Restarbeiten). **11/11.**
+- **`core/slope_stability_export.py`** — Querschnitt-XML mit Material- +
+  Piezometer-Daten als Slide/GeoStudio-Interchange. **12/12.**
+- **`core/variant_comparison.py`** — Side-by-Side HTML-Vergleich mehrerer
+  Planungs-Varianten. **9/9.**
+- `docs/PYTHON_API.md` — dokumentierte Public-API für headless Nutzung aller
+  QGIS-unabhängigen Module.
+
+**Anbindung (2026-06-01):**
+- Strata + Bauphasen: automatische Sektionen im Single-Site-Report
+  (Default-Stacks/-Phasen, abschaltbar durch Konfiguration).
+- Slope-Stability: opt-in Workflow-Schritt → `slope_stability.xml` aus den
+  Längsprofilen.
+- Variantenvergleich: bleibt als Python-API; Beispielcode in `PYTHON_API.md`.
+- **Drohnen-DEM:** GUI-Filepicker für ein lokales DEM (GeoTIFF) im
+  Ausgabe-Tab; STEP 4 überspringt die hoehendaten.de-Abfrage wenn ein Pfad
+  gesetzt ist.
+
 **GUI-/Workflow-Anbindung erledigt (2026-05-29):**
 - **LandXML:** `workflow_runner._export_meshes` schreibt zusätzlich `surfaces.xml`
   (TIN je Fläche) aus den gesammelten MeshData.

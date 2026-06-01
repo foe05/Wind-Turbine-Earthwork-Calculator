@@ -31,6 +31,8 @@ from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
 from .uncertainty import UncertaintyAnalysisResult
 from .co2_balance import CO2Calculator
+from .strata_quantities import StrataCalculator, StratumMode, default_stack
+from .construction_phases import PhasePlanner, default_phases
 
 
 class ReportGenerator:
@@ -124,6 +126,8 @@ class ReportGenerator:
         html_quality = self._generate_quality_assurance_section() if self.results.get('stabilization') else ""
         html_rotation = self._generate_rotation_section()
         html_mass_haul = self._generate_mass_haul_section()
+        html_strata = self._generate_strata_section(config)
+        html_phases = self._generate_phases_section(config)
         html_co2 = self._generate_co2_section(config)
         html_overview = self._generate_overview_section(overview_map_path)
         html_profiles = self._generate_profiles_section(profile_pngs)
@@ -149,6 +153,8 @@ class ReportGenerator:
         {html_quality}
         {html_rotation}
         {html_mass_haul}
+        {html_strata}
+        {html_phases}
         {html_co2}
         {html_overview}
         {html_profiles}
@@ -1550,6 +1556,124 @@ class ReportGenerator:
             volle 3D-Volumen. Für eine echte Trassenbetrachtung ein
             Zufahrts-Längsprofil verwenden.
         </p>
+    </div>
+"""
+
+    def _generate_strata_section(self, config: Optional[Dict] = None) -> str:
+        """Bodenschichten-Aufschlüsselung (default stack); non-fatal."""
+        try:
+            cut = float(self.results.get('total_cut', 0.0) or 0.0)
+            fill = float(self.results.get('total_fill', 0.0) or 0.0)
+            # Use the crane-pad area as the representative platform area.
+            surfaces = self.results.get('surfaces', {}) or {}
+            crane = surfaces.get('kranstellflaeche', {}) or {}
+            area = float(crane.get('area', 0.0) or 0.0)
+            if area <= 0 or (cut <= 0 and fill <= 0):
+                return ""
+            calc = StrataCalculator(default_stack())
+            cut_res = calc.split(cut, area, mode=StratumMode.CUT)
+            fill_res = calc.split(fill, area, mode=StratumMode.FILL)
+        except Exception as e:
+            self.logger.warning(f"Strata section skipped: {e}")
+            return ""
+
+        def _rows(result):
+            return "".join(
+                f"<tr><td>{html.escape(q.name)}</td>"
+                f"<td>{q.depth_m:.2f} m</td>"
+                f"<td>{q.volume_m3:,.0f} m³</td>"
+                f"<td>{q.cost_eur:,.0f} €</td>"
+                f"<td>{q.co2_kg:,.0f} kg</td></tr>"
+                for q in result.layers
+            )
+
+        cut_rem = (f"<p><strong>Hinweis:</strong> Tiefer als der konfigurierte "
+                   f"Schicht-Stapel — {cut_res.remainder_m3:,.0f} m³ Restmenge "
+                   f"nicht zugeordnet.</p>") if cut_res.remainder_m3 > 0 else ""
+        fill_rem = (f"<p><strong>Hinweis:</strong> Höher als der konfigurierte "
+                    f"Schicht-Stapel — {fill_res.remainder_m3:,.0f} m³ Restmenge "
+                    f"nicht zugeordnet.</p>") if fill_res.remainder_m3 > 0 else ""
+
+        return f"""
+    <div class="section">
+        <h2>🪨 Bodenschichten (Strata-Quantities)</h2>
+        <p>Aufschlüsselung der Erdbewegung nach Schichten des Bodenaufbaus
+        (Mutterboden → Frostschutz → Schottertragschicht). Kosten enthalten
+        Aushub bzw. Einbau und – beim Abtrag – auch die Entsorgung.</p>
+
+        <h3>Abtrag (von oben abgetragen)</h3>
+        <table>
+            <tr><th>Schicht</th><th>Tiefe</th><th>Volumen</th><th>Kosten</th><th>CO₂e</th></tr>
+            {_rows(cut_res)}
+            <tr style="font-weight: bold;"><td colspan="2">Summe</td>
+                <td>{cut_res.total_volume_m3:,.0f} m³</td>
+                <td>{cut_res.total_cost_eur:,.0f} €</td>
+                <td>{cut_res.total_co2_kg:,.0f} kg</td></tr>
+        </table>
+        {cut_rem}
+
+        <h3>Auftrag (von unten aufgebaut)</h3>
+        <table>
+            <tr><th>Schicht</th><th>Höhe</th><th>Volumen</th><th>Kosten</th><th>CO₂e</th></tr>
+            {_rows(fill_res)}
+            <tr style="font-weight: bold;"><td colspan="2">Summe</td>
+                <td>{fill_res.total_volume_m3:,.0f} m³</td>
+                <td>{fill_res.total_cost_eur:,.0f} €</td>
+                <td>{fill_res.total_co2_kg:,.0f} kg</td></tr>
+        </table>
+        {fill_rem}
+    </div>
+"""
+
+    def _generate_phases_section(self, config: Optional[Dict] = None) -> str:
+        """Bauphasen-Verteilung (default phases); non-fatal."""
+        try:
+            cut = float(self.results.get('total_cut', 0.0) or 0.0)
+            fill = float(self.results.get('total_fill', 0.0) or 0.0)
+            if cut <= 0 and fill <= 0:
+                return ""
+            cfg = config or {}
+            planner = PhasePlanner(
+                default_phases(),
+                cut_cost_per_m3=float(cfg.get('cost_cut', 8.0)),
+                fill_cost_per_m3=float(cfg.get('cost_fill', 12.0)),
+            )
+            plan = planner.plan(total_cut_m3=cut, total_fill_m3=fill)
+        except Exception as e:
+            self.logger.warning(f"Phases section skipped: {e}")
+            return ""
+
+        rows = "".join(
+            f"<tr><td>{html.escape(p.name)}</td>"
+            f"<td>Tag {p.start_day}–{p.end_day}</td>"
+            f"<td>{p.cut_m3:,.0f} m³</td>"
+            f"<td>{p.fill_m3:,.0f} m³</td>"
+            f"<td>{p.cost_eur:,.0f} €</td>"
+            f"<td>{p.co2_kg:,.0f} kg</td></tr>"
+            for p in plan.phases
+        )
+        remainder = ""
+        if plan.unassigned_cut_m3 > 0 or plan.unassigned_fill_m3 > 0:
+            remainder = (f"<p><strong>Nicht zugeordnet:</strong> "
+                         f"{plan.unassigned_cut_m3:,.0f} m³ Abtrag, "
+                         f"{plan.unassigned_fill_m3:,.0f} m³ Auftrag.</p>")
+
+        return f"""
+    <div class="section">
+        <h2>📅 Bauphasen-Verteilung</h2>
+        <p>Verteilung der Erdbewegung auf die Standardphasen des
+        WEA-Bauablaufs (Wegebau → Kranstellfläche → Fundament → Restarbeiten).
+        Gesamtbauzeit: {plan.total_duration_days} Tage.</p>
+
+        <table>
+            <tr><th>Phase</th><th>Zeitraum</th><th>Abtrag</th><th>Auftrag</th>
+                <th>Kosten</th><th>CO₂e</th></tr>
+            {rows}
+            <tr style="font-weight: bold;"><td colspan="4">Gesamt</td>
+                <td>{plan.total_cost_eur:,.0f} €</td>
+                <td>{plan.total_co2_kg:,.0f} kg</td></tr>
+        </table>
+        {remainder}
     </div>
 """
 
