@@ -10,6 +10,7 @@ Version: 2.0.0 - Multi-Surface Extension
 import os
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 import tempfile
 
 from qgis.PyQt.QtCore import QObject, QThread, pyqtSignal
