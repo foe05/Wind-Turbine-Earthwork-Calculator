@@ -52,23 +52,41 @@ streamlit_app/
   pyproject.toml      # streamlit, shapely, rasterio, geopandas, scipy, ezdxf, weasyprint, ...
   app/
     Home.py           # Streamlit entry: sidebar params, DXF upload, run-pipeline, results
+    pages/            # additional Streamlit pages (1-5: Varianten, Multi-Site, Unsicherheit, Boden, 3D)
     core/             # ported plugin modules (NO QGIS imports)
-      geometry.py     # shapely port of utils/geometry_utils.py
-      validation.py   # input validation, single-language German
-      dxf_import.py   # ezdxf + multi-strategy boundary trace; CRS auto-detect
-      dem_download.py # hoehendaten.de client + rasterio.merge mosaic (nodata sanity-check)
-      earthwork.py    # pixel-wise cut/fill + height sweep (coarse → fine)
-      multi_surface.py# SurfaceType/Config/Project + orchestration
-      profiles.py     # matplotlib Agg cross/longitudinal sections
-      report.py       # Jinja2 + WeasyPrint HTML/PDF; overview map via matplotlib
+      geometry.py             # shapely port of utils/geometry_utils.py
+      validation.py           # input validation, single-language German
+      dxf_import.py           # ezdxf + multi-strategy boundary trace; CRS auto-detect
+      dem_download.py         # hoehendaten.de client + rasterio.merge mosaic (nodata sanity-check)
+      earthwork.py            # pixel-wise cut/fill + height sweep (coarse → fine)
+      multi_surface.py        # SurfaceType/Config/Project + orchestration with Boom/Rotor/Road sweeps
+      slope_volume.py         # boundary-discretized slope-volume approximation
+      profiles.py             # matplotlib Agg cross/longitudinal sections
+      report.py               # Jinja2 + WeasyPrint HTML/PDF; overview map via matplotlib
+      rotation.py             # candidate-angle sweep with injectable evaluator
+      placement.py            # STRtree-accelerated constraint checks
+      mass_haul.py            # cumulative ordinate + balance points + haul integral
+      co2.py                  # emission-factor breakdown
+      phases.py               # construction-phase volume/cost/CO2 distribution
+      strata.py               # soil-stack peeling (Mutterboden / Frostschutz / Schotter)
+      variants.py             # side-by-side HTML comparison
+      uncertainty.py          # Monte Carlo + LHS + sensitivity ranking
+      soil_stabilization.py   # DIN 18196 lime dosage + RStO 12 gravel layer
+      bgr_api.py              # BGR BÜK200 WFS client (pyproj transform)
+      landxml.py              # LandXML 1.2 TIN export
+      slope_stability.py      # slope-stability XML (geotechnical interchange)
+      mesh.py                 # OBJ/STL/glTF/Three.js viewer; rasterio DEM→mesh
+      geopackage.py           # multi-surface GeoPackage via geopandas
+      park_optimizer.py       # LP + MILP via scipy.optimize for park-wide transport
+      site_data.py            # SiteData + MultiSiteProject aggregation
+      multi_site_report.py    # HTML + XLSX multi-site comparison
     services/
-      pipeline.py     # end-to-end orchestration (DXF→DEM→Calc→Profiles→Report)
+      pipeline.py     # end-to-end orchestration (DXF→DEM→Calc→Profiles→Report→Exports)
     templates/
       report.html     # Jinja2 report template
   tests/
     regression/       # wea45 volume regression (same numbers as the plugin)
-    test_*.py         # 83 tests across geometry, validation, dxf, dem, earthwork,
-                      #   multi_surface, profiles, report, e2e_pipeline
+    test_*.py         # 140 tests across all 25 ported modules
 ```
 
 QGIS-API substitutions used while porting:
@@ -83,7 +101,7 @@ QGIS-API substitutions used while porting:
 | `QThread` / multiprocessing | `concurrent.futures` or `dramatiq`/`rq` (job-dependent) |
 | PyQt5 dialog | Streamlit `st.tabs` / `st.sidebar` |
 
-What is NOT yet ported (deferred beyond MVP): slope/embankment volume geometry, rotation optimizer, placement constraints, Monte-Carlo uncertainty, park optimizer (MILP), mass-haul, 3D mesh exporters, LandXML, slope-stability XML, BGR soil API, CO₂ balance, construction phases, soil stabilization, strata quantities, multi-site reports. All of these have plugin sources available; they get added module-by-module behind the regression guard.
+Plugin feature parity reached (2026-06-03). All 25 core modules ported; 140 tests pass including the authoritative wea45 regression. The Streamlit slope-volume implementation is an approximation (boundary-discretized Δh/tan(angle) band, 5-10% typical accuracy) — the plugin still has the geometrically exact slope-polygon construction, which can be ported later if higher precision is required for a specific customer.
 
 ## Build, Test, Lint
 
