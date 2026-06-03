@@ -1,10 +1,9 @@
 """
 Multi-Surface-Projekt-Container und Berechnungs-Orchestrierung.
 
-Pragmatischer MVP-Port von core/multi_surface_calculator.py + surface_types.py.
-Volle Plugin-Tiefe (Boom-Slope, Rotor-Offset, Road-Slope-Sweep, Connection-Edges)
-folgt iterativ — hier reicht: Foundation-Cut/Fill auf FOK-depth, Crane-Pad mit
-optionalem Höhen-Sweep, optional Boom/Rotor/Holms/Road mit fester Höhe.
+Vollausbau: Foundation + Crane-Pad (mit optionalem Höhen-Sweep), Boom mit
+Slope-Sweep, Rotor-Storage mit Offset-Sweep, Road-Access mit Slope-Sweep,
+Holme. Optionale Slope-/Böschungs-Volumen-Approximation (siehe slope_volume).
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ from typing import Optional
 from shapely.geometry.base import BaseGeometry
 
 from .earthwork import CutFillResult, coarse_then_fine_sweep, cut_fill_for_polygon
+from .slope_volume import SlopeVolumeResult, estimate_slope_volume
 
 
 class SurfaceType(str, Enum):
@@ -47,18 +47,14 @@ class HeightMode(str, Enum):
 
 @dataclass
 class SurfaceConfig:
-    """Ein Surface im Multi-Surface-Projekt."""
-
     surface_type: SurfaceType
     polygon: BaseGeometry
     height_mode: HeightMode = HeightMode.FIXED
-    height_value: Optional[float] = None  # m ü.NN bei FIXED
+    height_value: Optional[float] = None
 
 
 @dataclass
 class MultiSurfaceProject:
-    """Projektkonfiguration. Mindestens crane_pad + foundation + fok."""
-
     crane_pad: SurfaceConfig
     foundation: SurfaceConfig
     fok: float
@@ -70,12 +66,35 @@ class MultiSurfaceProject:
     road_access: Optional[SurfaceConfig] = None
     holms: Optional[list[BaseGeometry]] = None
 
-    # Höhen-Sweep für Kranstellfläche
+    # Crane-Pad-Sweep
     search_range_below_fok: float = 0.5
     search_range_above_fok: float = 0.5
     coarse_step: float = 0.1
     fine_step: float = 0.01
-    optimize_objective: str = "min_total"  # 'min_total' | 'min_net' | 'min_cut'
+    optimize_objective: str = "min_total"
+
+    # Böschungs-Approximation
+    include_slope_volume: bool = True
+    slope_angle_deg: float = 45.0
+    slope_sample_spacing_m: float = 1.0
+
+    # Boom-Slope-Sweep (% in Prozent)
+    boom_slope_optimize: bool = False
+    boom_slope_min_percent: float = -4.0
+    boom_slope_max_percent: float = 4.0
+    boom_slope_step_percent: float = 0.5
+
+    # Rotor-Offset-Sweep (m relativ zur Kran-OK)
+    rotor_offset_optimize: bool = False
+    rotor_offset_min_m: float = -0.5
+    rotor_offset_max_m: float = 0.5
+    rotor_offset_step_m: float = 0.05
+
+    # Road-Slope-Sweep (% in Prozent)
+    road_slope_optimize: bool = False
+    road_slope_min_percent: float = -8.0
+    road_slope_max_percent: float = 8.0
+    road_slope_step_percent: float = 1.0
 
     @property
     def search_min_height(self) -> float:
@@ -92,21 +111,43 @@ class MultiSurfaceProject:
 
 @dataclass
 class MultiSurfaceResult:
-    """Aggregierte Ergebnisse aller Surfaces für einen Berechnungslauf."""
-
-    crane_optimum_height: float  # m ü.NN (Plattformoberkante = Sohle + Schotter)
+    crane_optimum_height: float
     surface_results: dict[SurfaceType, CutFillResult]
     fok: float
     foundation_depth: float
     gravel_thickness: float
+    slope_results: dict[SurfaceType, SlopeVolumeResult] = field(default_factory=dict)
+    boom_slope_percent: float = 0.0
+    rotor_offset_m: float = 0.0
+    road_slope_percent: float = 0.0
 
     @property
     def total_cut_m3(self) -> float:
-        return sum(r.cut_m3 for r in self.surface_results.values())
+        platform = sum(r.cut_m3 for r in self.surface_results.values())
+        slope = sum(r.cut_m3 for r in self.slope_results.values())
+        return platform + slope
 
     @property
     def total_fill_m3(self) -> float:
+        platform = sum(r.fill_m3 for r in self.surface_results.values())
+        slope = sum(r.fill_m3 for r in self.slope_results.values())
+        return platform + slope
+
+    @property
+    def total_platform_cut_m3(self) -> float:
+        return sum(r.cut_m3 for r in self.surface_results.values())
+
+    @property
+    def total_platform_fill_m3(self) -> float:
         return sum(r.fill_m3 for r in self.surface_results.values())
+
+    @property
+    def total_slope_cut_m3(self) -> float:
+        return sum(r.cut_m3 for r in self.slope_results.values())
+
+    @property
+    def total_slope_fill_m3(self) -> float:
+        return sum(r.fill_m3 for r in self.slope_results.values())
 
     @property
     def net_m3(self) -> float:
@@ -122,10 +163,15 @@ class MultiSurfaceResult:
             "fok": round(self.fok, 3),
             "foundation_depth": round(self.foundation_depth, 3),
             "gravel_thickness": round(self.gravel_thickness, 3),
+            "boom_slope_percent": round(self.boom_slope_percent, 2),
+            "rotor_offset_m": round(self.rotor_offset_m, 3),
+            "road_slope_percent": round(self.road_slope_percent, 2),
             "total_cut_m3": round(self.total_cut_m3, 1),
             "total_fill_m3": round(self.total_fill_m3, 1),
             "net_m3": round(self.net_m3, 1),
             "total_moved_m3": round(self.total_moved_m3, 1),
+            "total_slope_cut_m3": round(self.total_slope_cut_m3, 1),
+            "total_slope_fill_m3": round(self.total_slope_fill_m3, 1),
             "surfaces": {
                 t.value: {
                     "plateau_height": round(r.plateau_height, 3),
@@ -135,18 +181,94 @@ class MultiSurfaceResult:
                     "terrain_min": round(r.terrain_min, 2),
                     "terrain_max": round(r.terrain_max, 2),
                     "terrain_mean": round(r.terrain_mean, 2),
+                    "slope_cut_m3": round(self.slope_results[t].cut_m3, 1)
+                    if t in self.slope_results else 0.0,
+                    "slope_fill_m3": round(self.slope_results[t].fill_m3, 1)
+                    if t in self.slope_results else 0.0,
+                    "slope_area_m2": round(self.slope_results[t].slope_area_m2, 1)
+                    if t in self.slope_results else 0.0,
                 }
                 for t, r in self.surface_results.items()
             },
         }
 
 
+def _sweep_boom_slope(
+    dem_path: str | Path,
+    boom_polygon: BaseGeometry,
+    crane_optimum: float,
+    project: MultiSurfaceProject,
+) -> tuple[float, CutFillResult]:
+    """Sweep Boom-Plateau-Höhe als crane_optimum + delta (parametrisiert über Slope)."""
+    if project.boom_slope_step_percent <= 0:
+        raise ValueError("boom_slope_step_percent muss > 0 sein")
+    best: Optional[CutFillResult] = None
+    best_slope = 0.0
+    pct = project.boom_slope_min_percent
+    # Approximation: Slope wird über mittlere Distanz zur Kran-OK umgerechnet
+    # in Höhendelta. Wir nehmen 30 m als Plug-in-Mittelwert.
+    avg_distance_m = 30.0
+    while pct <= project.boom_slope_max_percent + 1e-9:
+        delta = avg_distance_m * (pct / 100.0)
+        h = crane_optimum + delta
+        r = cut_fill_for_polygon(dem_path, boom_polygon, h)
+        if best is None or r.total_moved_m3 < best.total_moved_m3:
+            best = r
+            best_slope = pct
+        pct += project.boom_slope_step_percent
+    return best_slope, best  # type: ignore[return-value]
+
+
+def _sweep_rotor_offset(
+    dem_path: str | Path,
+    rotor_polygon: BaseGeometry,
+    crane_optimum: float,
+    project: MultiSurfaceProject,
+) -> tuple[float, CutFillResult]:
+    if project.rotor_offset_step_m <= 0:
+        raise ValueError("rotor_offset_step_m muss > 0 sein")
+    best: Optional[CutFillResult] = None
+    best_offset = 0.0
+    o = project.rotor_offset_min_m
+    while o <= project.rotor_offset_max_m + 1e-9:
+        h = crane_optimum + o
+        r = cut_fill_for_polygon(dem_path, rotor_polygon, h)
+        if best is None or r.total_moved_m3 < best.total_moved_m3:
+            best = r
+            best_offset = o
+        o += project.rotor_offset_step_m
+    return best_offset, best  # type: ignore[return-value]
+
+
+def _sweep_road_slope(
+    dem_path: str | Path,
+    road_polygon: BaseGeometry,
+    crane_optimum: float,
+    project: MultiSurfaceProject,
+) -> tuple[float, CutFillResult]:
+    if project.road_slope_step_percent <= 0:
+        raise ValueError("road_slope_step_percent muss > 0 sein")
+    best: Optional[CutFillResult] = None
+    best_slope = 0.0
+    pct = project.road_slope_min_percent
+    avg_distance_m = 50.0  # Typische Zufahrtslänge
+    while pct <= project.road_slope_max_percent + 1e-9:
+        delta = avg_distance_m * (pct / 100.0)
+        h = crane_optimum + delta
+        r = cut_fill_for_polygon(dem_path, road_polygon, h)
+        if best is None or r.total_moved_m3 < best.total_moved_m3:
+            best = r
+            best_slope = pct
+        pct += project.road_slope_step_percent
+    return best_slope, best  # type: ignore[return-value]
+
+
 def calculate_multi_surface(
     dem_path: str | Path, project: MultiSurfaceProject
 ) -> MultiSurfaceResult:
-    """Komplette Multi-Surface-Berechnung gegen ein DEM-Mosaik."""
-
+    """Vollausbau-Berechnung Multi-Surface gegen ein DEM-Mosaik."""
     results: dict[SurfaceType, CutFillResult] = {}
+    slope_results: dict[SurfaceType, SlopeVolumeResult] = {}
 
     # Foundation: festes Plateau auf FOK - depth
     foundation_planum = project.foundation_bottom_elevation
@@ -154,7 +276,7 @@ def calculate_multi_surface(
         dem_path, project.foundation.polygon, foundation_planum
     )
 
-    # Crane Pad: Plateau ist Optimum - Schotter; optional über Höhen-Sweep
+    # Crane Pad
     if project.crane_pad.height_mode == HeightMode.OPTIMIZED:
         h_lo = project.search_min_height - project.gravel_thickness
         h_hi = project.search_max_height - project.gravel_thickness
@@ -181,15 +303,55 @@ def calculate_multi_surface(
             dem_path, project.crane_pad.polygon, crane_planum
         )
 
-    # Boom / Rotor Storage / Road Access mit fester Höhe (MVP)
-    for surface in (project.boom, project.rotor_storage, project.road_access):
-        if surface is None or surface.height_value is None:
-            continue
-        results[surface.surface_type] = cut_fill_for_polygon(
-            dem_path, surface.polygon, surface.height_value
-        )
+    # Boom — optional Sweep
+    boom_slope = 0.0
+    if project.boom is not None:
+        if project.boom_slope_optimize:
+            boom_slope, r_boom = _sweep_boom_slope(
+                dem_path, project.boom.polygon, crane_optimum, project
+            )
+        else:
+            h = (
+                project.boom.height_value
+                if project.boom.height_value is not None
+                else crane_optimum
+            )
+            r_boom = cut_fill_for_polygon(dem_path, project.boom.polygon, h)
+        results[SurfaceType.BOOM] = r_boom
 
-    # Holms: aggregiert auf FOK (Plugin-Default)
+    # Rotor Storage — optional Sweep
+    rotor_offset = 0.0
+    if project.rotor_storage is not None:
+        if project.rotor_offset_optimize:
+            rotor_offset, r_rotor = _sweep_rotor_offset(
+                dem_path, project.rotor_storage.polygon, crane_optimum, project
+            )
+        else:
+            h = (
+                project.rotor_storage.height_value
+                if project.rotor_storage.height_value is not None
+                else crane_optimum
+            )
+            r_rotor = cut_fill_for_polygon(dem_path, project.rotor_storage.polygon, h)
+        results[SurfaceType.ROTOR_STORAGE] = r_rotor
+
+    # Road Access — optional Sweep
+    road_slope = 0.0
+    if project.road_access is not None:
+        if project.road_slope_optimize:
+            road_slope, r_road = _sweep_road_slope(
+                dem_path, project.road_access.polygon, crane_optimum, project
+            )
+        else:
+            h = (
+                project.road_access.height_value
+                if project.road_access.height_value is not None
+                else crane_optimum
+            )
+            r_road = cut_fill_for_polygon(dem_path, project.road_access.polygon, h)
+        results[SurfaceType.ROAD_ACCESS] = r_road
+
+    # Holms aggregiert
     if project.holms:
         cut_total = 0.0
         fill_total = 0.0
@@ -210,10 +372,46 @@ def calculate_multi_surface(
             num_pixels=0,
         )
 
+    # Slope/Böschungs-Volumen pro Surface
+    if project.include_slope_volume:
+        if SurfaceType.CRANE_PAD in results:
+            slope_results[SurfaceType.CRANE_PAD] = estimate_slope_volume(
+                dem_path,
+                project.crane_pad.polygon,
+                results[SurfaceType.CRANE_PAD].plateau_height,
+                project.slope_angle_deg,
+                project.slope_sample_spacing_m,
+            )
+        if SurfaceType.FOUNDATION in results:
+            slope_results[SurfaceType.FOUNDATION] = estimate_slope_volume(
+                dem_path,
+                project.foundation.polygon,
+                results[SurfaceType.FOUNDATION].plateau_height,
+                project.slope_angle_deg,
+                project.slope_sample_spacing_m,
+            )
+        for st, src_cfg in (
+            (SurfaceType.BOOM, project.boom),
+            (SurfaceType.ROTOR_STORAGE, project.rotor_storage),
+            (SurfaceType.ROAD_ACCESS, project.road_access),
+        ):
+            if src_cfg is not None and st in results:
+                slope_results[st] = estimate_slope_volume(
+                    dem_path,
+                    src_cfg.polygon,
+                    results[st].plateau_height,
+                    project.slope_angle_deg,
+                    project.slope_sample_spacing_m,
+                )
+
     return MultiSurfaceResult(
         crane_optimum_height=crane_optimum,
         surface_results=results,
         fok=project.fok,
         foundation_depth=project.foundation_depth,
         gravel_thickness=project.gravel_thickness,
+        slope_results=slope_results,
+        boom_slope_percent=boom_slope,
+        rotor_offset_m=rotor_offset,
+        road_slope_percent=road_slope,
     )
