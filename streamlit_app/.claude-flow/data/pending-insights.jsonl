@@ -10,3 +10,14 @@
 {"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/app/core/dxf_import.py","timestamp":1780500360740,"sessionId":null}
 {"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/app/core/dxf_import.py","timestamp":1780500407763,"sessionId":null}
 {"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/tests/test_earthwork.py","timestamp":1780500725863,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/tests/test_profiles.py","timestamp":1780500833955,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/tests/test_profiles.py","timestamp":1780500835370,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/app/templates/report.html","timestamp":1780500888138,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/app/core/report.py","timestamp":1780500910921,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/tests/test_report.py","timestamp":1780500926056,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/app/services/__init__.py","timestamp":1780500968609,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/app/services/pipeline.py","timestamp":1780501003035,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/app/Home.py","timestamp":1780501039273,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/tests/test_e2e_pipeline.py","timestamp":1780501067905,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/streamlit_app/tests/test_e2e_pipeline.py","timestamp":1780501131737,"sessionId":null}
+{"type":"edit","file":"/home/claude-dev/projects/Wind-Turbine-Earthwork-Calculator/CLAUDE.md","timestamp":1780501338781,"sessionId":null}
