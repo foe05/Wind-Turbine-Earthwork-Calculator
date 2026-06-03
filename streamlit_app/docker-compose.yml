@@ -1,0 +1,31 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      DATABASE_URL: postgresql+psycopg://wtec:wtec@db:5432/wtec
+      DEM_CACHE_DIR: /data/dem_cache
+      UPLOAD_DIR: /data/uploads
+      EXPORT_DIR: /data/exports
+      STREAMLIT_SERVER_MAX_UPLOAD_SIZE: "512"
+    volumes:
+      - ./app:/app/app:ro
+      - ./data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: wtec
+      POSTGRES_PASSWORD: wtec
+      POSTGRES_DB: wtec
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wtec"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

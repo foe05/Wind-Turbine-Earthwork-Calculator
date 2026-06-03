@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+.env
+.env.local
+.streamlit/secrets.toml
+
+# DEM tile cache (local FS)
+data/dem_cache/
+data/uploads/
+data/exports/
+
+# Postgres data (docker volume mount target)
+data/postgres/
