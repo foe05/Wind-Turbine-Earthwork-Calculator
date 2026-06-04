@@ -2,7 +2,7 @@
 
 Wiederverwendbarer Prompt für ein Frontend-Bau-Tool (v0.dev, Lovable, Bolt,
 Claude/Cursor) zur Generierung einer Single-Page-Landingpage für das Produkt
-**Kubatur** (https://v1.kubatur.app).
+**Kubatur** (https://kubatur.app).
 
 Vor dem Loslassen prüfen:
 
