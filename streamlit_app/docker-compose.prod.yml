@@ -2,11 +2,21 @@ services:
   app:
     container_name: wtec-app
     restart: unless-stopped
-    # Port 8501 wird aus der base compose.yml schon auf 0.0.0.0:8501 exponiert.
+    # Public-Port aus der base compose.yml entfernen — Traffic kommt jetzt
+    # ausschließlich über den NPM-Reverse-Proxy auf v1.kubatur.app rein.
+    ports: !reset []
     environment:
       # Damit `from app.services.pipeline import ...` aus Home.py funktioniert:
       # /app ist Container-WORKDIR, das Skript liegt in /app/app/Home.py.
       PYTHONPATH: /app
+      # Telemetrie abdrehen + Streamlit dem Reverse-Proxy gegenüber
+      # nachgiebig konfigurieren.
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+      STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION: "false"
+      STREAMLIT_SERVER_ENABLE_CORS: "false"
+    networks:
+      - default     # für die DB
+      - proxy       # für NPM
     deploy:
       resources:
         limits:
@@ -27,3 +37,8 @@ services:
       resources:
         limits:
           memory: 768m
+
+networks:
+  proxy:
+    name: docker-apps_proxy
+    external: true
