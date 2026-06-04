@@ -76,6 +76,38 @@ class PipelineInputs:
     profile_spacing: float = 10.0
     profile_type: str = "cross"  # 'cross' | 'long' | 'both'
 
+    # Optionale Surfaces (DXF-Pfade)
+    boom_dxf: Optional[str] = None
+    rotor_storage_dxf: Optional[str] = None
+    road_access_dxf: Optional[str] = None
+    holms_dxf: Optional[str] = None  # Multi-Polygon → wird als list[Polygon] importiert
+
+    # Boom-Slope-Sweep
+    boom_slope_optimize: bool = True
+    boom_slope_min_percent: float = -4.0
+    boom_slope_max_percent: float = 4.0
+    boom_slope_step_percent: float = 0.5
+    boom_height_fixed: Optional[float] = None  # falls optimize=False
+
+    # Rotor-Offset-Sweep
+    rotor_offset_optimize: bool = True
+    rotor_offset_min_m: float = -0.5
+    rotor_offset_max_m: float = 0.5
+    rotor_offset_step_m: float = 0.05
+    rotor_height_fixed: Optional[float] = None
+
+    # Road-Slope-Sweep
+    road_slope_optimize: bool = True
+    road_slope_min_percent: float = -8.0
+    road_slope_max_percent: float = 8.0
+    road_slope_step_percent: float = 1.0
+    road_height_fixed: Optional[float] = None
+
+    # Slope-Volumen
+    include_slope_volume: bool = True
+    slope_angle_deg: float = 45.0
+    slope_sample_spacing_m: float = 1.0
+
     # Zusätzliche Outputs (Wave 7-9 Module)
     generate_geopackage: bool = True
     generate_landxml: bool = True
@@ -104,6 +136,10 @@ class PipelineOutputs:
     profile_paths: list[dict]
     html_report_path: str
     json_report_path: str
+    boom_polygon: Optional[BaseGeometry] = None
+    rotor_polygon: Optional[BaseGeometry] = None
+    road_polygon: Optional[BaseGeometry] = None
+    holm_polygons: Optional[list[BaseGeometry]] = None
     geopackage_path: Optional[str] = None
     landxml_path: Optional[str] = None
     gltf_path: Optional[str] = None
@@ -136,6 +172,39 @@ def run_pipeline(
     found_imp = DXFImporter(inputs.foundation_dxf, crs_epsg=inputs.crs_epsg)
     foundation_poly, found_meta = found_imp.import_as_polygon()
 
+    # Optionale Surfaces — fail-soft: wenn DXF fehlt oder nicht parsbar, nur loggen
+    boom_poly = None
+    rotor_poly = None
+    road_poly = None
+    holm_polys = None
+
+    def _import_optional(path: str | None, label: str):
+        if not path or not Path(path).exists():
+            return None
+        try:
+            _say(f"Lade {label} aus {path}")
+            imp = DXFImporter(path, crs_epsg=inputs.crs_epsg)
+            poly, _ = imp.import_as_polygon()
+            return poly
+        except Exception as e:
+            log.warning("%s konnte nicht geladen werden: %s", label, e)
+            _say(f"⚠ {label} übersprungen: {e}")
+            return None
+
+    boom_poly = _import_optional(inputs.boom_dxf, "Auslegerfläche")
+    rotor_poly = _import_optional(inputs.rotor_storage_dxf, "Blattlagerfläche")
+    road_poly = _import_optional(inputs.road_access_dxf, "Zufahrtsstraße")
+    if inputs.holms_dxf and Path(inputs.holms_dxf).exists():
+        try:
+            _say(f"Lade Holme aus {inputs.holms_dxf}")
+            holm_imp = DXFImporter(inputs.holms_dxf, crs_epsg=inputs.crs_epsg)
+            holm_polys, _ = holm_imp.import_holms()
+            _say(f"  {len(holm_polys)} Holm-Polygone")
+        except Exception as e:
+            log.warning("Holme konnten nicht geladen werden: %s", e)
+            _say(f"⚠ Holme übersprungen: {e}")
+            holm_polys = None
+
     # 2. DEM beschaffen
     if inputs.dem_path and Path(inputs.dem_path).exists():
         _say(f"Verwende vorhandenes DEM: {inputs.dem_path}")
@@ -145,7 +214,15 @@ def run_pipeline(
             raise ValueError("Weder dem_path noch dem_cache_dir gesetzt")
         _say("Lade DEM von hoehendaten.de…")
         dl = DEMDownloader(cache_dir=inputs.dem_cache_dir)
-        combined_bounds = _union_bounds(crane_poly, foundation_poly)
+        # Bounds aller geladenen Polygone vereinigen, damit das DEM auch
+        # Boom/Rotor/Road/Holme komplett abdeckt.
+        all_polys = [crane_poly, foundation_poly]
+        for p in (boom_poly, rotor_poly, road_poly):
+            if p is not None:
+                all_polys.append(p)
+        if holm_polys:
+            all_polys.extend(holm_polys)
+        combined_bounds = _union_bounds_many(all_polys)
         mosaic_path = out_dir / "dem_mosaic.tif"
         dem_path = dl.download_for_bbox(
             combined_bounds,
@@ -166,6 +243,25 @@ def run_pipeline(
         foundation=SurfaceConfig(
             SurfaceType.FOUNDATION, foundation_poly, HeightMode.FIXED, height_value=inputs.fok
         ),
+        boom=SurfaceConfig(
+            SurfaceType.BOOM,
+            boom_poly,
+            HeightMode.OPTIMIZED if inputs.boom_slope_optimize else HeightMode.FIXED,
+            height_value=inputs.boom_height_fixed,
+        ) if boom_poly is not None else None,
+        rotor_storage=SurfaceConfig(
+            SurfaceType.ROTOR_STORAGE,
+            rotor_poly,
+            HeightMode.OPTIMIZED if inputs.rotor_offset_optimize else HeightMode.FIXED,
+            height_value=inputs.rotor_height_fixed,
+        ) if rotor_poly is not None else None,
+        road_access=SurfaceConfig(
+            SurfaceType.ROAD_ACCESS,
+            road_poly,
+            HeightMode.OPTIMIZED if inputs.road_slope_optimize else HeightMode.FIXED,
+            height_value=inputs.road_height_fixed,
+        ) if road_poly is not None else None,
+        holms=holm_polys,
         fok=inputs.fok,
         foundation_depth=inputs.foundation_depth,
         gravel_thickness=inputs.gravel_thickness,
@@ -174,6 +270,21 @@ def run_pipeline(
         coarse_step=inputs.coarse_step,
         fine_step=inputs.fine_step,
         optimize_objective=inputs.optimize_objective,
+        include_slope_volume=inputs.include_slope_volume,
+        slope_angle_deg=inputs.slope_angle_deg,
+        slope_sample_spacing_m=inputs.slope_sample_spacing_m,
+        boom_slope_optimize=inputs.boom_slope_optimize,
+        boom_slope_min_percent=inputs.boom_slope_min_percent,
+        boom_slope_max_percent=inputs.boom_slope_max_percent,
+        boom_slope_step_percent=inputs.boom_slope_step_percent,
+        rotor_offset_optimize=inputs.rotor_offset_optimize,
+        rotor_offset_min_m=inputs.rotor_offset_min_m,
+        rotor_offset_max_m=inputs.rotor_offset_max_m,
+        rotor_offset_step_m=inputs.rotor_offset_step_m,
+        road_slope_optimize=inputs.road_slope_optimize,
+        road_slope_min_percent=inputs.road_slope_min_percent,
+        road_slope_max_percent=inputs.road_slope_max_percent,
+        road_slope_step_percent=inputs.road_slope_step_percent,
     )
     result = calculate_multi_surface(dem_path, project)
     _say(
@@ -181,14 +292,17 @@ def run_pipeline(
         f"Gesamt-Cut={result.total_cut_m3:.0f} m³, Gesamt-Fill={result.total_fill_m3:.0f} m³"
     )
 
-    # 4. Übersichtskarte
+    # 4. Übersichtskarte (zeigt alle vorhandenen Surfaces)
     _say("Erzeuge Übersichtskarte…")
     map_path = out_dir / "map_overview.png"
-    render_overview_map(
-        dem_path,
-        {"crane": crane_poly, "foundation": foundation_poly},
-        str(map_path),
-    )
+    overview_layers: dict = {"crane": crane_poly, "foundation": foundation_poly}
+    if boom_poly is not None:
+        overview_layers["boom"] = boom_poly
+    if rotor_poly is not None:
+        overview_layers["rotor"] = rotor_poly
+    if road_poly is not None:
+        overview_layers["road"] = road_poly
+    render_overview_map(dem_path, overview_layers, str(map_path))
 
     # 5. Profile
     profiles: list[dict] = []
@@ -370,6 +484,10 @@ def run_pipeline(
         profile_paths=profiles,
         html_report_path=str(html_path),
         json_report_path=str(json_path),
+        boom_polygon=boom_poly,
+        rotor_polygon=rotor_poly,
+        road_polygon=road_poly,
+        holm_polygons=holm_polys,
         geopackage_path=geopackage_path,
         landxml_path=landxml_path,
         gltf_path=gltf_path,
@@ -392,6 +510,16 @@ def _union_bounds(g1: BaseGeometry, g2: BaseGeometry) -> tuple[float, float, flo
     miny = min(g1.bounds[1], g2.bounds[1])
     maxx = max(g1.bounds[2], g2.bounds[2])
     maxy = max(g1.bounds[3], g2.bounds[3])
+    return (minx, miny, maxx, maxy)
+
+
+def _union_bounds_many(polygons: list[BaseGeometry]) -> tuple[float, float, float, float]:
+    if not polygons:
+        raise ValueError("Keine Polygone für Bounds")
+    minx = min(p.bounds[0] for p in polygons)
+    miny = min(p.bounds[1] for p in polygons)
+    maxx = max(p.bounds[2] for p in polygons)
+    maxy = max(p.bounds[3] for p in polygons)
     return (minx, miny, maxx, maxy)
 
 

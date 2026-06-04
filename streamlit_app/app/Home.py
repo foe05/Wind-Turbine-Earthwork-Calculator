@@ -92,6 +92,7 @@ with st.sidebar:
 
 # ---------------------------------------------------------------- Eingaben
 st.header("1) Eingabe-Geometrien")
+st.markdown("**Pflicht-Flächen**")
 col1, col2 = st.columns(2)
 with col1:
     crane_dxf = st.file_uploader(
@@ -105,6 +106,40 @@ with col2:
         type=["dxf"],
         key="foundation_dxf",
     )
+
+with st.expander("Optionale Flächen — Ausleger, Blattlager, Holme, Zufahrt", expanded=False):
+    st.caption(
+        "Wenn vorhanden, werden zusätzliche Surfaces in die Multi-Surface-"
+        "Berechnung aufgenommen. Pro Fläche ein eigener DXF. Holme werden "
+        "als Multi-Polygon importiert (alle geschlossenen Polylinien)."
+    )
+    col_a, col_b = st.columns(2)
+    with col_a:
+        boom_dxf = st.file_uploader(
+            "Auslegerfläche (DXF)",
+            type=["dxf"],
+            key="boom_dxf",
+            help="Erweiterte Plattform für den Hauptausleger; Slope-Sweep optimiert die Neigung gegen das Gelände.",
+        )
+        rotor_dxf = st.file_uploader(
+            "Blattlagerfläche (DXF)",
+            type=["dxf"],
+            key="rotor_dxf",
+            help="Lagerplatz für Rotorblätter; Offset-Sweep optimiert relative Höhe zur Kranstellfläche.",
+        )
+    with col_b:
+        road_dxf = st.file_uploader(
+            "Zufahrtsstraße (DXF)",
+            type=["dxf"],
+            key="road_dxf",
+            help="Anbindungsstraße; Slope-Sweep optimiert Längsneigung.",
+        )
+        holms_dxf = st.file_uploader(
+            "Holme (DXF, mehrere geschlossene Polygone)",
+            type=["dxf"],
+            key="holms_dxf",
+            help="Rotorblatt-Auflage-Holme. Jedes geschlossene Polygon wird als eigener Holm interpretiert (Plateau = FOK).",
+        )
 
 uploaded_dem = None
 if dem_source.startswith("Eigene"):
@@ -130,6 +165,18 @@ if run:
     crane_path.write_bytes(crane_dxf.getbuffer())
     foundation_path = session_dir / "foundation.dxf"
     foundation_path.write_bytes(foundation_dxf.getbuffer())
+
+    def _save_optional(uploader, filename: str) -> str | None:
+        if uploader is None:
+            return None
+        p = session_dir / filename
+        p.write_bytes(uploader.getbuffer())
+        return str(p)
+
+    boom_path = _save_optional(boom_dxf, "boom.dxf")
+    rotor_path = _save_optional(rotor_dxf, "rotor.dxf")
+    road_path = _save_optional(road_dxf, "road.dxf")
+    holms_path = _save_optional(holms_dxf, "holms.dxf")
 
     dem_local: str | None = None
     if uploaded_dem:
@@ -157,6 +204,10 @@ if run:
         generate_profiles=True,
         profile_spacing=profile_spacing,
         profile_type=profile_type,
+        boom_dxf=boom_path,
+        rotor_storage_dxf=rotor_path,
+        road_access_dxf=road_path,
+        holms_dxf=holms_path,
     )
 
     status = st.status("Berechnung läuft…", expanded=True)
