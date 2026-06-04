@@ -225,6 +225,10 @@ class DEMDownloader:
             mosaic, transform = rio_merge(srcs, nodata=src_nodata)
 
             profile = srcs[0].profile.copy()
+            # Die hoehendaten-Tiles kommen als striped (blockxsize=1000, blockysize=2),
+            # was beim Schreiben mit tiled=True von GDAL abgelehnt wird
+            # ("BLOCKXSIZE must be a multiple of 16"). Wir müssen daher die Block-
+            # Maße explizit auf saubere Werte setzen (oder tiled ausschalten).
             profile.update(
                 driver="GTiff",
                 height=mosaic.shape[1],
@@ -235,6 +239,8 @@ class DEMDownloader:
                 nodata=src_nodata,
                 compress="lzw",
                 tiled=True,
+                blockxsize=256,
+                blockysize=256,
             )
 
             mosaic_f32 = mosaic.astype(np.float32, copy=False)
