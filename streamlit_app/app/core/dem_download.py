@@ -26,6 +26,19 @@ from rasterio.merge import merge as rio_merge
 log = logging.getLogger(__name__)
 
 
+def _safe_progress(progress: Optional[Callable[[str], None]], msg: str) -> None:
+    """Ruft progress() defensiv auf. UI-Callbacks (z. B. Streamlit st.status.write)
+    sind häufig nicht thread-safe — Exceptions aus dem Callback dürfen NICHT
+    die Download-Logik abbrechen."""
+    if not progress:
+        return
+    try:
+        progress(msg)
+    except Exception:
+        # Bewusst stumm — Logging des Download-Status liegt ohnehin in `log`.
+        log.debug("progress callback failed (ignored)", exc_info=True)
+
+
 class DEMDownloader:
     """hoehendaten.de DGM1-Tiles laden + rasterio-Mosaik bauen."""
 
@@ -86,8 +99,7 @@ class DEMDownloader:
 
         tile_path = self.cache_dir / f"{tile_name}.tif"
         if tile_path.exists() and not self.force_refresh:
-            if progress:
-                progress(f"Cache-Hit: {tile_name}")
+            _safe_progress(progress, f"Cache-Hit: {tile_name}")
             return str(tile_path)
 
         parts = tile_name.split("_")
@@ -106,8 +118,7 @@ class DEMDownloader:
         }
 
         log.info("Lade Tile %s (Zone=%s E=%s N=%s)", tile_name, zone, easting, northing)
-        if progress:
-            progress(f"Lade Tile {tile_name}…")
+        _safe_progress(progress, f"Lade Tile {tile_name}…")
 
         try:
             resp = requests.post(
@@ -159,8 +170,7 @@ class DEMDownloader:
 
         tile_path.write_bytes(tiff)
         log.info("Tile geladen: %s (%.2f MB)", tile_name, len(tiff) / 1024 / 1024)
-        if progress:
-            progress(f"OK {tile_name} ({len(tiff) / 1024 / 1024:.2f} MB)")
+        _safe_progress(progress, f"OK {tile_name} ({len(tiff) / 1024 / 1024:.2f} MB)")
         return str(tile_path)
 
     # ----------------------------------------------------- Parallel-Loading
@@ -173,17 +183,27 @@ class DEMDownloader:
     ) -> list[str]:
         tile_names = list(tile_names)
         paths: list[str] = []
+        # progress wird absichtlich NICHT in die Worker-Threads gegeben — UI-Callbacks
+        # (Streamlit st.status etc.) sind häufig nicht thread-safe und werfen aus
+        # einem Worker eine schwer abzufangende Exception. Stattdessen rufen wir
+        # progress vom Main-Thread auf, sobald ein Worker fertig ist.
+        total = len(tile_names)
+        done = 0
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            fut_map = {ex.submit(self.download_tile, t, progress=progress): t for t in tile_names}
+            fut_map = {ex.submit(self.download_tile, t): t for t in tile_names}
             for fut in as_completed(fut_map):
                 t = fut_map[fut]
+                done += 1
                 try:
                     p = fut.result()
                 except Exception as e:
-                    log.error("Download-Exception %s: %s", t, e)
+                    log.error("Download-Exception %s: %s", t, repr(e))
                     p = None
                 if p:
                     paths.append(p)
+                    _safe_progress(progress, f"[{done}/{total}] OK {t}")
+                else:
+                    _safe_progress(progress, f"[{done}/{total}] FAIL {t}")
         return paths
 
     # ----------------------------------------------------------- Mosaik-IO
@@ -275,8 +295,7 @@ class DEMDownloader:
         tiles = self.calculate_tiles(bbox, buffer_m=buffer_m)
         if not tiles:
             raise ValueError("Keine Tiles für BBox berechnet")
-        if progress:
-            progress(f"Benötige {len(tiles)} Tile(s)")
+        _safe_progress(progress, f"Benötige {len(tiles)} Tile(s)")
         paths = self.download_tiles(tiles, progress=progress)
         if not paths:
             raise RuntimeError("Keine DEM-Tiles konnten geladen werden")
