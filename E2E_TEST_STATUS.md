@@ -54,7 +54,27 @@ The following automated tests are already in place and passing:
   - Excel generation (mocked)
   - Edge cases
 
-**Test Results**: 42/47 tests passing (5 Excel tests skipped - require full openpyxl)
+#### Unit Tests - v3-Foundation-Module (neu Mai 2026)
+
+- ✅ `test_placement_constraints.py` — 16 tests (Constraint-Validator,
+  STRtree-Lookup, Snap-to-Grid)
+- ✅ `test_park_optimizer.py` — 9 tests (Park-weite LP-Transport-Optimierung)
+- ✅ `test_mesh_exporter.py` — 16 tests (OBJ-Writer, Ear-Clipping,
+  DEM-zu-Mesh; 5 GDAL-bedingte Tests skippen in plain-Python-Env)
+- 🟡 `test_terrain_intersection.py` — 6 Test-Skelette (skippen ohne QGIS;
+  laufen in QGIS-Env)
+
+**Stand 2026-05-27:**
+- **47 Tests** im Multi-Site-Pfad (42 grün, 5 Excel-skip — unverändert seit
+  November 2025)
+- **47 zusätzliche Tests** in den v3-Foundation-Modulen (36 grün im plain
+  Python-Env, 11 skippen mangels GDAL/QGIS-Bindings)
+
+**Behoben (2026-05-28):** Die 19.5-MB-Fixture `wea45mit3d.zip` war in Commit
+`5374657` („delete test files") entfernt worden, wodurch
+`test_volume_regression.py` stillschweigend skippte. Sie wurde aus der
+Git-Historie (`5374657^`) wiederhergestellt; der Regressionstest läuft wieder
+(**4/4 grün** mit rasterio/fiona/shapely) und pinnt die Cut/Fill-Math erneut.
 
 ## Manual Test Requirement
 

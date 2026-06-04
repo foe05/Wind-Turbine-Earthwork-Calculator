@@ -502,12 +502,19 @@ Ersparnis: 88% weniger Berechnungen!
 ### Nächste Schritte
 
 Die Logik ist validiert. Für vollständige Integration:
-- Integration in QGIS-UI für Parametereingabe
-- HTML-Report-Erweiterung für neue Optimierungsergebnisse
-- Praxistest mit echten DEM- und DXF-Daten
+- ✅ HTML-Report-Erweiterung für neue Optimierungsergebnisse (erledigt:
+  `multi_site_report_generator.py` zeigt Multi-Param-Ergebnisse pro Standort)
+- 🟡 Integration in QGIS-UI für Parametereingabe (UI existiert; finaler
+  Bedienkomfort-Schliff offen)
+- ✅ Praxistest mit echten DEM- und DXF-Daten — die `wea45mit3d.zip`-Fixture
+  wurde am 2026-05-28 aus der Git-Historie (`5374657^`) wiederhergestellt;
+  `test_volume_regression.py` läuft wieder (4/4 grün) und pinnt die
+  Cut/Fill-Math gegen die Referenzwerte aus dem realen Plugin-Lauf vom
+  2025-11-26.
 
 ---
 
 **Test durchgeführt von:** Claude Code
 **Testdauer:** < 1 Sekunde
 **Alle Assertions bestanden:** Ja ✅
+**Letzte Status-Aktualisierung:** 2026-05-27

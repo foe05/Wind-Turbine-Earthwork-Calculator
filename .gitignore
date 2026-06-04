@@ -153,6 +153,7 @@ results/
 Ergebnisse/
 *.html
 !docs/*.html
+!landingpage/*.html
 
 # Temporary files
 *.tmp

@@ -10,6 +10,7 @@ Version: 2.0.0 - Multi-Surface Extension
 import os
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 import tempfile
 
 from qgis.PyQt.QtCore import QObject, QThread, pyqtSignal
@@ -52,6 +53,10 @@ from .surface_types import (
 )
 from .surface_validators import validate_project
 from .uncertainty import UncertaintyConfig, TerrainType
+from . import mesh_exporter
+from . import landxml_export
+from . import slope_stability_export
+from .mass_haul import MassHaulStation, MassHaulDiagram
 from ..utils.geometry_utils import get_centroid
 from ..utils.logging_utils import get_plugin_logger
 from ..utils.central_logging import log_event
@@ -189,6 +194,63 @@ class WorkflowWorker(QObject):
         """Cancel workflow."""
         self.is_cancelled = True
 
+    def _run_constraint_preflight(self, crane_geometry):
+        """Check the crane-pad centroid against configured placement constraints.
+
+        The validator (if any) is a pure-shapely PlacementValidator built on the
+        main thread and passed via ``params['placement_validator']`` — see
+        ``gui/main_dialog._build_placement_validator``. No-op when not configured.
+
+        Hard violations raise (aborting the run before the DEM download); soft
+        violations are logged and surfaced as a progress warning but do not stop
+        the workflow.
+        """
+        validator = self.params.get('placement_validator')
+        if validator is None:
+            return
+
+        try:
+            centroid = crane_geometry.centroid().asPoint()
+            cx, cy = centroid.x(), centroid.y()
+        except Exception as e:
+            self.logger.warning(f"Restriktions-Preflight übersprungen (Centroid-Fehler: {e})")
+            return
+
+        self.progress_updated.emit(31, "🚧 Restriktionsprüfung der Kranstellflächen-Position...")
+        try:
+            violations = validator.check_position(cx, cy)
+        except Exception as e:
+            # A failure while checking should never block the calculation.
+            self.logger.warning(f"Restriktions-Preflight übersprungen (Prüffehler: {e})")
+            return
+
+        def _sev(v):
+            return getattr(v.severity, "value", v.severity)
+
+        hard = [v for v in violations if _sev(v) == "hard"]
+        soft = [v for v in violations if _sev(v) == "soft"]
+
+        for v in soft:
+            msg = (f"Weiche Restriktion verletzt: {v.layer_name} "
+                   f"({v.actual_distance_m:.0f} m vorhanden, "
+                   f"{v.required_distance_m:.0f} m gefordert)")
+            self.logger.warning(msg)
+            self.progress_updated.emit(31, f"⚠️ {msg}")
+
+        if hard:
+            details = "; ".join(
+                f"{v.layer_name} ({v.actual_distance_m:.0f} m < {v.required_distance_m:.0f} m)"
+                for v in hard
+            )
+            self.logger.error(f"Harte Restriktion(en) verletzt: {details}")
+            raise Exception(
+                "Restriktionsprüfung fehlgeschlagen — die Kranstellflächen-Position "
+                f"verletzt harte Mindestabstände: {details}. "
+                "Position anpassen oder Restriktion im Tab 'Restriktionen' lockern."
+            )
+
+        self.logger.info("Restriktions-Preflight bestanden (keine harten Verletzungen)")
+
     def _run_workflow(self):
         """Run the complete multi-surface workflow."""
         self.logger.info("Starting multi-surface workflow execution...")
@@ -304,6 +366,13 @@ class WorkflowWorker(QObject):
             current_progress += progress_per_dxf
 
         self.progress_updated.emit(30, "✓ DXF-Dateien importiert")
+
+        # === STEP 1.5: Placement constraint preflight ===
+        # If the user configured restriction layers in the GUI, a
+        # PlacementValidator (pure shapely, built on the main thread) is passed
+        # via params. Check the crane-pad centroid here, before the expensive
+        # DEM download. Hard violations abort the run; soft ones only warn.
+        self._run_constraint_preflight(surfaces['crane']['geometry'])
 
         # === STEP 2: Create MultiSurfaceProject ===
         self.progress_updated.emit(32, "🔧 Erstelle Multi-Surface Projekt...")
@@ -441,64 +510,89 @@ class WorkflowWorker(QObject):
 
         self.progress_updated.emit(38, "✓ Alle Validierungen bestanden")
 
-        # === STEP 4: DEM Download ===
-        self.progress_updated.emit(40, "🌍 DEM-Daten werden heruntergeladen...")
-        self.logger.info("Starting DEM download...")
+        # === STEP 4: DEM acquisition ===
+        # If the user supplied a local DEM (e.g. drone-derived GeoTIFF) skip
+        # the hoehendaten.de download entirely and use it as-is.
+        local_dem_path = self.params.get('local_dem_path') or None
 
-        try:
-            # Use crane pad as reference for DEM extent (it should cover all surfaces)
-            # But we buffer generously to cover all surfaces
-            # Only include geometries that exist (boom and rotor are optional)
-            all_geoms = [
-                surfaces['crane']['geometry'],
-                surfaces['foundation']['geometry'],
-            ]
-
-            # Add optional surfaces if they exist
-            if surfaces['boom'] is not None:
-                all_geoms.append(surfaces['boom']['geometry'])
-            if surfaces['rotor'] is not None:
-                all_geoms.append(surfaces['rotor']['geometry'])
-            if surfaces['road'] is not None:
-                all_geoms.append(surfaces['road']['geometry'])
-
-            # Create union of all geometries
-            combined_geom = all_geoms[0]
-            for geom in all_geoms[1:]:
-                combined_geom = combined_geom.combine(geom)
-
-            temp_dem_path = tempfile.mktemp(suffix='.tif', prefix='dem_mosaic_')
-            self.logger.info(f"Temp DEM path: {temp_dem_path}")
-
-            downloader = DEMDownloader(
-                cache_dir=str(cache_dir),
-                force_refresh=self.params['force_refresh']
-            )
-
-            self.progress_updated.emit(42, "⬇️ Lade DEM-Kacheln...")
-            dem_path = downloader.download_for_geometry(
-                combined_geom,
-                temp_dem_path,
-                buffer_m=250
-            )
-
-            self.logger.info(f"DEM downloaded: {dem_path}")
-
-            dem_layer = QgsRasterLayer(dem_path, "DGM Mosaik")
+        if local_dem_path:
+            self.progress_updated.emit(40, "🛰️ Lokales DEM wird geladen...")
+            self.logger.info(f"Using local DEM (skipping hoehendaten.de): {local_dem_path}")
+            if not os.path.exists(local_dem_path):
+                raise Exception(f"Lokales DEM nicht gefunden: {local_dem_path}")
+            dem_layer = QgsRasterLayer(local_dem_path, "DGM (lokal)")
             if not dem_layer.isValid():
-                raise Exception(f"DEM konnte nicht geladen werden: {dem_path}")
-
-            # Save DEM mosaic to results directory
-            dem_result_name = f"WKA_{int(get_centroid(surfaces['crane']['geometry']).x())}_{int(get_centroid(surfaces['crane']['geometry']).y())}_DEM.tif"
+                raise Exception(f"Lokales DEM ist ungültig: {local_dem_path}")
+            dem_path = local_dem_path
+            dem_result_name = (
+                f"WKA_{int(get_centroid(surfaces['crane']['geometry']).x())}_"
+                f"{int(get_centroid(surfaces['crane']['geometry']).y())}_DEM.tif"
+            )
             dem_result_path = results_dir / dem_result_name
-            shutil.copy2(dem_path, dem_result_path)
-            self.logger.info(f"DEM mosaic saved to results: {dem_result_path}")
+            try:
+                shutil.copy2(local_dem_path, dem_result_path)
+            except Exception as e:
+                self.logger.warning(f"Could not copy local DEM into results: {e}")
+            self.progress_updated.emit(50, "✓ Lokales DEM geladen")
+        else:
+            self.progress_updated.emit(40, "🌍 DEM-Daten werden heruntergeladen...")
+            self.logger.info("Starting DEM download...")
 
-            self.progress_updated.emit(50, "✓ DGM-Mosaik erstellt")
+        if not local_dem_path:
+            try:
+                # Use crane pad as reference for DEM extent (it should cover all surfaces)
+                # But we buffer generously to cover all surfaces
+                # Only include geometries that exist (boom and rotor are optional)
+                all_geoms = [
+                    surfaces['crane']['geometry'],
+                    surfaces['foundation']['geometry'],
+                ]
 
-        except Exception as e:
-            self.logger.error(f"DEM Download failed: {e}", exc_info=True)
-            raise
+                # Add optional surfaces if they exist
+                if surfaces['boom'] is not None:
+                    all_geoms.append(surfaces['boom']['geometry'])
+                if surfaces['rotor'] is not None:
+                    all_geoms.append(surfaces['rotor']['geometry'])
+                if surfaces['road'] is not None:
+                    all_geoms.append(surfaces['road']['geometry'])
+
+                # Create union of all geometries
+                combined_geom = all_geoms[0]
+                for geom in all_geoms[1:]:
+                    combined_geom = combined_geom.combine(geom)
+
+                temp_dem_path = tempfile.mktemp(suffix='.tif', prefix='dem_mosaic_')
+                self.logger.info(f"Temp DEM path: {temp_dem_path}")
+
+                downloader = DEMDownloader(
+                    cache_dir=str(cache_dir),
+                    force_refresh=self.params['force_refresh']
+                )
+
+                self.progress_updated.emit(42, "⬇️ Lade DEM-Kacheln...")
+                dem_path = downloader.download_for_geometry(
+                    combined_geom,
+                    temp_dem_path,
+                    buffer_m=250
+                )
+
+                self.logger.info(f"DEM downloaded: {dem_path}")
+
+                dem_layer = QgsRasterLayer(dem_path, "DGM Mosaik")
+                if not dem_layer.isValid():
+                    raise Exception(f"DEM konnte nicht geladen werden: {dem_path}")
+
+                # Save DEM mosaic to results directory
+                dem_result_name = f"WKA_{int(get_centroid(surfaces['crane']['geometry']).x())}_{int(get_centroid(surfaces['crane']['geometry']).y())}_DEM.tif"
+                dem_result_path = results_dir / dem_result_name
+                shutil.copy2(dem_path, dem_result_path)
+                self.logger.info(f"DEM mosaic saved to results: {dem_result_path}")
+
+                self.progress_updated.emit(50, "✓ DGM-Mosaik erstellt")
+
+            except Exception as e:
+                self.logger.error(f"DEM Download failed: {e}", exc_info=True)
+                raise
 
         # === STEP 5: Multi-Surface Optimization ===
         self.progress_updated.emit(52, "⚙️ Optimiere Kranstellflächen-Höhe...")
@@ -616,10 +710,27 @@ class WorkflowWorker(QObject):
             self.logger.error(f"Optimization failed: {e}", exc_info=True)
             raise
 
+        # === STEP 5.5: Optional crane-pad rotation analysis ===
+        # Opt-in, informational, non-fatal: reports the orientation that would
+        # minimise cut/fill. Does not change the chosen geometry or height.
+        rotation_analysis = None
+        if self.params.get('analyze_rotation', False):
+            try:
+                self.progress_updated.emit(71, "🧭 Analysiere optimale Plattform-Ausrichtung...")
+                rotation_analysis = calculator.analyze_crane_rotation()
+                if rotation_analysis:
+                    self.logger.info(
+                        f"Best crane-pad orientation: {rotation_analysis['best_angle_deg']:.0f}° "
+                        f"(saving {rotation_analysis['savings_m3']:.0f} m³ vs current)"
+                    )
+            except Exception as e:
+                self.logger.warning(f"Rotation analysis skipped: {e}")
+
         # === STEP 6: Profile Generation ===
         self.progress_updated.emit(72, "📊 Geländeschnitte werden erstellt...")
         self.logger.info(f"Generating profiles in: {profiles_dir}")
 
+        mass_haul_summary = None
         try:
             # Get boom connection info from calculator
             boom_connection_edge = None
@@ -716,6 +827,37 @@ class WorkflowWorker(QObject):
                 all_profiles.extend(long_profiles)
                 self.logger.info(f"Generated {len(long_profiles)} longitudinal profiles")
 
+                # Optional mass-haul analysis along the representative
+                # longitudinal profile (opt-in, non-fatal, per-strip-width).
+                if self.params.get('mass_haul_analysis', False) and long_profiles_raw:
+                    try:
+                        strip_width = float(self.params.get('long_profile_spacing', 10.0))
+                        mass_haul_summary = self._compute_mass_haul(
+                            long_profiles_raw[0], strip_width
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Mass-haul analysis skipped: {e}")
+
+                # Optional slope-stability XML export — one section per
+                # longitudinal profile, suitable as Slide/GeoStudio interchange.
+                if self.params.get('export_slope_stability', False) and long_profiles_raw:
+                    try:
+                        sections = []
+                        for i, p in enumerate(long_profiles_raw):
+                            sections.append(slope_stability_export.section_from_profile(
+                                name=f"long_profile_{i+1}",
+                                profile=p,
+                                materials=slope_stability_export.default_materials(),
+                            ))
+                        slope_path = Path(results_dir) / "slope_stability.xml"
+                        slope_stability_export.write_slope_xml(
+                            str(slope_path), sections,
+                            project_name=f"WKA_{int(get_centroid(surfaces['crane']['geometry']).x())}",
+                        )
+                        self.logger.info(f"Slope-stability XML written: {slope_path}")
+                    except Exception as e:
+                        self.logger.warning(f"Slope-stability export skipped: {e}")
+
             profiles = all_profiles
             profile_pngs = [p['png_path'] for p in profiles if 'png_path' in p]
             self.logger.info(f"Total: Generated {len(profile_pngs)} profile images")
@@ -808,6 +950,10 @@ class WorkflowWorker(QObject):
 
         results_for_report = results.to_dict()
         results_for_report['stabilization'] = stabilization_data
+        if rotation_analysis:
+            results_for_report['rotation_analysis'] = rotation_analysis
+        if mass_haul_summary:
+            results_for_report['mass_haul'] = mass_haul_summary
         report_gen = ReportGenerator(
             results_for_report,
             project.crane_pad.geometry,
@@ -848,6 +994,22 @@ class WorkflowWorker(QObject):
             optimal_crane_height,
             results
         )
+
+        # === STEP 8.5: Export 3D meshes (OBJ) ===
+        # Optional, non-fatal: writes a terrain mesh and one mesh per surface so
+        # the result can be inspected in external 3D viewers (Three.js, Blender,
+        # Cesium). Controlled by the 'export_obj' param (default on).
+        if self.params.get('export_obj', True):
+            try:
+                self.progress_updated.emit(92, "🧊 3D-Meshes (OBJ) werden exportiert...")
+                obj_paths = self._export_meshes(
+                    results_dir, x_coord, y_coord,
+                    project, dem_path, optimal_crane_height
+                )
+                self.logger.info(f"Exported {len(obj_paths)} OBJ mesh(es)")
+            except Exception as e:
+                # Never let mesh export break the main workflow.
+                self.logger.warning(f"OBJ mesh export skipped due to error: {e}")
 
         # === STEP 9: Add to QGIS ===
         self.progress_updated.emit(95, "🗺️ Layer werden zu QGIS hinzugefügt...")
@@ -1069,6 +1231,164 @@ class WorkflowWorker(QObject):
         layers['profile_lines'] = profile_lines_layer
 
         return layers
+
+    @staticmethod
+    def _compute_mass_haul(profile: dict, strip_width: float) -> Optional[dict]:
+        """Build a mass-haul summary from a longitudinal profile dict.
+
+        Per station the earthwork is ``(existing_z - bottom_z) × strip_width ×
+        step``; NaN/None entries (outside any surface) contribute nothing. The
+        diagram is for the representative longitudinal strip — a per-corridor
+        approximation, not the full 3D volume.
+        """
+        distances = profile.get('distances')
+        existing = profile.get('existing_z')
+        bottom = profile.get('bottom_z')
+        if distances is None or existing is None or bottom is None:
+            return None
+        n = len(distances)
+        if n < 2:
+            return None
+
+        step = float(distances[1]) - float(distances[0])
+        if step <= 0:
+            step = 1.0
+
+        stations = []
+        for i in range(n):
+            d = float(distances[i])
+            e = existing[i]
+            b = bottom[i]
+            # Skip NaN / None (masked stations outside surfaces).
+            if e is None or b is None or e != e or b != b:
+                stations.append(MassHaulStation(d, 0.0, 0.0))
+                continue
+            diff = float(e) - float(b)
+            vol = abs(diff) * strip_width * step
+            cut = vol if diff > 0 else 0.0
+            fill = vol if diff < 0 else 0.0
+            stations.append(MassHaulStation(d, cut, fill))
+
+        res = MassHaulDiagram(stations).compute()
+        return {
+            "total_cut_m3": res.total_cut_m3,
+            "total_fill_m3": res.total_fill_m3,
+            "net_m3": res.net_m3,
+            "num_balance_points": len(res.balance_points),
+            "balance_points_m": [round(bp.station_m, 1) for bp in res.balance_points],
+            "total_haul_m3km": res.total_haul_m3km,
+            "max_ordinate_m3": res.max_ordinate_m3,
+            "min_ordinate_m3": res.min_ordinate_m3,
+            "strip_width_m": strip_width,
+        }
+
+    @staticmethod
+    def _polygon_exterior_xy(geometry):
+        """Extract the exterior ring of a QgsGeometry polygon as [(x, y), ...].
+
+        Returns an empty list for empty/non-polygon geometries. Handles both
+        single polygons and multipolygons (first part only).
+        """
+        if geometry is None or geometry.isEmpty():
+            return []
+        if geometry.isMultipart():
+            multi = geometry.asMultiPolygon()
+            if not multi:
+                return []
+            rings = multi[0]
+        else:
+            rings = geometry.asPolygon()
+        if not rings:
+            return []
+        exterior = rings[0]
+        return [(pt.x(), pt.y()) for pt in exterior]
+
+    def _export_meshes(self, results_dir, x_coord, y_coord,
+                       project: MultiSurfaceProject, dem_path, optimal_crane_height):
+        """Export 3D meshes (OBJ per surface + combined glTF + Three.js viewer).
+
+        Writes into ``WKA_<x>_<y>_meshes/``:
+          - one ``.obj`` per surface and ``terrain.obj`` (universal interchange)
+          - ``scene.gltf`` combining all meshes with per-surface colours
+          - ``viewer.html`` — self-contained Three.js viewer of scene.gltf
+
+        Heights:
+          - crane pad   → optimal_crane_height
+          - foundation  → fok - foundation_depth (Fundamentsohle)
+          - boom/rotor/road → optimal_crane_height as a flat approximation
+            (sloped surfaces would need the per-pixel target raster; the flat
+            mesh is sufficient for a first-pass 3D overview)
+
+        Each export is individually guarded so one failure does not abort the
+        rest. Returns the list of written file paths.
+        """
+        written: list[str] = []
+        collected = []  # MeshData objects for the combined glTF
+        base = f"WKA_{x_coord}_{y_coord}"
+        mesh_dir = Path(results_dir) / f"{base}_meshes"
+
+        # Terrain mesh from the DEM (decimated for a manageable file size).
+        try:
+            terrain_mesh = mesh_exporter.dem_to_mesh(str(dem_path), decimation=4, name="terrain")
+            if terrain_mesh.triangle_count > 0:
+                out = mesh_exporter.write_obj(str(mesh_dir / "terrain.obj"), terrain_mesh)
+                written.append(out)
+                collected.append(terrain_mesh)
+        except Exception as e:
+            self.logger.warning(f"Terrain mesh export failed: {e}")
+
+        # Surface meshes: (attribute, target height, name)
+        fok = float(project.fok)
+        surface_specs = [
+            (getattr(project, "crane_pad", None), float(optimal_crane_height), "kranstellflaeche"),
+            (getattr(project, "foundation", None), fok - float(project.foundation_depth), "fundamentsohle"),
+            (getattr(project, "boom", None), float(optimal_crane_height), "auslegerflaeche"),
+            (getattr(project, "rotor_storage", None), float(optimal_crane_height), "rotorflaeche"),
+            (getattr(project, "road_access", None), float(optimal_crane_height), "zufahrt"),
+        ]
+        for surface, height, name in surface_specs:
+            if surface is None or getattr(surface, "geometry", None) is None:
+                continue
+            try:
+                coords = self._polygon_exterior_xy(surface.geometry)
+                if len(coords) < 3:
+                    continue
+                mesh = mesh_exporter.polygon_to_mesh_at_height(coords, height, name=name)
+                if mesh.triangle_count > 0:
+                    out = mesh_exporter.write_obj(str(mesh_dir / f"{name}.obj"), mesh)
+                    written.append(out)
+                    collected.append(mesh)
+            except Exception as e:
+                self.logger.warning(f"Mesh export for {name} failed: {e}")
+
+        # Combined glTF + self-contained Three.js viewer over all meshes.
+        if collected:
+            try:
+                gltf = mesh_exporter.build_gltf_dict(collected)
+                gltf_path = mesh_exporter.write_gltf(str(mesh_dir / "scene.gltf"), collected)
+                written.append(gltf_path)
+                viewer_path = mesh_exporter.write_three_js_viewer(
+                    str(mesh_dir / "viewer.html"), gltf,
+                    title=f"WEA {x_coord}/{y_coord} — 3D-Ansicht"
+                )
+                written.append(viewer_path)
+            except Exception as e:
+                self.logger.warning(f"glTF/viewer export failed: {e}")
+
+            # LandXML TIN surfaces for machine control (Trimble/Topcon/Leica) + BIM.
+            try:
+                landxml_surfaces = [
+                    landxml_export.surface_from_mesh(m.name, m) for m in collected
+                ]
+                landxml_path = landxml_export.write_landxml(
+                    str(mesh_dir / "surfaces.xml"), landxml_surfaces,
+                    project_name=f"WKA_{x_coord}_{y_coord}",
+                )
+                written.append(landxml_path)
+            except Exception as e:
+                self.logger.warning(f"LandXML export failed: {e}")
+
+        return written
 
     def _save_to_geopackage(self, gpkg_path, project: MultiSurfaceProject,
                            profiles, dem_path, optimal_crane_height, results):

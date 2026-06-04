@@ -11,6 +11,7 @@ Author: Wind Energy Site Planning
 Version: 2.0.0 - Multi-Surface Extension
 """
 
+import html
 import os
 from pathlib import Path
 
@@ -22,6 +23,13 @@ from qgis.PyQt.QtWidgets import (
 )
 from qgis.PyQt.QtCore import Qt, pyqtSignal, QUrl
 from qgis.PyQt.QtGui import QIcon, QDesktopServices
+
+try:
+    from qgis.gui import QgsMapLayerComboBox
+    from qgis.core import QgsMapLayerProxyModel
+    _MAP_LAYER_COMBO_AVAILABLE = True
+except ImportError:
+    _MAP_LAYER_COMBO_AVAILABLE = False
 
 from ..utils.logging_utils import get_plugin_logger
 from ..utils.validation import (
@@ -79,6 +87,7 @@ class MainDialog(QDialog):
         # Create tabs
         self.tab_input = self._create_input_tab()
         self.tab_optimization = self._create_optimization_tab()
+        self.tab_constraints = self._create_constraints_tab()
         self.tab_profiles = self._create_profiles_tab()
         self.tab_stabilization = self._create_soil_stabilization_tab()
         self.tab_output = self._create_output_tab()
@@ -86,6 +95,7 @@ class MainDialog(QDialog):
 
         self.tabs.addTab(self.tab_input, "📂 Eingabe")
         self.tabs.addTab(self.tab_optimization, "⚙️ Optimierung")
+        self.tabs.addTab(self.tab_constraints, "🚧 Restriktionen")
         self.tabs.addTab(self.tab_profiles, "📊 Geländeschnitte")
         self.tabs.addTab(self.tab_stabilization, "🏗️ Bodenstabilisierung")
         self.tabs.addTab(self.tab_output, "💾 Ausgabe")
@@ -437,6 +447,33 @@ class MainDialog(QDialog):
         group_slope.setLayout(form_slope)
         layout.addWidget(group_slope)
 
+        # Advanced analyses (opt-in, informational, non-fatal)
+        group_advanced = QGroupBox("Erweiterte Analysen (optional)")
+        form_advanced = QFormLayout()
+
+        self.input_analyze_rotation = QCheckBox(
+            "Optimale Plattform-Ausrichtung analysieren"
+        )
+        self.input_analyze_rotation.setChecked(False)
+        self.input_analyze_rotation.setToolTip(
+            "Untersucht die Rotation der Kranstellfläche zur Minimierung der "
+            "Erdbewegungen. Informativ — ändert die berechnete Geometrie nicht."
+        )
+        form_advanced.addRow(self.input_analyze_rotation)
+
+        self.input_mass_haul = QCheckBox(
+            "Massenmassenkurve (Mass-Haul) berechnen"
+        )
+        self.input_mass_haul.setChecked(False)
+        self.input_mass_haul.setToolTip(
+            "Erstellt eine Mass-Haul-Auswertung entlang des Längsprofils "
+            "(Massenausgleichspunkte, Transportbilanz)."
+        )
+        form_advanced.addRow(self.input_mass_haul)
+
+        group_advanced.setLayout(form_advanced)
+        layout.addWidget(group_advanced)
+
         # Uncertainty Analysis
         group_uncertainty = QGroupBox("Unsicherheitsanalyse (Monte Carlo)")
         form_uncertainty = QFormLayout()
@@ -518,6 +555,244 @@ class MainDialog(QDialog):
         self.input_terrain_type.setEnabled(enabled)
         self.input_foundation_depth_std.setEnabled(enabled)
         self.input_slope_angle_std.setEnabled(enabled)
+
+    # ------------------------------------------------------------------
+    # Restriktionen (placement constraints) tab
+    # ------------------------------------------------------------------
+
+    # (label, default min-distance in m) for the three standard DACH categories
+    _CONSTRAINT_CATEGORIES = [
+        ("Wohnbebauung", 600.0),
+        ("Straßen / Verkehrswege", 50.0),
+        ("Schutzgebiete (NSG/FFH)", 200.0),
+    ]
+
+    def _create_constraints_tab(self):
+        """Create the placement-constraints tab.
+
+        Lets the user pick existing QGIS vector layers as obstacle sources,
+        define a minimum clearance per category, and interactively check a
+        candidate WEA position against them (or get the nearest valid spot).
+        Backed by core/placement_constraints.py.
+        """
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        info = QLabel(
+            "<b>Restriktionsprüfung</b><br><br>"
+            "<i>Prüft eine geplante WEA-Position gegen Mindestabstände zu "
+            "Hindernissen (Wohnbebauung, Straßen, Schutzgebiete). Wählen Sie "
+            "pro Kategorie eine vorhandene QGIS-Vektorebene und den geforderten "
+            "Abstand. Koordinaten in UTM (EPSG:25832–25836).</i>"
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        if not _MAP_LAYER_COMBO_AVAILABLE:
+            warn = QLabel(
+                "<b style='color:#cc0000'>QgsMapLayerComboBox nicht verfügbar.</b> "
+                "Die Restriktionsprüfung benötigt eine vollständige QGIS-GUI-Umgebung."
+            )
+            warn.setWordWrap(True)
+            layout.addWidget(warn)
+            layout.addStretch()
+            widget.setLayout(layout)
+            scroll.setWidget(widget)
+            return scroll
+
+        # --- Constraint category rows ---
+        group = QGroupBox("Restriktionsflächen")
+        form = QFormLayout()
+
+        # Each entry: dict(enabled, layer_combo, distance, severity)
+        self.constraint_rows = []
+        for label, default_dist in self._CONSTRAINT_CATEGORIES:
+            enabled = QCheckBox("aktiv")
+            enabled.setChecked(False)
+
+            layer_combo = QgsMapLayerComboBox()
+            layer_combo.setFilters(QgsMapLayerProxyModel.VectorLayer)
+            layer_combo.setAllowEmptyLayer(True)
+
+            distance = QDoubleSpinBox()
+            distance.setRange(0.0, 100000.0)
+            distance.setDecimals(1)
+            distance.setSingleStep(10.0)
+            distance.setValue(default_dist)
+            distance.setSuffix(" m")
+
+            severity = QComboBox()
+            severity.addItems(["Hart (blockiert)", "Weich (Warnung)"])
+
+            row_layout = QHBoxLayout()
+            row_layout.addWidget(enabled)
+            row_layout.addWidget(layer_combo, stretch=1)
+            row_layout.addWidget(distance)
+            row_layout.addWidget(severity)
+            row_container = QWidget()
+            row_container.setLayout(row_layout)
+
+            form.addRow(f"{label}:", row_container)
+            self.constraint_rows.append({
+                "label": label,
+                "enabled": enabled,
+                "layer_combo": layer_combo,
+                "distance": distance,
+                "severity": severity,
+            })
+
+        group.setLayout(form)
+        layout.addWidget(group)
+
+        # --- Interactive position check ---
+        group_check = QGroupBox("Position prüfen")
+        form_check = QFormLayout()
+
+        self.input_check_x = QDoubleSpinBox()
+        self.input_check_x.setRange(0.0, 10_000_000.0)
+        self.input_check_x.setDecimals(2)
+        self.input_check_x.setSingleStep(1.0)
+        self.input_check_x.setValue(0.0)
+        form_check.addRow("Rechtswert (X, UTM):", self.input_check_x)
+
+        self.input_check_y = QDoubleSpinBox()
+        self.input_check_y.setRange(0.0, 10_000_000.0)
+        self.input_check_y.setDecimals(2)
+        self.input_check_y.setSingleStep(1.0)
+        self.input_check_y.setValue(0.0)
+        form_check.addRow("Hochwert (Y, UTM):", self.input_check_y)
+
+        btn_layout = QHBoxLayout()
+        self.btn_constraint_check = QPushButton("Position prüfen")
+        self.btn_constraint_check.clicked.connect(self._on_constraint_check)
+        self.btn_constraint_suggest = QPushButton("Nächste gültige Position")
+        self.btn_constraint_suggest.clicked.connect(self._on_constraint_suggest)
+        btn_layout.addWidget(self.btn_constraint_check)
+        btn_layout.addWidget(self.btn_constraint_suggest)
+        btn_container = QWidget()
+        btn_container.setLayout(btn_layout)
+        form_check.addRow("", btn_container)
+
+        self.label_constraint_result = QLabel("")
+        self.label_constraint_result.setWordWrap(True)
+        self.label_constraint_result.setStyleSheet("QLabel { font-size: 10pt; }")
+        form_check.addRow("Ergebnis:", self.label_constraint_result)
+
+        group_check.setLayout(form_check)
+        layout.addWidget(group_check)
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        scroll.setWidget(widget)
+        return scroll
+
+    def _build_placement_validator(self):
+        """Construct a PlacementValidator from the configured constraint rows.
+
+        Returns (validator, error_message). validator is None if nothing is
+        configured or shapely is missing; error_message is a user-facing string
+        in that case.
+        """
+        try:
+            from ..core.placement_constraints import (
+                PlacementValidator, constraint_from_qgis_layer, Severity
+            )
+        except ImportError as exc:
+            return None, f"placement_constraints nicht ladbar: {exc}"
+
+        constraints = []
+        for row in getattr(self, "constraint_rows", []):
+            if not row["enabled"].isChecked():
+                continue
+            layer = row["layer_combo"].currentLayer()
+            if layer is None:
+                continue
+            severity = (Severity.HARD if row["severity"].currentIndex() == 0
+                        else Severity.SOFT)
+            try:
+                constraints.append(constraint_from_qgis_layer(
+                    name=row["label"],
+                    layer=layer,
+                    min_distance_m=row["distance"].value(),
+                    severity=severity,
+                ))
+            except Exception as exc:
+                return None, f"Layer '{row['label']}' konnte nicht gelesen werden: {exc}"
+
+        if not constraints:
+            return None, ("Keine aktiven Restriktionsebenen konfiguriert. "
+                          "Mindestens eine Kategorie aktivieren und eine Ebene wählen.")
+
+        try:
+            return PlacementValidator(constraints), None
+        except ImportError as exc:
+            return None, f"shapely fehlt: {exc}"
+
+    def _on_constraint_check(self):
+        """Check the entered position against the configured constraints."""
+        validator, error = self._build_placement_validator()
+        if validator is None:
+            self.label_constraint_result.setText(
+                f"<span style='color:#cc6600'>{html.escape(str(error))}</span>"
+            )
+            return
+
+        x = self.input_check_x.value()
+        y = self.input_check_y.value()
+        violations = validator.check_position(x, y)
+
+        if not violations:
+            self.label_constraint_result.setText(
+                "<span style='color:#006600'>✓ Position ist konfliktfrei "
+                "(keine Restriktion verletzt).</span>"
+            )
+            return
+
+        lines = []
+        for v in violations:
+            colour = "#cc0000" if v.severity.value == "hard" else "#cc6600"
+            kind = "HART" if v.severity.value == "hard" else "weich"
+            lines.append(
+                f"<span style='color:{colour}'>✗ {html.escape(v.layer_name)} "
+                f"({kind}): {v.actual_distance_m:.1f} m vorhanden, "
+                f"{v.required_distance_m:.1f} m gefordert "
+                f"(fehlen {v.shortfall_m:.1f} m)</span>"
+            )
+        self.label_constraint_result.setText("<br>".join(lines))
+
+    def _on_constraint_suggest(self):
+        """Suggest the nearest constraint-respecting position."""
+        validator, error = self._build_placement_validator()
+        if validator is None:
+            self.label_constraint_result.setText(
+                f"<span style='color:#cc6600'>{html.escape(str(error))}</span>"
+            )
+            return
+
+        x = self.input_check_x.value()
+        y = self.input_check_y.value()
+        suggestion = validator.suggest_nearest_valid(
+            x, y, search_radius_m=500.0, grid_step_m=10.0
+        )
+        if suggestion is None:
+            self.label_constraint_result.setText(
+                "<span style='color:#cc0000'>Keine gültige Position innerhalb "
+                "von 500 m gefunden. Suchradius erhöhen oder Restriktionen prüfen.</span>"
+            )
+            return
+
+        sx, sy = suggestion
+        import math
+        dist = math.hypot(sx - x, sy - y)
+        self.label_constraint_result.setText(
+            f"<span style='color:#006600'>✓ Nächste gültige Position: "
+            f"X={sx:.2f}, Y={sy:.2f} ({dist:.1f} m vom Eingabepunkt).</span>"
+        )
 
     def _create_profiles_tab(self):
         """Create profiles tab."""
@@ -808,10 +1083,54 @@ class MainDialog(QDialog):
         group_options.setLayout(form_options)
         layout.addWidget(group_options)
 
+        # Local DEM (drone-derived GeoTIFF) — skips hoehendaten.de download.
+        group_local_dem = QGroupBox("Lokales DEM (z. B. Drohnenbefliegung)")
+        form_local = QFormLayout()
+        self.input_local_dem = QLineEdit()
+        self.input_local_dem.setPlaceholderText(
+            "Optional: Pfad zu einer eigenen DEM-Datei (GeoTIFF). "
+            "Wenn gesetzt, wird die hoehendaten.de-Abfrage übersprungen."
+        )
+        btn_browse_dem = QPushButton("Durchsuchen...")
+        btn_browse_dem.clicked.connect(self._browse_local_dem)
+        local_dem_row = QHBoxLayout()
+        local_dem_row.addWidget(self.input_local_dem)
+        local_dem_row.addWidget(btn_browse_dem)
+        form_local.addRow("DEM-Datei:", local_dem_row)
+        group_local_dem.setLayout(form_local)
+        layout.addWidget(group_local_dem)
+
+        # Extra exports / analyses (opt-in, non-fatal).
+        group_extra = QGroupBox("Zusätzliche Auswertungen / Exporte (optional)")
+        form_extra = QFormLayout()
+        self.input_export_slope_stability = QCheckBox(
+            "Slope-Stability-XML (Querschnitt für Slide/GeoStudio) exportieren"
+        )
+        self.input_export_slope_stability.setChecked(False)
+        form_extra.addRow(self.input_export_slope_stability)
+        info_extra = QLabel(
+            "<i>Strata- und Bauphasen-Auswertung erscheinen automatisch im "
+            "Bericht, sofern Volumen und Flächen verfügbar sind.</i>"
+        )
+        info_extra.setWordWrap(True)
+        info_extra.setStyleSheet("color: gray; font-size: 10px;")
+        form_extra.addRow(info_extra)
+        group_extra.setLayout(form_extra)
+        layout.addWidget(group_extra)
+
         layout.addStretch()
         widget.setLayout(layout)
         scroll.setWidget(widget)
         return scroll
+
+    def _browse_local_dem(self):
+        """File picker for a user-supplied DEM (GeoTIFF)."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Lokales DEM auswählen", "",
+            "GeoTIFF (*.tif *.tiff);;Alle Dateien (*)",
+        )
+        if path:
+            self.input_local_dem.setText(path)
 
     def _create_multisite_report_tab(self):
         """Create multi-site comparison report tab."""
@@ -994,7 +1313,7 @@ class MainDialog(QDialog):
 
     def _on_tab_changed(self, index):
         """Handle tab change - show/hide appropriate buttons."""
-        # Last tab (index 3) shows "Start" button, others show "Next" button
+        # The last tab shows the "Start" button, all others show "Next".
         is_last_tab = (index == self.tabs.count() - 1)
 
         self.btn_next.setVisible(not is_last_tab)
@@ -1486,9 +1805,14 @@ class MainDialog(QDialog):
                 soil_code = result.get('soil_code', '')
                 description = result.get('description', '')
 
+                # Escape externally-sourced BGR fields before rendering as Qt rich text
+                soil_type_safe = html.escape(str(soil_type) if soil_type else '', quote=True)
+                soil_code_safe = html.escape(str(soil_code), quote=True)
+                description_safe = html.escape(str(description)[:100], quote=True)
+
                 self.label_bgr_status.setText(
-                    f"<i>✓ Gefunden: <b>{soil_type}</b> (BGR-Code: {soil_code})<br>"
-                    f"{description[:100]}...</i>"
+                    f"<i>✓ Gefunden: <b>{soil_type_safe}</b> (BGR-Code: {soil_code_safe})<br>"
+                    f"{description_safe}...</i>"
                 )
                 self.label_bgr_status.setStyleSheet("QLabel { color: #006600; }")
 
@@ -1513,7 +1837,7 @@ class MainDialog(QDialog):
                 # Fehler
                 error = result.get('error', 'Unbekannter Fehler')
                 self.label_bgr_status.setText(
-                    f"<i>✗ Fehler: {error}</i>"
+                    f"<i>✗ Fehler: {html.escape(str(error), quote=True)}</i>"
                 )
                 self.label_bgr_status.setStyleSheet("QLabel { color: #cc0000; }")
 
@@ -1768,6 +2092,10 @@ class MainDialog(QDialog):
             'height_step': self.input_height_step.value(),
             'slope_angle': self.input_slope_angle.value(),
 
+            # Advanced opt-in analyses
+            'analyze_rotation': self.input_analyze_rotation.isChecked(),
+            'mass_haul_analysis': self.input_mass_haul.isChecked(),
+
             # Profile parameters
             'bbox_buffer': self.input_bbox_buffer.value(),
             'generate_cross_profiles': self.input_generate_cross_profiles.isChecked(),
@@ -1779,6 +2107,8 @@ class MainDialog(QDialog):
             # Output parameters
             'workspace': self.input_workspace.text().strip(),
             'force_refresh': self.input_force_refresh.isChecked(),
+            'local_dem_path': self.input_local_dem.text().strip() or None,
+            'export_slope_stability': self.input_export_slope_stability.isChecked(),
 
             # Uncertainty analysis parameters
             'uncertainty_enabled': self.input_uncertainty_enabled.isChecked(),
@@ -1796,6 +2126,17 @@ class MainDialog(QDialog):
             'water_content': self.input_water_content.value(),
             'optimum_water': self.input_optimum_water.value()
         }
+
+        # Placement-constraint preflight validator. Built here on the main
+        # thread (reads QgsVectorLayer geometries → shapely); passed into the
+        # worker so it can check the crane-pad centroid before DEM download.
+        # None when the Restriktionen tab is not configured → preflight skipped.
+        try:
+            validator, _err = self._build_placement_validator()
+            params['placement_validator'] = validator
+        except Exception as e:
+            self.logger.warning(f"Could not build placement validator: {e}")
+            params['placement_validator'] = None
 
         # Emit signal
         self.processing_requested.emit(params)
@@ -2022,6 +2363,56 @@ class MainDialog(QDialog):
             'cost_gravel': self.input_cost_gravel.value()
         }
 
+    def _compute_park_optimization(self, selected_sites, cost_params):
+        """Run the park-wide transport LP over the selected sites.
+
+        Maps each site's net balance to a surplus (cut_excess) or deficit
+        (fill_need) and optimises inter-site haulage. Returns a ParkSolution,
+        or None if the optimiser is unavailable or fails (non-fatal — the
+        report is still generated without the park section).
+
+        Cost mapping: external gravel cost is the dominant saving, so it is the
+        gravel rate; dump_cost is set to 0 (conservative — on-site surplus
+        disposal is assumed cost-neutral), so transport only happens when it
+        beats buying external gravel.
+        """
+        try:
+            from ..core.park_optimizer import (
+                ParkOptimizer, SiteEarthwork, TransportConfig
+            )
+        except ImportError as exc:
+            self.logger.warning(f"park_optimizer unavailable: {exc}")
+            return None
+
+        sites = []
+        for sd in selected_sites:
+            try:
+                net = sd.net_volume  # cut - fill
+                sites.append(SiteEarthwork(
+                    site_id=sd.site_id,
+                    x=sd.location.x(),
+                    y=sd.location.y(),
+                    cut_excess_m3=max(0.0, net),
+                    fill_need_m3=max(0.0, -net),
+                ))
+            except Exception as exc:
+                self.logger.warning(f"Skipping site in park optimisation: {exc}")
+
+        if len(sites) < 2:
+            # Transport optimisation only makes sense with >= 2 sites.
+            return None
+
+        config = TransportConfig(
+            cost_per_m3_km=0.5,
+            dump_cost_per_m3=0.0,
+            external_gravel_cost_per_m3=cost_params['cost_gravel'],
+        )
+        try:
+            return ParkOptimizer(config).solve(sites)
+        except Exception as exc:
+            self.logger.warning(f"Park optimisation failed: {exc}")
+            return None
+
     def _on_generate_multisite_report(self):
         """Handle generate multi-site report button click."""
         try:
@@ -2095,12 +2486,16 @@ class MainDialog(QDialog):
                 'transport_cost_per_m3_km': 0.5  # Default transport cost
             }
 
+            # Park-wide transport optimisation (optional, non-fatal)
+            park_solution = self._compute_park_optimization(selected_sites, cost_params)
+
             # Import report generator
             from ..core.multi_site_report_generator import MultiSiteReportGenerator
 
             # Create report generator
             self.logger.info(f"Generating multi-site report for {len(selected_sites)} sites...")
-            generator = MultiSiteReportGenerator(site_results, cost_config)
+            generator = MultiSiteReportGenerator(site_results, cost_config,
+                                                 park_solution=park_solution)
 
             # Generate report based on format
             if report_format == 'html':

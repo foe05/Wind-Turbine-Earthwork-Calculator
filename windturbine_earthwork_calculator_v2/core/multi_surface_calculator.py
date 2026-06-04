@@ -16,6 +16,7 @@ import time
 import copy
 import os
 import platform
+from collections import OrderedDict
 from typing import Optional, Tuple, Dict, List
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -533,6 +534,16 @@ class MultiSurfaceCalculator:
         # Vectorization setting (can be overridden)
         self._use_vectorized = True
 
+        # Small LRU cache of DEM samples keyed by geometry WKT. The height
+        # sweep samples the same height-invariant surface polygons once per
+        # scenario; caching avoids re-reading + re-rasterising the DEM N times.
+        # The bounded size keeps RAM in check — transient per-height slope
+        # buffers churn out while frequently-requested surface geometries stay
+        # hot. (Only helps the in-process/sequential path; ProcessPool workers
+        # have their own instances.)
+        self._dem_sample_cache: "OrderedDict[str, np.ndarray]" = OrderedDict()
+        self._dem_sample_cache_maxsize = 16
+
         # Pre-calculate connection edges (for boom surface)
         self.boom_connection_edge = None
         self.boom_slope_direction = None
@@ -845,10 +856,29 @@ class MultiSurfaceCalculator:
         if use_vectorized is None:
             use_vectorized = self._use_vectorized
 
+        # LRU cache lookup (keyed by geometry WKT). Returns the cached array
+        # directly; all current callers treat the samples read-only.
+        cache_key = None
+        try:
+            cache_key = geometry.asWkt()
+        except Exception:
+            cache_key = None
+        if cache_key is not None and cache_key in self._dem_sample_cache:
+            self._dem_sample_cache.move_to_end(cache_key)
+            return self._dem_sample_cache[cache_key]
+
         if use_vectorized and GDAL_AVAILABLE:
-            return self._sample_dem_vectorized(geometry)
+            result = self._sample_dem_vectorized(geometry)
         else:
-            return self._sample_dem_legacy(geometry)
+            result = self._sample_dem_legacy(geometry)
+
+        if cache_key is not None:
+            self._dem_sample_cache[cache_key] = result
+            self._dem_sample_cache.move_to_end(cache_key)
+            while len(self._dem_sample_cache) > self._dem_sample_cache_maxsize:
+                self._dem_sample_cache.popitem(last=False)
+
+        return result
 
     def _sample_dem_vectorized(self, geometry: QgsGeometry) -> np.ndarray:
         """
@@ -1161,15 +1191,10 @@ class MultiSurfaceCalculator:
         # Foundation bottom elevation
         foundation_bottom = self.project.foundation_bottom_elevation
 
-        # Calculate excavation volume
-        # Volume = area × depth, but we calculate it pixel by pixel for accuracy
-        cut_volume = 0.0
-
-        for elevation in elevations:
-            # Excavate from terrain to foundation bottom
-            depth = elevation - foundation_bottom
-            if depth > 0:
-                cut_volume += depth * self.pixel_area
+        # Calculate excavation volume (vectorised; equivalent to summing
+        # max(0, terrain - foundation_bottom) per pixel × pixel_area).
+        depth = np.asarray(elevations, dtype=float) - foundation_bottom
+        cut_volume = float(np.sum(depth[depth > 0])) * self.pixel_area
 
         # Minimal fill (for reference - actual fill is concrete)
         # Just the volume of the foundation itself as placeholder
@@ -1243,16 +1268,11 @@ class MultiSurfaceCalculator:
         # Planum height (below crane surface due to gravel layer)
         planum_height = crane_height - self.project.gravel_thickness
 
-        # Calculate cut/fill on platform
-        cut_volume = 0.0
-        fill_volume = 0.0
-
-        for elevation in elevations:
-            diff = elevation - planum_height
-            if diff > 0:  # Cut (existing terrain is higher than planum)
-                cut_volume += diff * self.pixel_area
-            else:  # Fill (existing terrain is lower than planum)
-                fill_volume += abs(diff) * self.pixel_area
+        # Calculate cut/fill on platform (vectorised; identical to the
+        # per-pixel split — diff==0 contributes nothing to either side).
+        diff = np.asarray(elevations, dtype=float) - planum_height
+        cut_volume = float(np.sum(diff[diff > 0])) * self.pixel_area
+        fill_volume = float(np.sum(-diff[diff < 0])) * self.pixel_area
 
         # Calculate slope area around crane pad
         max_height_diff = max(abs(terrain_max - planum_height), abs(terrain_min - planum_height))
@@ -2002,6 +2022,167 @@ class MultiSurfaceCalculator:
                 f"optimize_for={'NET' if optimize_for_net else 'TOTAL'}"
             )
             return self._find_optimum_multi_parameter(feedback, use_parallel, max_workers)
+
+    @staticmethod
+    def _select_diverse_candidates(scored, n, min_spacing_m):
+        """Pick up to ``n`` candidates, best metric first, spaced apart in height.
+
+        Args:
+            scored: iterable of ``(metric, height, payload)`` tuples. Lower
+                metric is better.
+            n: maximum number of candidates to return.
+            min_spacing_m: minimum height difference (m) between selected
+                candidates. 0 disables the spacing filter. This avoids
+                returning several near-identical adjacent heights, which would
+                give a downstream park optimiser no meaningful trade-off.
+
+        Returns:
+            list of ``(height, payload)`` ordered best-first.
+        """
+        ordered = sorted(scored, key=lambda item: item[0])
+        selected = []
+        chosen_heights = []
+        for _metric, height, payload in ordered:
+            if min_spacing_m > 0 and any(
+                abs(height - h) < min_spacing_m for h in chosen_heights
+            ):
+                continue
+            selected.append((height, payload))
+            chosen_heights.append(height)
+            if len(selected) >= n:
+                break
+        return selected
+
+    def find_n_best(self, n: int = 5, min_spacing_m: float = 0.0,
+                    feedback: Optional[QgsProcessingFeedback] = None
+                    ) -> List[Tuple[float, MultiSurfaceCalculationResult]]:
+        """Return the top-``n`` crane-pad height candidates, best first.
+
+        Sweeps the configured crane-height search range (the single-parameter
+        space) and ranks every height by the active optimisation metric
+        (``abs(net_volume)`` when optimising for net earthwork, else
+        ``total_volume_moved``). Useful for feeding a per-site candidate list
+        into ``core.park_optimizer.ParkOptimizer.solve_milp``.
+
+        Each returned ``MultiSurfaceCalculationResult`` exposes ``total_cut`` /
+        ``total_fill`` / ``net_volume``; a caller mapping to a park
+        ``SiteCandidate`` typically uses
+        ``cut_excess = max(0, net_volume)`` and
+        ``fill_need = max(0, -net_volume)``.
+
+        Args:
+            n: number of candidates to return (>= 1).
+            min_spacing_m: minimum height spacing between candidates to ensure
+                they are meaningfully different (0 = no spacing filter).
+            feedback: optional QGIS feedback.
+
+        Returns:
+            list of ``(height, result)`` tuples, best metric first. Never empty
+            on success; raises ValueError if no scenario could be evaluated.
+
+        Note: this intentionally covers only the crane-height dimension. Boom
+        slope / rotor offset multi-parameter candidates are out of scope here.
+        """
+        if n < 1:
+            raise ValueError(f"n must be >= 1, got {n}")
+
+        min_height = self.project.search_min_height
+        max_height = self.project.search_max_height
+        step = self.project.search_step
+        heights = np.arange(min_height, max_height + step, step)
+
+        self.logger.info(
+            f"find_n_best: evaluating {len(heights)} heights "
+            f"({min_height:.2f}-{max_height:.2f} m, step {step:.3f} m), "
+            f"returning top {n} (min spacing {min_spacing_m:.2f} m)"
+        )
+
+        optimize_for_net = self.project.optimize_for_net_earthwork
+        scored = []
+        for height in heights:
+            if feedback and feedback.isCanceled():
+                break
+            try:
+                result = self.calculate_scenario(float(height), feedback)
+                metric = (abs(result.net_volume) if optimize_for_net
+                          else result.total_volume_moved)
+                scored.append((metric, float(height), result))
+            except Exception as e:
+                self.logger.error(f"find_n_best: scenario h={height:.2f}m failed: {e}")
+
+        if not scored:
+            raise ValueError(
+                "find_n_best: no valid scenarios in the configured height range "
+                f"({min_height:.2f}-{max_height:.2f} m)"
+            )
+
+        return self._select_diverse_candidates(scored, n, min_spacing_m)
+
+    def analyze_crane_rotation(self, angles_deg=None, reference_height=None) -> Optional[dict]:
+        """Informational crane-pad orientation analysis (does NOT change the
+        main optimisation). Rotates the crane-pad footprint around its centroid
+        through a set of angles, samples the DEM for each, and reports the
+        orientation that minimises flat cut/fill against the local mean terrain.
+
+        Returns a dict with best_angle_deg, best/baseline volume moved and the
+        saving, or None if it cannot run (e.g. degenerate geometry / no DEM).
+        The heavy lifting is delegated to the unit-tested
+        core.rotation_optimizer; this method only supplies the DEM-aware
+        evaluation. Wrapped by the caller as a non-fatal, opt-in step.
+        """
+        from .rotation_optimizer import (
+            RotationOptimizer, polygon_centroid, rotate_points
+        )
+
+        geom = self.project.crane_pad.geometry
+        if geom is None or geom.isEmpty():
+            return None
+        # Exterior ring as (x, y) tuples.
+        if geom.isMultipart():
+            multi = geom.asMultiPolygon()
+            rings = multi[0] if multi else None
+        else:
+            rings = geom.asPolygon()
+        if not rings or len(rings[0]) < 3:
+            return None
+        pts = [(p.x(), p.y()) for p in rings[0]]
+        pivot = polygon_centroid(pts)
+
+        def evaluate(rotated_xy):
+            rgeom = QgsGeometry.fromPolygonXY([[QgsPointXY(x, y) for (x, y) in rotated_xy]])
+            elevations = self.sample_dem_in_polygon(rgeom)
+            if elevations is None or len(elevations) == 0:
+                raise ValueError("no DEM data in rotated footprint")
+            elevations = np.asarray(elevations, dtype=float)
+            planum = (float(np.mean(elevations)) if reference_height is None
+                      else float(reference_height))
+            diff = elevations - planum
+            cut = float(np.sum(diff[diff > 0])) * self.pixel_area
+            fill = float(np.sum(-diff[diff < 0])) * self.pixel_area
+            return cut + fill, {"cut": cut, "fill": fill, "planum": planum}
+
+        try:
+            optimizer = (RotationOptimizer(angles_deg) if angles_deg
+                         else RotationOptimizer())
+            best = optimizer.optimize(pts, evaluate, pivot=pivot)
+            # Baseline at 0° (identity rotation) for a saving comparison.
+            baseline_metric, _ = evaluate(rotate_points(pts, 0.0, pivot))
+        except Exception as e:
+            self.logger.warning(f"analyze_crane_rotation failed: {e}")
+            return None
+
+        savings = baseline_metric - best.metric
+        self.logger.info(
+            f"Rotation analysis: best={best.angle_deg:.0f}° "
+            f"(moved {best.metric:.0f} m³ vs baseline {baseline_metric:.0f} m³, "
+            f"saving {savings:.0f} m³)"
+        )
+        return {
+            "best_angle_deg": best.angle_deg,
+            "best_volume_moved_m3": best.metric,
+            "baseline_volume_moved_m3": baseline_metric,
+            "savings_m3": savings,
+        }
 
     def _find_optimum_multi_parameter(self, feedback: Optional[QgsProcessingFeedback],
                                       use_parallel: bool, max_workers: int) -> Tuple[float, MultiSurfaceCalculationResult]:

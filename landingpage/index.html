@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="de" class="scroll-smooth">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Kubatur — Erdmassen für Windenergie. Browserbasiert. Plugin-Genauigkeit. Lieferfertige Reports.">
+<title>Kubatur — Erdmassen für Windenergie. In Minuten statt Tagen.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          accent: { DEFAULT: '#0E7C7B', dark: '#0a5e5d', light: '#14a3a1' },
+          ink:    { DEFAULT: '#1f2937', soft: '#374151' },
+          cut:    '#f4a259',
+          fill:   '#4a90d9',
+        },
+        fontFamily: {
+          sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  :root { color-scheme: light dark; }
+  html { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+  .mockup {
+    background:
+      linear-gradient(135deg, rgba(14,124,123,0.05) 0%, rgba(14,124,123,0.0) 100%),
+      repeating-linear-gradient(0deg, transparent 0 24px, rgba(0,0,0,0.04) 24px 25px),
+      repeating-linear-gradient(90deg, transparent 0 24px, rgba(0,0,0,0.04) 24px 25px);
+  }
+  .dark .mockup {
+    background:
+      linear-gradient(135deg, rgba(14,124,123,0.15) 0%, rgba(14,124,123,0.0) 100%),
+      repeating-linear-gradient(0deg, transparent 0 24px, rgba(255,255,255,0.04) 24px 25px),
+      repeating-linear-gradient(90deg, transparent 0 24px, rgba(255,255,255,0.04) 24px 25px);
+  }
+</style>
+</head>
+<body class="bg-white text-ink dark:bg-zinc-950 dark:text-zinc-100 antialiased">
+
+<!-- ============================================================ NAV -->
+<header class="sticky top-0 z-40 backdrop-blur bg-white/80 dark:bg-zinc-950/80 border-b border-zinc-200 dark:border-zinc-800">
+  <div class="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+    <a href="#" class="flex items-center gap-2 font-bold text-lg">
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M2 26 L8 18 L14 24 L20 12 L26 22 L30 16" stroke="#0E7C7B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M2 28 L30 28" stroke="currentColor" stroke-width="1.5" opacity="0.4"/>
+      </svg>
+      <span>Kubatur</span>
+    </a>
+    <nav class="hidden md:flex items-center gap-7 text-sm text-ink-soft dark:text-zinc-300">
+      <a href="#warum" class="hover:text-accent dark:hover:text-accent-light">Warum</a>
+      <a href="#features" class="hover:text-accent dark:hover:text-accent-light">Features</a>
+      <a href="#workflow" class="hover:text-accent dark:hover:text-accent-light">Workflow</a>
+      <a href="#vergleich" class="hover:text-accent dark:hover:text-accent-light">Vergleich</a>
+      <a href="#faq" class="hover:text-accent dark:hover:text-accent-light">FAQ</a>
+    </nav>
+    <div class="flex items-center gap-2">
+      <button id="theme-toggle" class="h-9 w-9 grid place-items-center rounded-md border border-zinc-200 dark:border-zinc-700 text-ink-soft dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label="Theme wechseln">
+        <svg class="dark:hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="hidden dark:block" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <a href="https://v1.kubatur.app" class="hidden sm:inline-flex h-9 items-center px-3 rounded-md text-sm border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800">Login</a>
+      <a href="#cta" class="inline-flex h-9 items-center px-3 rounded-md text-sm font-medium bg-accent text-white hover:bg-accent-dark">Pilot anfragen</a>
+    </div>
+  </div>
+</header>
+
+<!-- ============================================================ HERO -->
+<section class="relative">
+  <div class="max-w-6xl mx-auto px-6 pt-20 pb-16 lg:pt-28 lg:pb-24">
+    <div class="grid lg:grid-cols-2 gap-12 items-center">
+      <div>
+        <div class="inline-flex items-center gap-2 text-xs font-medium px-3 py-1 rounded-full bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+          <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
+          Pilot-Phase · Beta unter <code class="ml-1 font-mono">v1.kubatur.app</code>
+        </div>
+        <h1 class="mt-5 text-4xl lg:text-5xl font-extrabold tracking-tight leading-[1.1]">
+          Erdmassen für Windenergie.<br>
+          <span class="text-accent dark:text-accent-light">In Minuten statt Tagen.</span>
+        </h1>
+        <p class="mt-5 text-lg text-ink-soft dark:text-zinc-300 max-w-xl">
+          DXF hoch, FOK rein, Bericht raus. Multi-Surface Cut/Fill, Geländeschnitte, 3D-Ansicht
+          und CAD-Export — pixelgenau identisch zur QGIS-Plugin-Berechnung.
+        </p>
+        <div class="mt-7 flex flex-wrap gap-3">
+          <a href="#cta" class="inline-flex h-11 items-center px-5 rounded-md font-medium bg-accent text-white hover:bg-accent-dark shadow-sm">Pilot anfragen</a>
+          <a href="https://v1.kubatur.app" class="inline-flex h-11 items-center px-5 rounded-md font-medium border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800">Live ansehen →</a>
+        </div>
+        <p class="mt-10 text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Vertraut auf</p>
+        <div class="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm text-ink-soft dark:text-zinc-300">
+          <span>DGM1 von hoehendaten.de</span>
+          <span class="text-zinc-400">·</span>
+          <span>DSGVO-konform</span>
+          <span class="text-zinc-400">·</span>
+          <span>Hosted in Deutschland</span>
+          <span class="text-zinc-400">·</span>
+          <span>Single-Tenant pro Kunde</span>
+        </div>
+      </div>
+      <div class="relative">
+        <div class="mockup aspect-[4/3] w-full rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xl overflow-hidden">
+          <div class="h-9 border-b border-zinc-200/60 dark:border-zinc-700/60 flex items-center gap-1.5 px-3 bg-white/60 dark:bg-zinc-900/60">
+            <span class="h-2.5 w-2.5 rounded-full bg-red-400/70"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-amber-400/70"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-emerald-400/70"></span>
+            <span class="ml-3 text-[11px] font-mono text-zinc-500">v1.kubatur.app — WEA Standort 1</span>
+          </div>
+          <div class="p-6 grid grid-cols-3 gap-4 h-[calc(100%-2.25rem)]">
+            <div class="col-span-1 space-y-2 text-xs">
+              <div class="font-semibold text-ink dark:text-zinc-200">Eingabe</div>
+              <div class="px-2 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800">Kranstellfläche.dxf</div>
+              <div class="px-2 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800">Fundament.dxf</div>
+              <div class="px-2 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800/60 text-zinc-500">+ Ausleger</div>
+              <div class="px-2 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800/60 text-zinc-500">+ Zufahrt</div>
+              <div class="pt-3 font-semibold text-ink dark:text-zinc-200">Parameter</div>
+              <div class="flex justify-between"><span class="text-zinc-500">FOK</span><span>318,37 m</span></div>
+              <div class="flex justify-between"><span class="text-zinc-500">Tiefe</span><span>3,10 m</span></div>
+              <div class="flex justify-between"><span class="text-zinc-500">Schotter</span><span>0,60 m</span></div>
+            </div>
+            <div class="col-span-2 rounded-lg bg-gradient-to-br from-emerald-200/60 via-amber-100/60 to-orange-200/60 dark:from-emerald-900/40 dark:via-amber-900/30 dark:to-orange-900/40 relative overflow-hidden">
+              <svg class="absolute inset-0 w-full h-full" viewBox="0 0 200 150" fill="none">
+                <path d="M 30 90 Q 70 60 110 80 Q 150 100 170 70 L 170 130 L 30 130 Z" fill="rgba(244,162,89,0.55)" stroke="#f4a259" stroke-width="1.5"/>
+                <path d="M 30 90 Q 70 60 110 80 Q 150 100 170 70" stroke="#1f2937" class="dark:stroke-white/80" stroke-width="1.5" fill="none"/>
+                <rect x="60" y="75" width="60" height="20" fill="rgba(14,124,123,0.7)" stroke="#0E7C7B" stroke-width="1.5" rx="2"/>
+                <text x="90" y="89" text-anchor="middle" font-size="6" fill="white" font-weight="700">Kran</text>
+                <circle cx="135" cy="92" r="8" fill="rgba(74,144,217,0.7)" stroke="#4a90d9" stroke-width="1.5"/>
+                <text x="135" y="95" text-anchor="middle" font-size="5" fill="white" font-weight="700">F</text>
+              </svg>
+              <div class="absolute bottom-2 left-2 text-[10px] font-mono text-zinc-700 dark:text-zinc-300 bg-white/70 dark:bg-zinc-900/70 px-1.5 py-0.5 rounded">EPSG:25832</div>
+              <div class="absolute top-2 right-2 text-[10px] font-mono text-zinc-700 dark:text-zinc-300 space-y-0.5">
+                <div class="bg-white/70 dark:bg-zinc-900/70 px-1.5 py-0.5 rounded"><span class="text-cut">Cut</span> 5.280 m³</div>
+                <div class="bg-white/70 dark:bg-zinc-900/70 px-1.5 py-0.5 rounded"><span class="text-fill">Fill</span> 1.763 m³</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="absolute -bottom-4 -right-4 hidden lg:block bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-lg rounded-lg px-4 py-3 text-xs font-mono">
+          <div class="text-zinc-500">Regression</div>
+          <div class="font-semibold mt-0.5">Cut 6.546 m³ ±2</div>
+          <div class="font-semibold">Fill 2.411 m³ ±2</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ WARUM (3 PILLARS) -->
+<section id="warum" class="border-y border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40">
+  <div class="max-w-6xl mx-auto px-6 py-20">
+    <h2 class="text-3xl font-bold tracking-tight">Warum Kubatur</h2>
+    <div class="mt-10 grid md:grid-cols-3 gap-6">
+      <div class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950">
+        <div class="h-10 w-10 grid place-items-center rounded-lg bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        </div>
+        <h3 class="mt-4 font-semibold text-lg">Browser statt Plugin</h3>
+        <p class="mt-2 text-ink-soft dark:text-zinc-300 text-sm leading-relaxed">
+          Kein QGIS, keine OSGeo4W-Shell, keine Python-Abhängigkeiten.
+          Funktioniert auf jedem Rechner mit Browser.
+        </p>
+      </div>
+      <div class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950">
+        <div class="h-10 w-10 grid place-items-center rounded-lg bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+        </div>
+        <h3 class="mt-4 font-semibold text-lg">Plugin-Parität verifiziert</h3>
+        <p class="mt-2 text-ink-soft dark:text-zinc-300 text-sm leading-relaxed">
+          Pixel-weise identisch zur etablierten QGIS-Plugin-Berechnung —
+          Foundation Cut ±1 m³, Crane Cut/Fill ±2 m³ gegen Referenz-Fixture.
+        </p>
+      </div>
+      <div class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950">
+        <div class="h-10 w-10 grid place-items-center rounded-lg bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <h3 class="mt-4 font-semibold text-lg">End-to-End in einem Lauf</h3>
+        <p class="mt-2 text-ink-soft dark:text-zinc-300 text-sm leading-relaxed">
+          Vom DXF bis zum PDF-Bericht inklusive Profilen, 3D-Ansicht,
+          GeoPackage, LandXML und CO₂-Bilanz.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ FEATURE GRID -->
+<section id="features" class="border-b border-zinc-200 dark:border-zinc-800">
+  <div class="max-w-6xl mx-auto px-6 py-20">
+    <h2 class="text-3xl font-bold tracking-tight">Was Kubatur kann</h2>
+    <p class="mt-2 text-ink-soft dark:text-zinc-300 max-w-2xl">
+      Sechs Feature-Bündel, alle aus einer Pipeline — von der DXF-Eingabe bis zum
+      Bauleitungs-fertigen Bericht.
+    </p>
+    <div class="mt-10 grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+
+      <!-- Card: Eingabe -->
+      <article class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950 hover:border-accent/40 transition">
+        <div class="flex items-center gap-3">
+          <div class="h-9 w-9 grid place-items-center rounded-md bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3"/></svg>
+          </div>
+          <h3 class="font-semibold">Eingabe & DEM</h3>
+        </div>
+        <ul class="mt-4 space-y-2 text-sm text-ink-soft dark:text-zinc-300">
+          <li class="flex gap-2"><span class="text-accent">›</span>DXF-Upload für 6 Surfaces: Kran, Fundament, Ausleger, Blattlager, Holme, Zufahrt</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Automatischer DEM-Download von hoehendaten.de (DGM1, 1 m, deutschlandweit)</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>CRS-Auto-Erkennung (UTM 32N/33N, Gauss-Krüger als Legacy)</li>
+        </ul>
+      </article>
+
+      <!-- Card: Berechnung -->
+      <article class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950 hover:border-accent/40 transition">
+        <div class="flex items-center gap-3">
+          <div class="h-9 w-9 grid place-items-center rounded-md bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+          </div>
+          <h3 class="font-semibold">Berechnung & Optimierung</h3>
+        </div>
+        <ul class="mt-4 space-y-2 text-sm text-ink-soft dark:text-zinc-300">
+          <li class="flex gap-2"><span class="text-accent">›</span>Pixel-genaue Cut/Fill-Bilanz inkl. Slope-/Böschungsanteil</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Höhen-Sweep (coarse → fine) mit drei Zielen: min. bewegte Masse, Massenausgleich, min. Abtrag</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Boom-Slope-Sweep, Rotor-Offset-Sweep, Road-Slope-Sweep</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Rotation-Optimierung — Plattform gegen Höhenlinien ausrichten</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Placement-Constraints — Wohnen, Straßen, Schutzgebiete</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Monte-Carlo-Unsicherheit (LHS + Sensitivitäts-Ranking)</li>
+        </ul>
+      </article>
+
+      <!-- Card: Reports -->
+      <article class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950 hover:border-accent/40 transition">
+        <div class="flex items-center gap-3">
+          <div class="h-9 w-9 grid place-items-center rounded-md bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8M8 9h2"/></svg>
+          </div>
+          <h3 class="font-semibold">Berichte & Visualisierung</h3>
+        </div>
+        <ul class="mt-4 space-y-2 text-sm text-ink-soft dark:text-zinc-300">
+          <li class="flex gap-2"><span class="text-accent">›</span>HTML- und PDF-Bericht mit Tabellen, Karte und Profilen</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Quer- und Längsprofile als hochauflösende PNGs</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Interaktive 3D-Ansicht im Browser (Three.js, DEM-Hillshade + Surface-Meshes)</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Mass-Haul-Diagramm mit Massenausgleichspunkten und Free-Haul/Overhaul-Split</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Side-by-Side-Vergleich mehrerer Planungsvarianten</li>
+        </ul>
+      </article>
+
+      <!-- Card: Multi-Site -->
+      <article class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950 hover:border-accent/40 transition">
+        <div class="flex items-center gap-3">
+          <div class="h-9 w-9 grid place-items-center rounded-md bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v20M15 2v20M2 9h20M2 15h20"/></svg>
+          </div>
+          <h3 class="font-semibold">Multi-Site & Park</h3>
+        </div>
+        <ul class="mt-4 space-y-2 text-sm text-ink-soft dark:text-zinc-300">
+          <li class="flex gap-2"><span class="text-accent">›</span>Vergleich mehrerer Standorte im selben Park</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Park-weite Material-Transport-Optimierung (LP/MILP über scipy.optimize)</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Excel-Export (XLSX) und HTML-Park-Report</li>
+        </ul>
+      </article>
+
+      <!-- Card: Geotechnik -->
+      <article class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950 hover:border-accent/40 transition">
+        <div class="flex items-center gap-3">
+          <div class="h-9 w-9 grid place-items-center rounded-md bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M2 7h20M2 17h20"/></svg>
+          </div>
+          <h3 class="font-semibold">Geotechnik & Nachhaltigkeit</h3>
+        </div>
+        <ul class="mt-4 space-y-2 text-sm text-ink-soft dark:text-zinc-300">
+          <li class="flex gap-2"><span class="text-accent">›</span>Bauphasen-Verteilung: Massen, Kosten, CO₂ je Phase</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Bodenschichten-Aufteilung: Mutterboden, Frostschutz, Schottertragschicht (DIN 18196 / RStO 12)</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Bodenstabilisierung: Kalkdosierung + Schotterdicke nach Ev2-Lookup</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>BGR-Bodendaten-Lookup (BÜK200) per Klick</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>CO₂-Bilanz (Aushub, Transport, Beton, Stahl) mit konfigurierbaren Faktoren</li>
+        </ul>
+      </article>
+
+      <!-- Card: Exports -->
+      <article class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950 hover:border-accent/40 transition">
+        <div class="flex items-center gap-3">
+          <div class="h-9 w-9 grid place-items-center rounded-md bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          </div>
+          <h3 class="font-semibold">Exporte CAD / BIM / Maschinensteuerung</h3>
+        </div>
+        <ul class="mt-4 space-y-2 text-sm text-ink-soft dark:text-zinc-300">
+          <li class="flex gap-2"><span class="text-accent">›</span>GeoPackage (alle Surfaces + Attribute) für QGIS und Civil 3D</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>LandXML 1.2 TIN-Surfaces für Trimble, Topcon, Leica</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>Slope-Stability-XML für Slide2, GeoStudio SLOPE/W, Plaxis-LE</li>
+          <li class="flex gap-2"><span class="text-accent">›</span>3D-Mesh als OBJ, STL und glTF — direkt in Blender, Cesium, Sketchfab</li>
+        </ul>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ WORKFLOW -->
+<section id="workflow" class="bg-zinc-50/60 dark:bg-zinc-900/40 border-b border-zinc-200 dark:border-zinc-800">
+  <div class="max-w-6xl mx-auto px-6 py-20">
+    <h2 class="text-3xl font-bold tracking-tight">So läuft eine Berechnung</h2>
+    <p class="mt-2 text-ink-soft dark:text-zinc-300 max-w-2xl">
+      Fünf Schritte. Maus statt CLI.
+    </p>
+    <ol class="mt-10 grid md:grid-cols-5 gap-4">
+      <li class="rounded-lg border border-zinc-200 dark:border-zinc-800 p-5 bg-white dark:bg-zinc-950">
+        <div class="text-accent dark:text-accent-light font-mono text-sm">01</div>
+        <div class="font-semibold mt-1">DXF hochladen</div>
+        <p class="mt-2 text-xs text-ink-soft dark:text-zinc-400 leading-relaxed">
+          Pflicht: Kranstellfläche + Fundamentfläche. Optional: Ausleger, Blattlager, Holme, Zufahrt.
+        </p>
+      </li>
+      <li class="rounded-lg border border-zinc-200 dark:border-zinc-800 p-5 bg-white dark:bg-zinc-950">
+        <div class="text-accent dark:text-accent-light font-mono text-sm">02</div>
+        <div class="font-semibold mt-1">Parameter setzen</div>
+        <p class="mt-2 text-xs text-ink-soft dark:text-zinc-400 leading-relaxed">
+          FOK, Fundamenttiefe, Schotterdicke, Optimierungs-Ziel, Sweep-Bereiche.
+        </p>
+      </li>
+      <li class="rounded-lg border border-zinc-200 dark:border-zinc-800 p-5 bg-white dark:bg-zinc-950">
+        <div class="text-accent dark:text-accent-light font-mono text-sm">03</div>
+        <div class="font-semibold mt-1">Berechnen</div>
+        <p class="mt-2 text-xs text-ink-soft dark:text-zinc-400 leading-relaxed">
+          DEM wird automatisch gezogen, Cut/Fill und alle Sweeps laufen pixelweise auf dem Mosaik.
+        </p>
+      </li>
+      <li class="rounded-lg border border-zinc-200 dark:border-zinc-800 p-5 bg-white dark:bg-zinc-950">
+        <div class="text-accent dark:text-accent-light font-mono text-sm">04</div>
+        <div class="font-semibold mt-1">Live ansehen</div>
+        <p class="mt-2 text-xs text-ink-soft dark:text-zinc-400 leading-relaxed">
+          Karte, Tabellen je Surface, Profile, 3D-Modell.
+        </p>
+      </li>
+      <li class="rounded-lg border border-zinc-200 dark:border-zinc-800 p-5 bg-white dark:bg-zinc-950">
+        <div class="text-accent dark:text-accent-light font-mono text-sm">05</div>
+        <div class="font-semibold mt-1">Bericht downloaden</div>
+        <p class="mt-2 text-xs text-ink-soft dark:text-zinc-400 leading-relaxed">
+          HTML, PDF, GeoPackage, LandXML, glTF, ZIP.
+        </p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============================================================ COMPARISON -->
+<section id="vergleich" class="border-b border-zinc-200 dark:border-zinc-800">
+  <div class="max-w-6xl mx-auto px-6 py-20">
+    <h2 class="text-3xl font-bold tracking-tight">Kubatur vs. heutiger Workflow</h2>
+    <p class="mt-2 text-ink-soft dark:text-zinc-300 max-w-2xl">
+      Was bisher Tage gedauert hat, dauert jetzt eine Kaffeepause.
+    </p>
+    <div class="mt-10 overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <table class="min-w-full text-sm">
+        <thead class="bg-zinc-50 dark:bg-zinc-900 text-left">
+          <tr>
+            <th class="px-5 py-3 font-semibold">Schritt</th>
+            <th class="px-5 py-3 font-semibold">Heute</th>
+            <th class="px-5 py-3 font-semibold text-accent dark:text-accent-light">Mit Kubatur</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
+          <tr><td class="px-5 py-3 font-medium">DXF einlesen</td><td class="px-5 py-3 text-ink-soft dark:text-zinc-300">QGIS + ezdxf-Workarounds</td><td class="px-5 py-3">Drag & Drop im Browser</td></tr>
+          <tr><td class="px-5 py-3 font-medium">DEM ziehen</td><td class="px-5 py-3 text-ink-soft dark:text-zinc-300">hoehendaten.de manuell, Tile-Mosaik</td><td class="px-5 py-3">Automatisch im Hintergrund</td></tr>
+          <tr><td class="px-5 py-3 font-medium">Cut/Fill rechnen</td><td class="px-5 py-3 text-ink-soft dark:text-zinc-300">Excel-Tabellen, Plugin-Tabs</td><td class="px-5 py-3">Ein Klick, pixelgenau</td></tr>
+          <tr><td class="px-5 py-3 font-medium">Profile rendern</td><td class="px-5 py-3 text-ink-soft dark:text-zinc-300">matplotlib-Script, Output sortieren</td><td class="px-5 py-3">Quer + Längs inklusive</td></tr>
+          <tr><td class="px-5 py-3 font-medium">Bericht zusammenbauen</td><td class="px-5 py-3 text-ink-soft dark:text-zinc-300">manuell in Word/PowerPoint</td><td class="px-5 py-3">PDF + GeoPackage in einem ZIP</td></tr>
+          <tr class="bg-accent/5 dark:bg-accent/10"><td class="px-5 py-3 font-bold">Zeit</td><td class="px-5 py-3 font-bold">1–2 Personentage</td><td class="px-5 py-3 font-bold text-accent dark:text-accent-light">5–15 Minuten</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ USE CASES -->
+<section class="bg-zinc-50/60 dark:bg-zinc-900/40 border-b border-zinc-200 dark:border-zinc-800">
+  <div class="max-w-6xl mx-auto px-6 py-20">
+    <h2 class="text-3xl font-bold tracking-tight">Use-Cases</h2>
+    <div class="mt-10 grid md:grid-cols-3 gap-5">
+      <article class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950">
+        <div class="text-xs uppercase tracking-widest text-accent dark:text-accent-light font-semibold">Einzelner WEA-Standort</div>
+        <h3 class="mt-2 font-semibold">Optimale Kranhöhe, Massenausgleich, Bauantragsunterlagen</h3>
+        <p class="mt-3 text-sm text-ink-soft dark:text-zinc-300 leading-relaxed">
+          Optimale Kranstellflächen-Höhe finden, Massenausgleich erreichen,
+          Geländeschnitte für den Bauantrag — alles in einem Lauf.
+        </p>
+      </article>
+      <article class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950">
+        <div class="text-xs uppercase tracking-widest text-accent dark:text-accent-light font-semibold">Park-Optimierung</div>
+        <h3 class="mt-2 font-semibold">Mehrere Standorte, geteilter Materialhaushalt</h3>
+        <p class="mt-3 text-sm text-ink-soft dark:text-zinc-300 leading-relaxed">
+          Standorte vergleichen, Material zwischen Cut- und Fill-Sites verschieben,
+          park-weite Transport-Kosten minimieren.
+        </p>
+      </article>
+      <article class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 bg-white dark:bg-zinc-950">
+        <div class="text-xs uppercase tracking-widest text-accent dark:text-accent-light font-semibold">Bauphasen & Reporting</div>
+        <h3 class="mt-2 font-semibold">Massen, Kosten, CO₂ je Phase</h3>
+        <p class="mt-3 text-sm text-ink-soft dark:text-zinc-300 leading-relaxed">
+          Massen, Kosten und CO₂ je Bauphase visualisieren, Reports inkl. LandXML
+          an die Bauleitung übergeben.
+        </p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ TRUST -->
+<section class="border-b border-zinc-200 dark:border-zinc-800">
+  <div class="max-w-6xl mx-auto px-6 py-20">
+    <div class="grid lg:grid-cols-2 gap-12 items-start">
+      <div>
+        <h2 class="text-3xl font-bold tracking-tight">Vertrauen ohne Buzzwords</h2>
+        <p class="mt-3 text-ink-soft dark:text-zinc-300 max-w-xl">
+          Single-Tenant, deutsches Hosting, offen dokumentierte Berechnungslogik —
+          nachprüfbar, kein Lock-in, kein Tracker.
+        </p>
+      </div>
+      <ul class="space-y-4">
+        <li class="flex gap-4">
+          <div class="h-10 w-10 shrink-0 grid place-items-center rounded-md bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+          </div>
+          <div><div class="font-semibold">Single-Tenant pro Kunde</div><div class="text-sm text-ink-soft dark:text-zinc-400">Eigene Instanz, eigene Datenbank — keine geteilte Infrastruktur.</div></div>
+        </li>
+        <li class="flex gap-4">
+          <div class="h-10 w-10 shrink-0 grid place-items-center rounded-md bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 0 20M12 2a15.3 15.3 0 0 0 0 20"/></svg>
+          </div>
+          <div><div class="font-semibold">Hosting in Deutschland</div><div class="text-sm text-ink-soft dark:text-zinc-400">Hetzner-VM in Falkenstein/Nürnberg. TLS via Let's Encrypt, Authentifizierung über Reverse Proxy.</div></div>
+        </li>
+        <li class="flex gap-4">
+          <div class="h-10 w-10 shrink-0 grid place-items-center rounded-md bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div><div class="font-semibold">DSGVO-konform</div><div class="text-sm text-ink-soft dark:text-zinc-400">Keine PII in Telemetrie, keine externen Tracker, keine Cookies außer Session.</div></div>
+        </li>
+        <li class="flex gap-4">
+          <div class="h-10 w-10 shrink-0 grid place-items-center rounded-md bg-accent/10 text-accent dark:bg-accent/20 dark:text-accent-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          </div>
+          <div><div class="font-semibold">Offen für Audit</div><div class="text-sm text-ink-soft dark:text-zinc-400">Die Berechnungslogik ist als QGIS-Plugin open-source — jeder Algorithmus auf GitHub nachprüfbar.</div></div>
+        </li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ FAQ -->
+<section id="faq" class="bg-zinc-50/60 dark:bg-zinc-900/40 border-b border-zinc-200 dark:border-zinc-800">
+  <div class="max-w-3xl mx-auto px-6 py-20">
+    <h2 class="text-3xl font-bold tracking-tight">FAQ</h2>
+    <div class="mt-10 space-y-3">
+      <details class="group rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 open:shadow-sm">
+        <summary class="cursor-pointer font-semibold flex items-center justify-between">Welche DEM-Quellen werden unterstützt?<span class="text-accent group-open:rotate-45 transition">+</span></summary>
+        <p class="mt-3 text-sm text-ink-soft dark:text-zinc-300">DGM1 von hoehendaten.de deutschlandweit, plus Upload eigener GeoTIFFs in EPSG:25832–25836.</p>
+      </details>
+      <details class="group rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 open:shadow-sm">
+        <summary class="cursor-pointer font-semibold flex items-center justify-between">Wie genau ist die Berechnung?<span class="text-accent group-open:rotate-45 transition">+</span></summary>
+        <p class="mt-3 text-sm text-ink-soft dark:text-zinc-300">Pixel-weise identisch zum QGIS-Plugin-Algorithmus — ±2 m³ gegen die Referenz-Fixture aus der Plugin-Regression.</p>
+      </details>
+      <details class="group rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 open:shadow-sm">
+        <summary class="cursor-pointer font-semibold flex items-center justify-between">Welche CAD-Formate kommen raus?<span class="text-accent group-open:rotate-45 transition">+</span></summary>
+        <p class="mt-3 text-sm text-ink-soft dark:text-zinc-300">GeoPackage, LandXML 1.2, glTF, OBJ, STL, PDF, HTML, XLSX.</p>
+      </details>
+      <details class="group rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 open:shadow-sm">
+        <summary class="cursor-pointer font-semibold flex items-center justify-between">Funktioniert es ohne QGIS?<span class="text-accent group-open:rotate-45 transition">+</span></summary>
+        <p class="mt-3 text-sm text-ink-soft dark:text-zinc-300">Ja, komplett browserbasiert. QGIS muss nicht installiert sein.</p>
+      </details>
+      <details class="group rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 open:shadow-sm">
+        <summary class="cursor-pointer font-semibold flex items-center justify-between">Wie steht es um Datenschutz?<span class="text-accent group-open:rotate-45 transition">+</span></summary>
+        <p class="mt-3 text-sm text-ink-soft dark:text-zinc-300">Single-Tenant pro Kunde, Hosting in Deutschland, keine externen Tracker, keine Drittländer-Übermittlung.</p>
+      </details>
+      <details class="group rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 open:shadow-sm">
+        <summary class="cursor-pointer font-semibold flex items-center justify-between">Kann ich mehrere Standorte parallel rechnen?<span class="text-accent group-open:rotate-45 transition">+</span></summary>
+        <p class="mt-3 text-sm text-ink-soft dark:text-zinc-300">Ja, plus park-weite Material-Transport-Optimierung über LP/MILP.</p>
+      </details>
+      <details class="group rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 open:shadow-sm">
+        <summary class="cursor-pointer font-semibold flex items-center justify-between">Was kostet es?<span class="text-accent group-open:rotate-45 transition">+</span></summary>
+        <p class="mt-3 text-sm text-ink-soft dark:text-zinc-300">Pilot-Phase laufend; Preise auf Anfrage. Pilot-Kunden behalten Sonderkonditionen.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ FINAL CTA -->
+<section id="cta" class="border-b border-zinc-200 dark:border-zinc-800">
+  <div class="max-w-3xl mx-auto px-6 py-24 text-center">
+    <h2 class="text-4xl font-extrabold tracking-tight">Pilot starten.</h2>
+    <p class="mt-4 text-ink-soft dark:text-zinc-300">
+      Du schickst zwei DXFs, wir rechnen den ersten Standort gemeinsam.
+      Kein Kreditkartenzwang, kein Account nötig.
+    </p>
+    <div class="mt-7 flex flex-wrap justify-center gap-3">
+      <a href="mailto:pilot@kubatur.app?subject=Pilot-Anfrage%20Kubatur" class="inline-flex h-11 items-center px-6 rounded-md font-medium bg-accent text-white hover:bg-accent-dark shadow-sm">Pilot anfragen</a>
+      <a href="https://v1.kubatur.app" class="inline-flex h-11 items-center px-6 rounded-md font-medium border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800">Live ansehen →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ FOOTER -->
+<footer class="bg-zinc-50/60 dark:bg-zinc-900/40">
+  <div class="max-w-6xl mx-auto px-6 py-14">
+    <div class="grid sm:grid-cols-2 md:grid-cols-4 gap-8 text-sm">
+      <div>
+        <div class="font-bold text-base flex items-center gap-2">
+          <svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M2 26 L8 18 L14 24 L20 12 L26 22 L30 16" stroke="#0E7C7B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 28 L30 28" stroke="currentColor" stroke-width="1.5" opacity="0.4"/></svg>
+          Kubatur
+        </div>
+        <p class="mt-3 text-ink-soft dark:text-zinc-400 max-w-xs">
+          Erdmassen für Windenergie. In Minuten statt Tagen.
+        </p>
+      </div>
+      <div>
+        <div class="font-semibold">Produkt</div>
+        <ul class="mt-3 space-y-2 text-ink-soft dark:text-zinc-400">
+          <li><a href="#features" class="hover:text-accent dark:hover:text-accent-light">Features</a></li>
+          <li><a href="https://v1.kubatur.app" class="hover:text-accent dark:hover:text-accent-light">Live-Demo</a></li>
+          <li><a href="#cta" class="hover:text-accent dark:hover:text-accent-light">Pricing anfragen</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="font-semibold">Ressourcen</div>
+        <ul class="mt-3 space-y-2 text-ink-soft dark:text-zinc-400">
+          <li><a href="https://github.com/foe05/Wind-Turbine-Earthwork-Calculator" class="hover:text-accent dark:hover:text-accent-light">GitHub</a></li>
+          <li><a href="#" class="hover:text-accent dark:hover:text-accent-light">Dokumentation</a></li>
+          <li><a href="#" class="hover:text-accent dark:hover:text-accent-light">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="font-semibold">Kontakt &amp; Rechtliches</div>
+        <ul class="mt-3 space-y-2 text-ink-soft dark:text-zinc-400">
+          <li><a href="mailto:pilot@kubatur.app" class="hover:text-accent dark:hover:text-accent-light">pilot@kubatur.app</a></li>
+          <li><a href="https://broetzens.de/impressum" class="hover:text-accent dark:hover:text-accent-light">Impressum</a></li>
+          <li><a href="https://broetzens.de/datenschutz" class="hover:text-accent dark:hover:text-accent-light">Datenschutz</a></li>
+          <li><a href="https://broetzens.de/agb" class="hover:text-accent dark:hover:text-accent-light">AGB</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="mt-10 pt-6 border-t border-zinc-200 dark:border-zinc-800 text-xs text-ink-soft dark:text-zinc-500 flex flex-wrap gap-x-3 gap-y-1 items-center">
+      <span>© 2026 Kubatur — ein Service der <a href="https://broetzens.de" class="font-medium text-ink dark:text-zinc-200 hover:text-accent dark:hover:text-accent-light underline decoration-zinc-300 dark:decoration-zinc-600 underline-offset-2">Broetzens IT Cattles and Cows</a>.</span>
+      <span class="text-zinc-300 dark:text-zinc-700">·</span>
+      <span>Gebaut auf Basis des QGIS-Plugins <a href="https://github.com/foe05/Wind-Turbine-Earthwork-Calculator" class="underline decoration-zinc-300 dark:decoration-zinc-600 underline-offset-2 hover:text-accent dark:hover:text-accent-light">Wind Turbine Earthwork Calculator</a>.</span>
+    </div>
+  </div>
+</footer>
+
+<!-- ============================================================ JS -->
+<script>
+  // Dark-Mode-Toggle mit Persistenz im localStorage; respektiert system preference auf erstem Besuch.
+  (function(){
+    const root = document.documentElement;
+    const stored = localStorage.getItem('kubatur-theme');
+    const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (stored === 'dark' || (!stored && sysDark)) root.classList.add('dark');
+    document.getElementById('theme-toggle').addEventListener('click', () => {
+      root.classList.toggle('dark');
+      localStorage.setItem('kubatur-theme', root.classList.contains('dark') ? 'dark' : 'light');
+    });
+  })();
+</script>
+
+</body>
+</html>

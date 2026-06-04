@@ -8,6 +8,7 @@ Author: Wind Energy Site Planning
 Version: 2.0.0
 """
 
+import html
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -32,7 +33,8 @@ class MultiSiteReportGenerator:
     - Cost breakdowns per site
     """
 
-    def __init__(self, site_results: List[Dict], cost_config: Optional[Dict] = None):
+    def __init__(self, site_results: List[Dict], cost_config: Optional[Dict] = None,
+                 park_solution=None):
         """
         Initialize multi-site report generator.
 
@@ -48,6 +50,10 @@ class MultiSiteReportGenerator:
                 - fill_cost_per_m3: Cost per cubic meter of fill
                 - gravel_cost_per_m3: Cost per cubic meter of gravel
                 - transport_cost_per_m3_km: Transport cost per m3 per km
+            park_solution: Optional ParkSolution from
+                core.park_optimizer.ParkOptimizer.solve(). When provided, a
+                "Park-Transport-Optimierung" section is rendered in the HTML
+                report showing the optimal inter-site haul plan and savings.
         """
         self.site_results = site_results
         self.cost_config = cost_config or {
@@ -56,6 +62,7 @@ class MultiSiteReportGenerator:
             'gravel_cost_per_m3': 25.0,
             'transport_cost_per_m3_km': 0.5
         }
+        self.park_solution = park_solution
         self.logger = get_plugin_logger()
 
         # Calculate aggregated statistics
@@ -167,7 +174,8 @@ class MultiSiteReportGenerator:
         """
         self.logger.info(f"Generating multi-site HTML report: {output_path}")
 
-        project_name = project_name or "Windpark-Projekt"
+        # Escape user-supplied project name before any HTML interpolation
+        project_name = html.escape(project_name or "Windpark-Projekt", quote=True)
 
         # Generate HTML sections
         html_header = self._generate_header(project_name)
@@ -177,6 +185,7 @@ class MultiSiteReportGenerator:
         html_site_comparison = self._generate_site_comparison()
         html_site_details = self._generate_site_details()
         html_cost_breakdown = self._generate_cost_breakdown()
+        html_park_optimization = self._generate_park_optimization()
         html_footer = self._generate_footer()
 
         # Combine all sections
@@ -197,6 +206,7 @@ class MultiSiteReportGenerator:
         {html_site_comparison}
         {html_site_details}
         {html_cost_breakdown}
+        {html_park_optimization}
     </div>
     {html_footer}
 </body>
@@ -998,7 +1008,7 @@ class MultiSiteReportGenerator:
         # Generate ranking table rows
         ranking_rows = []
         for i, site in enumerate(ranked_sites, 1):
-            site_name = site.get('site_name', site.get('site_id', f'Site {i}'))
+            site_name = html.escape(str(site.get('site_name', site.get('site_id', f'Site {i}'))), quote=True)
             results = site.get('results', {})
 
             cut = results.get('total_cut', 0)
@@ -1063,7 +1073,7 @@ class MultiSiteReportGenerator:
         comparison_rows = []
 
         for site in self.site_results:
-            site_name = site.get('site_name', site.get('site_id', 'Unknown'))
+            site_name = html.escape(str(site.get('site_name', site.get('site_id', 'Unknown'))), quote=True)
             results = site.get('results', {})
             coords = site.get('coordinates', (0, 0))
 
@@ -1119,7 +1129,7 @@ class MultiSiteReportGenerator:
         site_sections = []
 
         for i, site in enumerate(self.site_results, 1):
-            site_name = site.get('site_name', site.get('site_id', f'Site {i}'))
+            site_name = html.escape(str(site.get('site_name', site.get('site_id', f'Site {i}'))), quote=True)
             results = site.get('results', {})
             coords = site.get('coordinates', (0, 0))
             config = site.get('config', {})
@@ -1369,7 +1379,7 @@ class MultiSiteReportGenerator:
         cost_rows = []
 
         for site in self.site_results:
-            site_name = site.get('site_name', site.get('site_id', 'Unknown'))
+            site_name = html.escape(str(site.get('site_name', site.get('site_id', 'Unknown'))), quote=True)
             results = site.get('results', {})
 
             cut = results.get('total_cut', 0)
@@ -1428,6 +1438,95 @@ class MultiSiteReportGenerator:
         <p style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
             <strong>Hinweis:</strong> Die Kosten sind Schätzungen basierend auf Standardwerten.
             Tatsächliche Kosten können je nach regionalen Gegebenheiten, Marktpreisen und Projektbedingungen variieren.
+        </p>
+    </div>
+"""
+
+    def _generate_park_optimization(self) -> str:
+        """Generate the park-wide transport-optimisation section.
+
+        Renders nothing when no ParkSolution was supplied. Otherwise shows the
+        optimal inter-site haul plan plus the estimated savings versus each
+        site sourcing/disposing material independently.
+        """
+        sol = self.park_solution
+        if sol is None:
+            return ""
+
+        # A failed/empty solve still carries a status; show a soft notice.
+        if not sol.flows and sol.savings_eur <= 0:
+            return f"""
+    <div class="section">
+        <h2>🚚 Park-Transport-Optimierung</h2>
+        <div class="highlight-box info">
+            <p>Kein wirtschaftlicher Materialtransport zwischen den Standorten
+            gefunden (Solver-Status: {html.escape(str(sol.solver_status))}).
+            Jeder Standort wird Abtrag/Auftrag eigenständig bilanzieren.</p>
+        </div>
+    </div>
+"""
+
+        flow_rows = []
+        for f in sol.flows:
+            flow_rows.append(f"""
+            <tr>
+                <td><strong>{html.escape(str(f.from_site))}</strong></td>
+                <td><strong>{html.escape(str(f.to_site))}</strong></td>
+                <td>{f.volume_m3:,.0f} m³</td>
+                <td>{f.distance_km:.2f} km</td>
+                <td>{f.transport_cost_eur:,.0f} €</td>
+            </tr>""")
+
+        flows_table = f"""
+        <table>
+            <tr>
+                <th>Von Standort</th>
+                <th>Nach Standort</th>
+                <th>Volumen</th>
+                <th>Distanz</th>
+                <th>Transportkosten</th>
+            </tr>
+            {''.join(flow_rows)}
+        </table>
+""" if flow_rows else "<p>Keine Transportbewegungen im Optimum.</p>"
+
+        savings_pct = (
+            (sol.savings_eur / sol.baseline_cost_eur * 100.0)
+            if sol.baseline_cost_eur > 0 else 0.0
+        )
+
+        return f"""
+    <div class="section">
+        <h2>🚚 Park-Transport-Optimierung</h2>
+        <p>Optimaler Materialtransport zwischen den Standorten, um externe
+        Schotterkäufe und Abtransport zu minimieren (lineare Optimierung).</p>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Transportkosten</h3>
+                <div class="value">{sol.total_transport_eur:,.0f}</div>
+                <div class="unit">€</div>
+            </div>
+            <div class="card">
+                <h3>Einsparung ggü. Einzelbilanz</h3>
+                <div class="value">{sol.savings_eur:,.0f}</div>
+                <div class="unit">€ ({savings_pct:.1f} %)</div>
+            </div>
+            <div class="card">
+                <h3>Transportbewegungen</h3>
+                <div class="value">{len(sol.flows)}</div>
+                <div class="unit">Routen</div>
+            </div>
+        </div>
+
+        <h3>Transportplan</h3>
+        {flows_table}
+
+        <p style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
+            <strong>Hinweis:</strong> Distanzen sind Luftlinien zwischen den
+            Standort-Mittelpunkten; reale Transportwege können länger sein.
+            Die Einsparung vergleicht den optimierten Plan mit dem Szenario,
+            in dem jeder Standort seinen Auftragsbedarf extern deckt.
         </p>
     </div>
 """

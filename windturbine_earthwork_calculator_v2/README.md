@@ -2,9 +2,9 @@
 
 **A QGIS Processing Plugin for Optimizing Wind Turbine Crane Pad Heights**
 
-Version: 2.0.0
+Version: 2.0.0 (released); v3.0 foundations in progress
 Author: Wind Energy Site Planning
-Date: November 2025
+Date: November 2025 (release); foundations updated May 2026
 
 ---
 
@@ -14,13 +14,34 @@ This QGIS plugin optimizes the platform height for wind turbine crane pads by ca
 
 ### Key Features
 
-✅ **DXF Import** - Automatically converts DXF polylines to platform polygons
-✅ **DEM Download** - Fetches 1m-resolution elevation data from hoehendaten.de API
-✅ **Height Optimization** - Tests multiple heights to find minimal earthwork
-✅ **Volume Calculations** - Accurate cut/fill calculations for platform and slopes
-✅ **Terrain Profiles** - Generates cross-section visualizations
-✅ **HTML Reports** - Professional reports with maps and statistics
-✅ **GeoPackage Output** - All data stored in standard GIS format
+**Erdmassen-Workflow**
+- ✅ **DXF Import** — LWPOLYLINE/POLYLINE → Polygone via `ezdxf` (recover-Mode, 500 MB-Cap)
+- ✅ **DEM-Akquise** — hoehendaten.de DGM1 (1 m) mit 50 MB-Tile-Cap + TIFF-Magic-Byte-Check, oder lokales GeoTIFF (Drohnenbefliegung) als Alternative
+- ✅ **Höhen-Optimierung** — single- + multi-parameter Sweep, parallel via `ProcessPoolExecutor` (Linux/macOS), LRU-Cache für DEM-Samples, vektorisierte Cut/Fill-Mathematik
+- ✅ **Multi-Surface-Berechnung** — Kranstellfläche, Fundament, Auslegerfläche, Rotorblattlagerfläche, Zufahrt
+- ✅ **Geländeschnitte** — Quer- + Längsprofile als PNG
+- ✅ **Schnittkanten + Differenz-Raster** — 14 LineString-Layer (2D + 3D) + 7 GeoTIFFs je Standort
+- ✅ **BGR-Bodendaten** — Bodenart + Stabilisierungs-Klasse via BGR WFS
+- ✅ **Opt-in-Telemetrie** — vier anonyme Events an `log.broetzens.de`; default aus, gitignored Key
+
+**Berichte + Export**
+- ✅ **HTML / PDF / Excel Reports** — Single-Site + Multi-Site, mit XSS-sicherem HTML-Escape
+- ✅ **GeoPackage** — alle Vektor-Layer in einer Datei (DEM als Side-Car-GeoTIFF)
+- ✅ **3D-Export** — OBJ + STL (ASCII/binär) + glTF + selbst-enthaltener Three.js-Viewer pro Standort
+- ✅ **LandXML 1.2** — TIN-Surfaces je Fläche für Machine-Control (Trimble/Topcon/Leica) und BIM
+- ✅ **Slope-Stability-XML** — opt-in Querschnitt-Export für Slide/GeoStudio mit Material- + Piezometer-Daten
+
+**Planung + Optimierung (v3-Module)**
+- ✅ **Restriktions-Tab** — Layer-Picker pro Kategorie (Wohnbebauung, Straßen, Schutzgebiete), Hard/Soft-Severity, Snap-to-Grid-Vorschlag der nächsten gültigen Position; automatischer Preflight des Kran-Centroids vor dem DEM-Download
+- ✅ **Park-Optimierung** — Transport-LP über mehrere Standorte (`solve`) und Kandidaten-MILP für gemeinsame Höhen-/Transport-Wahl (`solve_milp`); Sektion im Multi-Site-Report
+- ✅ **Rotationswinkel-Analyse** — opt-in, sweept Plattform-Ausrichtungen und zeigt die Einsparung im Bericht
+- ✅ **Mass-Haul-Diagramm** — opt-in, Massenausgleichspunkte + Free-Haul/Overhaul aus dem repräsentativen Längsprofil
+- ✅ **Bodenschichten (Strata)** — Aufschlüsselung von Cut/Fill in Mutterboden → Frostschutz → Schotter mit Kosten und CO₂
+- ✅ **Bauphasen-Verteilung** — Standardplan Wegebau → Pad → Fundament → Restarbeiten mit Zeitachse
+- ✅ **CO₂-Bilanz** — Erdbewegung × LKW-km × Faktor + Beton/Stahl
+- ✅ **Variantenvergleich** — Side-by-Side HTML mehrerer Planungs-Varianten (Python-API)
+
+Headless-Nutzung der Planungs-Module siehe `docs/PYTHON_API.md`.
 
 ---
 
@@ -286,13 +307,114 @@ Terrain Range: 8.5 m (min: 301.2, max: 309.7)
 
 ## 🐛 Known Issues
 
-1. **GeoPackage Raster Support**: QGIS sometimes has issues with rasters in GeoPackage. DEM is saved as separate GeoTIFF.
-2. **Large DXF Files**: Very complex DXF files (>1000 polylines) may be slow to import.
-3. **Memory Usage**: Processing large DEMs (>10km²) may require significant RAM.
+1. **Raster output format**: The DEM is intentionally written as a separate GeoTIFF (not into the GeoPackage). GeoPackage raster support in QGIS is functional but inconsistent across plugin readers (rasterio/GDAL/QGIS); a side-car GeoTIFF guarantees compatibility.
+2. **Large DXF Files**: Very complex DXF files (>1000 polylines) may be slow to import. The common path uses Shapely `linemerge`/`unary_union` (efficient); only a rarely-reached fallback is O(n²). Files above 500 MB are rejected outright for safety.
+3. **Memory Usage**: DEM sampling reads only the polygon's bounding-box window (not the whole band), so RAM scales with the construction area rather than the full DEM. A bounded LRU cache avoids re-sampling the same surface across the height sweep, and the cut/fill volume math is vectorised. Very large areas in the legacy fallback path can still be RAM-heavy.
+
+---
+
+## 🐍 Public Python API
+
+Twelve of the `core/` modules are **QGIS-independent** — they only need numpy /
+scipy / shapely (plus stdlib XML for the writers). They can be imported from
+plain Python scripts, batch jobs, CI pipelines or your own GUI without ever
+loading `qgis.core`. The QGIS-integrated workflow uses them too, so behaviour
+is consistent between the plugin and headless use.
+
+| Module | Public entry points |
+|---|---|
+| `core/park_optimizer.py` | `ParkOptimizer.solve` (LP), `ParkOptimizer.solve_milp` (MILP) |
+| `core/placement_constraints.py` | `PlacementValidator.check_position` / `suggest_nearest_valid` |
+| `core/rotation_optimizer.py` | `RotationOptimizer.optimize`, `rotate_points`, `polygon_centroid` |
+| `core/mesh_exporter.py` | `write_obj`, `write_stl`, `write_gltf`, `write_three_js_viewer`, `dem_to_mesh`, `polygon_to_mesh_at_height` |
+| `core/landxml_export.py` | `write_landxml`, `surface_from_mesh` |
+| `core/mass_haul.py` | `MassHaulDiagram.compute` |
+| `core/co2_balance.py` | `CO2Calculator.compute`, `EmissionFactors` |
+| `core/strata_quantities.py` | `StrataCalculator.split`, `default_stack` |
+| `core/construction_phases.py` | `PhasePlanner.plan`, `default_phases` |
+| `core/slope_stability_export.py` | `write_slope_xml`, `section_from_profile`, `default_materials` |
+| `core/variant_comparison.py` | `VariantComparisonReport.write`, `best_variant` |
+| `core/mesh_exporter.py` (helpers) | `MeshData`, `build_gltf_dict` |
+
+Usage examples for every module are in **`docs/PYTHON_API.md`**.
+
+An **end-to-end smoke test** that walks through a realistic three-turbine park
+planning flow across most of these modules ships as
+`tests/test_e2e_smoke.py` — useful both as a regression guard and as a
+worked example. To run the full plain-Python test suite (no QGIS install
+needed):
+
+```bash
+pip install --user pytest shapely scipy numpy
+pytest windturbine_earthwork_calculator_v2/tests/ \
+    --ignore=windturbine_earthwork_calculator_v2/tests/test_dxf_import.py \
+    --ignore=windturbine_earthwork_calculator_v2/tests/test_multi_site_report.py
+# (the ignored ones import the QGIS-bound package layer)
+```
+
+The plain-Python subset currently runs **166 tests** in well under three
+seconds; GDAL-bound tests skip cleanly when `osgeo` is missing.
 
 ---
 
 ## 🔄 Changelog
+
+For the full per-release log see the repository-root `CHANGELOG.md`.
+
+### Unreleased (Stand 2026-06-01)
+
+**Neue Konkurrenz-/Planungs-Features (alle mit plain-Python-Tests):**
+- `core/mass_haul.py` — Mass-Haul-Diagramm (Compaction, Balance-Punkte, Free-Haul); im Report
+- `core/rotation_optimizer.py` — Plattform-Ausrichtungs-Sweep; opt-in im Workflow + Report
+- `core/co2_balance.py` — CO₂e-Bilanz; automatische Sektion im Single-Site-Report
+- `core/landxml_export.py` — LandXML 1.2 TIN-Surfaces; auto-export neben OBJ/glTF
+- `core/strata_quantities.py` — Bodenschichten-Aufschlüsselung; Auto-Sektion im Report
+- `core/construction_phases.py` — Bauphasen-Planung mit Zeitachse; Auto-Sektion im Report
+- `core/slope_stability_export.py` — Querschnitt-XML für Slide/GeoStudio; opt-in im Workflow
+- `core/variant_comparison.py` — Side-by-Side HTML mehrerer Varianten (Library)
+- **Drohnen-DEM-Import:** GUI-Filepicker; STEP 4 überspringt hoehendaten.de bei lokalem GeoTIFF
+- `docs/PYTHON_API.md` — vollständige Public-API-Dokumentation
+- `tests/test_e2e_smoke.py` — End-to-End Smoke-Test über alle QGIS-freien Module
+
+**Performance (#9/#10):**
+- LRU-Cache (maxsize 16) für DEM-Samples im Höhen-Sweep
+- Vektorisierte Cut/Fill-Schleifen (Kranstellfläche + Fundament), Äquivalenz bewiesen
+- Hinweise zu großen DEMs (>10 km²) + dokumentierte Performance-Charakteristik
+
+### Unreleased (Stand 2026-05-27)
+
+**Sicherheits-Härtung:**
+- HTML-Escape für extern beziehbare Strings in allen Reports und Dialog-Labels
+- `log.config` aus dem Git-Index entfernt; nur `log.config.example` ausgeliefert
+- DEM-Downloader: 50 MB-Cap pro hoehendaten.de-Tile + TIFF-Magic-Byte-Prüfung
+- DEM-Downloader: Warnung bei DEM-Anfragen über 10 km²
+- DXF-Importer: 500 MB-Cap und Umstellung auf `ezdxf.recover.readfile`
+- Tile-Name-Regex-Guard im DEM-Downloader
+
+**Terrain-Intersection (Geländeschnittkanten & Differenz-Raster):**
+- Cleanup-Helper (`_safe_remove`, `_safe_remove_shapefile_set`) für robuste Temp-Datei-Entsorgung
+- Umstellung von `tempfile.mktemp` auf `tempfile.mkstemp` (Race-Condition behoben)
+- Test-Skelett `tests/test_terrain_intersection.py` ergänzt
+- `IMPLEMENTATION_TERRAIN_INTERSECTION.md` mit Implementierungs-Status angereichert
+
+**v3-Foundation-Module (eigenständig nutzbar, GUI-Integration folgt):**
+- `core/placement_constraints.py` — Constraint-Validator mit STRtree + Snap-to-Grid (16 Tests),
+  **GUI-Tab „🚧 Restriktionen"** in `gui/main_dialog.py` (Layer-Picker pro Kategorie,
+  Distanz, Hard/Soft, interaktiver Positions-Checker + Vorschlag nächster gültiger Position)
+- `core/park_optimizer.py` — Park-weite Optimierung via scipy: Transport-LP (`solve`)
+  + Kandidaten-MILP (`solve_milp`, wählt Höhen-Kandidat pro Standort + Transport gemeinsam); 16 Tests
+- `core/mesh_exporter.py` — 3D-Export für DEM und Plattform-Polygone in OBJ, STL
+  (ASCII/binär) und glTF + selbst-enthaltener Three.js-Viewer (25 Tests),
+  **im Workflow verdrahtet:** jeder Lauf schreibt Terrain + Flächen als OBJ,
+  ein kombiniertes `scene.gltf` und `viewer.html` nach `WKA_<x>_<y>_meshes/`
+  (auto-on, per Param `export_obj=False` abschaltbar)
+- `docs/plans/V3_ROADMAP.md` — konsolidierter v3-Implementierungsplan
+
+**Repo-Hygiene:**
+- Platzhalter-URLs `yourusername`/`YOURUSERNAME` durchgehend ersetzt
+- `metadata.txt`: tracker/repository/homepage und author-Email
+- CHANGELOG-Linksammlung um v5.x/v6.x ergänzt
+- AGENTS.md-Projektstruktur aktualisiert (alle aktuellen Module gelistet)
 
 ### Version 2.0.0 (November 2025)
 

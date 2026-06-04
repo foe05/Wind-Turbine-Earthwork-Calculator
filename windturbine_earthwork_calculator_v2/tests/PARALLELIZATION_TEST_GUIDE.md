@@ -254,11 +254,16 @@ The implementation includes multiple safety nets:
 3. **Exception handling**: Falls back to sequential on any parallel error
 4. **Result validation**: Logs successful/failed scenario counts
 
-## Next Steps
+## Status (Stand 2026-05)
 
-After running tests successfully:
-
-1. Test with real DEM and DXF data
-2. Benchmark on target hardware
-3. Adjust worker count for optimal performance
-4. Consider adding progress callbacks for GUI integration
+- ✅ **Real-DEM/DXF-Tests:** Durch `tests/test_volume_regression.py` abgedeckt
+  (Fixture `wea45mit3d.zip`, pinning gegen Referenz-Cut/Fill).
+- ✅ **Progress-Callbacks für GUI:** Bereits implementiert in
+  `core/multi_surface_calculator.py` (z. B. Zeilen 2165–2174, 2410–2415,
+  2598–2602, 2735–2740). `feedback.setProgress()` und `feedback.pushInfo()`
+  laufen sowohl im parallelen als auch im sequenziellen Pfad und melden
+  „Best so far"-Parameter alle 50 Szenarien.
+- ⏳ **Benchmarks auf Zielhardware:** Bleibt offen — bedarfsabhängig
+  durch Anwender messen.
+- ⏳ **Worker-Count-Tuning:** Default `cpu_count - 1` ist konservativ;
+  Tuning ggf. nach Benchmark.

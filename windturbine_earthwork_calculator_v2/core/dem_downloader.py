@@ -10,6 +10,7 @@ Version: 2.0.0
 """
 
 import os
+import re
 import math
 import base64
 from pathlib import Path
@@ -51,6 +52,15 @@ class DEMDownloader:
     TILE_SIZE = 1000  # 1km x 1km tiles
     TILE_PREFIX = "dgm1_32"
     TILE_RESOLUTION = "1m"
+
+    # Defensive limits for API response handling
+    # A 1m DGM1 tile of 1km² should be ~2 MB compressed; uncompressed float TIFF ~4 MB.
+    # 50 MB gives generous headroom and still bounds disk-fill abuse.
+    MAX_TIFF_SIZE_BYTES = 50 * 1024 * 1024
+    # First bytes of a valid TIFF: little/big-endian classic TIFF or BigTIFF
+    _TIFF_MAGIC_BYTES = (b'II*\x00', b'MM\x00*', b'II+\x00', b'MM\x00+')
+    # Tile names like "dgm1_32_492_5702_1m" — guard against unexpected input
+    _TILE_NAME_PATTERN = re.compile(r'^dgm1_\d+_\d+_\d+_1m$')
 
     def __init__(self, cache_dir: Optional[str] = None, force_refresh: bool = False):
         """
@@ -124,6 +134,17 @@ class DEMDownloader:
                 tile_name = f"{self.TILE_PREFIX}_{easting_km}_{northing_km}_{self.TILE_RESOLUTION}"
                 tiles.append(tile_name)
 
+        # Warn early about large DEM areas. At 1 m resolution a 10 km² DEM is
+        # already ~400 MB as float32 in RAM, and downstream sampling code
+        # currently materializes the full band (see V3_ROADMAP.md #10).
+        area_km2 = len(tiles)  # each tile is exactly 1 km²
+        if area_km2 > 10:
+            self.logger.warning(
+                f"Large DEM area requested: {area_km2} km² ({len(tiles)} tiles). "
+                f"Sampling currently loads the full DEM into RAM — expect "
+                f"~{area_km2 * 40:.0f} MB per band and possible memory pressure."
+            )
+
         self.logger.info(f"Required tiles: {len(tiles)} - {tiles}")
         return tiles
 
@@ -145,6 +166,11 @@ class DEMDownloader:
         """
         import json
 
+        # Validate tile name format before any filesystem or API use
+        if not self._TILE_NAME_PATTERN.match(tile_name):
+            self.logger.error(f"Invalid tile name format: {tile_name!r}")
+            return None
+
         tile_path = self.cache_dir / f"{tile_name}.tif"
 
         # Check cache
@@ -157,10 +183,6 @@ class DEMDownloader:
         # Parse tile name to get coordinates
         # Format: dgm1_32_492_5702_1m
         parts = tile_name.split('_')
-        if len(parts) < 4:
-            self.logger.error(f"Invalid tile name format: {tile_name}")
-            return None
-
         zone = int(parts[1])  # 32
         easting = int(parts[2]) * 1000 + 500  # 492 -> 492500
         northing = int(parts[3]) * 1000 + 500  # 5702 -> 5702500
@@ -235,6 +257,17 @@ class DEMDownloader:
                     feedback.reportError(f"Empty TIFF data for {tile_name}", fatalError=False)
                 return None
 
+            # Cap Base64 payload before decoding to bound memory use.
+            # Base64 is ~4/3 the size of the decoded blob, so MAX_TIFF_SIZE_BYTES * 4/3 + slack.
+            if len(base64_data) > self.MAX_TIFF_SIZE_BYTES * 2:
+                self.logger.error(
+                    f"TIFF payload for {tile_name} exceeds size limit "
+                    f"({len(base64_data)} encoded bytes > {self.MAX_TIFF_SIZE_BYTES * 2})"
+                )
+                if feedback:
+                    feedback.reportError(f"Oversized TIFF payload for {tile_name}", fatalError=False)
+                return None
+
             # Decode Base64 to binary TIFF data
             try:
                 tiff_binary = base64.b64decode(base64_data)
@@ -242,6 +275,27 @@ class DEMDownloader:
                 self.logger.error(f"Failed to decode Base64 data for {tile_name}: {e}")
                 if feedback:
                     feedback.reportError(f"Failed to decode TIFF data for {tile_name}", fatalError=False)
+                return None
+
+            # Enforce decoded-size limit and verify TIFF magic bytes before writing to disk.
+            # This protects against disk-fill abuse and a malicious server planting
+            # non-TIFF content that later raster code would try to open.
+            if len(tiff_binary) > self.MAX_TIFF_SIZE_BYTES:
+                self.logger.error(
+                    f"Decoded TIFF for {tile_name} exceeds size limit "
+                    f"({len(tiff_binary)} > {self.MAX_TIFF_SIZE_BYTES} bytes)"
+                )
+                if feedback:
+                    feedback.reportError(f"Oversized TIFF for {tile_name}", fatalError=False)
+                return None
+
+            if not tiff_binary.startswith(self._TIFF_MAGIC_BYTES):
+                self.logger.error(
+                    f"Response for {tile_name} does not start with a TIFF magic header "
+                    f"(first 4 bytes: {tiff_binary[:4]!r})"
+                )
+                if feedback:
+                    feedback.reportError(f"Invalid TIFF content for {tile_name}", fatalError=False)
                 return None
 
             # Write binary TIFF data to file
