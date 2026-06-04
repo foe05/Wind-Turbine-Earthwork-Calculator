@@ -1,0 +1,29 @@
+services:
+  app:
+    container_name: wtec-app
+    restart: unless-stopped
+    # Port 8501 wird aus der base compose.yml schon auf 0.0.0.0:8501 exponiert.
+    environment:
+      # Damit `from app.services.pipeline import ...` aus Home.py funktioniert:
+      # /app ist Container-WORKDIR, das Skript liegt in /app/app/Home.py.
+      PYTHONPATH: /app
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  db:
+    container_name: wtec-db
+    restart: unless-stopped
+    shm_size: 256m
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c work_mem=8MB
+      -c maintenance_work_mem=64MB
+      -c effective_cache_size=384MB
+      -c max_connections=20
+    deploy:
+      resources:
+        limits:
+          memory: 768m
