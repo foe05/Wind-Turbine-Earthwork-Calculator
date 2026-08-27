@@ -19,6 +19,10 @@ RUN pip install --no-cache-dir --no-deps -e .
 
 COPY app ./app
 
+# Schema-Migrationen: `alembic upgrade head` laeuft im Container.
+COPY alembic.ini ./
+COPY migrations ./migrations
+
 EXPOSE 8501
 
 CMD ["streamlit", "run", "app/Home.py", "--server.address=0.0.0.0", "--server.port=8501"]

@@ -20,6 +20,7 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "sqlalchemy>=2.0",
     "geoalchemy2>=0.14",
+    "alembic>=1.13",
     "requests>=2.31",
     "fiona>=1.9",
     "openpyxl>=3.1",

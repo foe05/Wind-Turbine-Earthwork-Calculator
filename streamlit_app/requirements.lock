@@ -4,6 +4,10 @@ affine==3.0.0 \
     --hash=sha256:573514d5c37e98401a0ec34139c2b725d9f9ae4d074662f4b62a47d6a2ba9f06 \
     --hash=sha256:d1b15ed1877a4649a623468a97af6b2182889dc748d7f96d59d504e5c83c00bf
     # via rasterio
+alembic==1.19.1 \
+    --hash=sha256:b39018cb3d9413a19cbd54cf3c02ad33998641f0538eb77413a488a21c3e14be \
+    --hash=sha256:e0fca0518118c78acc493e31bcb5402f190057aaf6df8b5b95ce94c4789cf648
+    # via wtec-streamlit (pyproject.toml)
 altair==6.2.2 \
     --hash=sha256:94014f8ad8617c3cb163d1137359cd6db5ba134b9b46d93cfd8b609fd245a583 \
     --hash=sha256:a1ff9d9cfe81c75414641826312b9471780e19d39293ba0b012933f6b6cba0fe
@@ -940,6 +944,10 @@ kiwisolver==1.5.0 \
     --hash=sha256:fd40bb9cd0891c4c3cb1ddf83f8bbfa15731a248fdc8162669405451e2724b09 \
     --hash=sha256:ff710414307fefa903e0d9bdf300972f892c23477829f49504e59834f4195398
     # via matplotlib
+mako==1.4.1 \
+    --hash=sha256:a359d9a94a541213958742b2698d0a7757bb83551767bc468a74b9905aba9617 \
+    --hash=sha256:d7904710b662996425a21627710c4777c45053146942cf8a7aebf757c92b8c27
+    # via alembic
 markupsafe==3.0.3 \
     --hash=sha256:0303439a41979d9e74d18ff5e2dd8c43ed6c6001fd40e5bf2e43f7bd9bbc523f \
     --hash=sha256:068f375c472b3e7acbe2d5318dea141359e6900156b5b2ba06a30b169086b91a \
@@ -1030,7 +1038,9 @@ markupsafe==3.0.3 \
     --hash=sha256:f71a396b3bf33ecaa1626c255855702aca4d3d9fea5e051b41ac59a9c1c41edc \
     --hash=sha256:f9e130248f4462aaa8e2552d547f36ddadbeaa573879158d721bbd33dfe4743a \
     --hash=sha256:fed51ac40f757d41b7c48425901843666a6677e3e8eb0abcff09e4ba6e664f50
-    # via jinja2
+    # via
+    #   jinja2
+    #   mako
 matplotlib==3.11.1 \
     --hash=sha256:0c1f44890d435c1b4ef52f701ad5828cb450ea97bcc83918fda6be74965d6cd2 \
     --hash=sha256:11664c551345553db92e61cae6cf1376f138f8c47cafdf13b64b18f3e3e9e464 \
@@ -1898,6 +1908,7 @@ sqlalchemy==2.0.52 \
     --hash=sha256:f4d4f7afc682961dc567db70e00a7b5bd81ccd3743c46199b0257f0744902dde
     # via
     #   wtec-streamlit (pyproject.toml)
+    #   alembic
     #   geoalchemy2
 starlette==1.6.0 \
     --hash=sha256:a86dd39d14bb45f85a3d18525215a9ef0cfd1f192ac793220e72598c90335f0c \
@@ -1931,6 +1942,7 @@ typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
     --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
     # via
+    #   alembic
     #   altair
     #   anyio
     #   ezdxf

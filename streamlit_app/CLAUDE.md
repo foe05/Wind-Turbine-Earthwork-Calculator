@@ -10,7 +10,7 @@ DXF-Upload → DEM-Akquise (hoehendaten.de) → Multi-Surface-Höhen-/Cut-Fill-O
 
 - **UI:** Streamlit + `streamlit-folium` (Karte) + iframe-glTF (3D)
 - **Berechnung:** NumPy, Shapely, rasterio, GeoPandas, scipy, pyproj, ezdxf, matplotlib (Agg)
-- **Persistenz:** PostgreSQL + PostGIS (Projekte, Jobs, Ergebnisse)
+- **Persistenz:** PostgreSQL + PostGIS — Schema in `app/core/models.py`, Migrationen unter `migrations/` (Alembic)
 - **Reports:** Jinja2 + WeasyPrint
 - **Background-Jobs (lang):** `dramatiq` oder `rq` (entscheiden bei Bedarf; Default ist `concurrent.futures` inline)
 - **Auth:** Authelia-Reverse-Proxy davor — keine app-eigene User-Tabelle
@@ -36,6 +36,29 @@ tests/
 - Eingaben müssen UTM sein (EPSG:25832–25836). Frontend konvertiert WGS84→UTM mit pyproj/proj4 vor jeder Berechnung.
 - DEM-Buffer fest 250 m (analog Plugin).
 - Volume-Regression `wea45mit3d.zip` ist Quelle der Wahrheit; jede Änderung an Cut/Fill-Logik muss dagegen grün bleiben.
+
+## Persistenz
+
+Vier Tabellen: `projects` → `runs` → `run_surfaces` / `run_artifacts`. `runs.inputs`
+haelt `_serialize_inputs()` als JSONB; eigene Spalten bekommen nur Werte, nach denen
+gelistet oder ausgewertet wird. Je Flaeche eine Zeile in `run_surfaces` mit
+`CutFillResult` und `SlopeVolumeResult` zusammen.
+
+Geometrien liegen kanonisch in **EPSG:4326**, nicht im Arbeits-CRS — nur so bleiben
+Laeufe aus verschiedenen UTM-Zonen ueber einen gemeinsamen GiST-Index abfragbar. Das
+Arbeits-CRS steht je Lauf in `runs.crs_epsg`, die Transformation macht
+`db.to_storage_geometry()`. An der 4326-Kopie haengt keine Massszahl: Volumen und
+Flaechen sind im nativen CRS vorberechnete Zahlen.
+
+```bash
+# Schema anlegen/aktualisieren (DATABASE_URL wie in der App)
+alembic upgrade head
+alembic check          # Modelle vs. Migrationen deckungsgleich?
+```
+
+Die Anwendung laeuft weiter, wenn `DATABASE_URL` fehlt — `db.is_configured()` pruefen,
+bevor eine Session geoeffnet wird. Die Pipeline schreibt derzeit **noch nicht** in die
+DB; das ist der naechste Schritt.
 
 ## Nicht anfassen
 
