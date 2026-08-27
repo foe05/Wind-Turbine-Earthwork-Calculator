@@ -143,6 +143,52 @@ def load_run(run_id: UUID) -> Optional[dict]:
         }
 
 
+def list_runs_for_comparison(limit: int = 100) -> list[dict]:
+    """Erfolgreiche Laeufe aller Projekte, aufbereitet fuer den Variantenvergleich.
+
+    Kosten und CO2 stehen nicht als eigene Spalten in `runs`, sondern in den
+    JSONB-Feldern der jeweiligen Zusatzmodule — sie fehlen, wenn der Lauf
+    ohne `compute_phases` bzw. `compute_co2` gerechnet wurde.
+    """
+    with db.session_scope() as session:
+        rows = session.execute(
+            select(
+                Run.id,
+                Project.name.label("project_name"),
+                Run.started_at,
+                Run.crane_optimum_height,
+                Run.total_cut_m3,
+                Run.total_fill_m3,
+                Run.crs_epsg,
+                Run.co2_breakdown,
+                Run.phase_plan,
+            )
+            .join(Project, Project.id == Run.project_id)
+            .where(Run.status == "succeeded")
+            .order_by(Run.started_at.desc())
+            .limit(limit)
+        ).all()
+
+    ergebnis = []
+    for r in rows:
+        co2 = (r.co2_breakdown or {}).get("total_kg")
+        kosten = (r.phase_plan or {}).get("total_cost_eur")
+        ergebnis.append(
+            {
+                "id": r.id,
+                "project_name": r.project_name,
+                "started_at": r.started_at,
+                "crane_optimum_height": r.crane_optimum_height or 0.0,
+                "total_cut_m3": r.total_cut_m3 or 0.0,
+                "total_fill_m3": r.total_fill_m3 or 0.0,
+                "crs_epsg": r.crs_epsg,
+                "total_co2_kg": float(co2) if co2 is not None else None,
+                "total_cost_eur": float(kosten) if kosten is not None else None,
+            }
+        )
+    return ergebnis
+
+
 def delete_run(run_id: UUID) -> bool:
     """Einen Lauf samt Flächen und Artefakten entfernen (DB-seitig CASCADE).
 
@@ -157,4 +203,11 @@ def delete_run(run_id: UUID) -> bool:
     return True
 
 
-__all__ = ["delete_run", "is_available", "list_projects", "list_runs", "load_run"]
+__all__ = [
+    "delete_run",
+    "is_available",
+    "list_projects",
+    "list_runs",
+    "list_runs_for_comparison",
+    "load_run",
+]

@@ -20,6 +20,7 @@ from streamlit.testing.v1 import AppTest
 from app.services import history
 
 PAGE = Path(__file__).resolve().parent.parent / "app" / "pages" / "6_Laufhistorie.py"
+VARIANTEN = Path(__file__).resolve().parent.parent / "app" / "pages" / "1_Variantenvergleich.py"
 
 
 def test_ohne_database_url_nicht_verfuegbar(monkeypatch):
@@ -68,3 +69,37 @@ def test_seite_meldet_unerreichbare_datenbank(monkeypatch):
 def test_lesefunktionen_sind_exportiert(fn):
     """Schützt die Seite davor, gegen umbenannte Funktionen zu laufen."""
     assert fn.__name__ in history.__all__
+
+
+def test_variantenvergleich_ohne_datenbank(monkeypatch):
+    """Die Seite gab es vor der Persistenz — sie muss ohne DB unveraendert laufen."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    at = AppTest.from_file(str(VARIANTEN), default_timeout=60)
+    at.run()
+
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert at.title[0].value == "Variantenvergleich"
+    # Kein Uebernehmen-Block, aber die manuelle Eingabe muss da sein.
+    assert not at.multiselect
+    assert any(b.label == "Hinzufügen" for b in at.button)
+
+
+def test_variantenvergleich_meldet_tote_datenbank(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://wtec:wtec@host.invalid:5432/wtec")
+    from app.core import db
+
+    db.get_engine.cache_clear()
+    db.get_sessionmaker.cache_clear()
+
+    at = AppTest.from_file(str(VARIANTEN), default_timeout=60)
+    at.run()
+
+    try:
+        assert not at.exception, [str(e.value) for e in at.exception]
+        assert at.warning, "Hinweis auf nicht abrufbare Laeufe fehlt"
+        # Manuelle Eingabe bleibt trotzdem benutzbar.
+        assert any(b.label == "Hinzufügen" for b in at.button)
+    finally:
+        db.get_engine.cache_clear()
+        db.get_sessionmaker.cache_clear()
