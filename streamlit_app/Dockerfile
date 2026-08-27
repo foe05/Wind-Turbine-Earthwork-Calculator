@@ -8,8 +8,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e .
+# Abhängigkeiten kommen aus dem Lockfile (uv pip compile, hash-gepinnt), damit
+# ein Rebuild dieselben Versionen liefert. Neu erzeugen mit:
+#   uv pip compile pyproject.toml --python-version 3.12 --generate-hashes -o requirements.lock
+COPY pyproject.toml requirements.lock ./
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
+
+# Projekt selbst ohne Resolver installieren – die Deps stehen schon.
+RUN pip install --no-cache-dir --no-deps -e .
 
 COPY app ./app
 

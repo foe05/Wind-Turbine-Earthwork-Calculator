@@ -1,0 +1,24 @@
+# Build-Kontext klein und lesbar halten – das Dockerfile braucht nur
+# pyproject.toml, requirements.lock und app/.
+.git
+.gitignore
+.claude-flow/
+CLAUDE.md
+docs/
+tests/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+.env.local
+.streamlit/secrets.toml
+docker-compose*.yml
+docker-compose.yml.bak-*
+Dockerfile
+Dockerfile.bak-*
+
+# Laufzeitdaten: DEM-Cache, Uploads, Exporte und das Postgres-Datenverzeichnis
+# (root-owned, würde den Kontext-Upload sonst mit EACCES abbrechen).
+data/
