@@ -42,6 +42,7 @@ from ..core.profiles import generate_profiles_for_polygon
 from ..core.report import render_html_report, render_overview_map
 from ..core.strata import StrataCalculator, StratumMode, default_stack
 from .persistence import RunRecorder
+from .preflight import check_dem, check_geometries, check_inputs
 
 log = logging.getLogger(__name__)
 
@@ -184,6 +185,9 @@ def _run_pipeline(
         if progress:
             progress(m)
 
+    # 0. Eingaben pruefen, bevor irgendetwas geladen oder geschrieben wird
+    check_inputs(inputs)
+
     out_dir = Path(inputs.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -229,6 +233,19 @@ def _run_pipeline(
             _say(f"⚠ Holme übersprungen: {e}")
             holm_polys = None
 
+    # 1b. Geometrien pruefen, solange es noch nichts gekostet hat: der
+    # DEM-Download darunter ist der teuerste Schritt der Pipeline.
+    check_geometries(
+        crane_poly,
+        foundation_poly,
+        {
+            "Auslegerflaeche": boom_poly,
+            "Blattlagerflaeche": rotor_poly,
+            "Zufahrtsstrasse": road_poly,
+            **{f"Holm {i + 1}": h for i, h in enumerate(holm_polys or [])},
+        },
+    )
+
     # 2. DEM beschaffen
     if inputs.dem_path and Path(inputs.dem_path).exists():
         _say(f"Verwende vorhandenes DEM: {inputs.dem_path}")
@@ -254,6 +271,9 @@ def _run_pipeline(
             buffer_m=inputs.dem_buffer_m,
             progress=progress,
         )
+
+    # 2b. DEM pruefen, bevor der Sweep darueber laeuft
+    check_dem(dem_path, inputs, [crane_poly, foundation_poly])
 
     # 3. Multi-Surface-Berechnung
     _say("Berechne Multi-Surface Cut/Fill…")

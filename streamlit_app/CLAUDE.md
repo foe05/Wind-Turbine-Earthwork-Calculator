@@ -37,6 +37,19 @@ tests/
 - DEM-Buffer fest 250 m (analog Plugin).
 - Volume-Regression `wea45mit3d.zip` ist Quelle der Wahrheit; jede Änderung an Cut/Fill-Logik muss dagegen grün bleiben.
 
+## Vorabpruefung
+
+`services/preflight.py` ruft `core/validation.py` an drei Stellen in der Pipeline:
+`check_inputs()` vor allem anderen (Parameter, Dateien, Sweep-Bereiche),
+`check_geometries()` nach dem DXF-Import und **vor** der DEM-Beschaffung,
+`check_dem()` vor dem Hoehen-Sweep. Der mittlere Punkt ist der wichtigste: der
+DEM-Download ist der teuerste Schritt, und ein vertauschtes DXF-Paar faellt dort
+auf, statt erst im Ergebnis. Alles wirft `ValidationError` mit deutscher Meldung,
+die Pipeline reicht sie durch und die Mitschrift vermerkt den Lauf als `failed`.
+
+Beim Erweitern der Pipeline-Parameter die Pruefung in `check_inputs()` mitziehen —
+sonst ist ein neuer Sweep wieder ungeschuetzt.
+
 ## Persistenz
 
 Vier Tabellen: `projects` → `runs` → `run_surfaces` / `run_artifacts`. `runs.inputs`
@@ -67,6 +80,12 @@ Laeufe, Flaechen (auf einer Folium-Karte — die 4326-Geometrien brauchen keine
 Transformation) und die erzeugten Dateien. Die Seite haelt beide Ausfaelle aus:
 ohne `DATABASE_URL` einen Hinweis, bei toter DB eine Fehlermeldung — beides statt
 eines Tracebacks, abgesichert per `AppTest` in `tests/test_history.py`.
+
+Der Variantenvergleich (`pages/1_Variantenvergleich.py`) uebernimmt Massen,
+Kranhoehe, Kosten und CO2 direkt aus gespeicherten Laeufen, statt sie abtippen zu
+lassen. Kosten und CO2 stehen in `runs.phase_plan` bzw. `runs.co2_breakdown` und
+fehlen, wenn der Lauf ohne die Zusatzmodule lief. Ohne Datenbank bleibt die Seite
+bei der manuellen Eingabe.
 
 ## Nicht anfassen
 

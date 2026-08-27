@@ -85,7 +85,8 @@ streamlit_app/
     services/
       pipeline.py     # end-to-end orchestration (DXF→DEM→Calc→Profiles→Report→Exports)
       persistence.py  # RunRecorder: schreibt jeden Lauf nach projects/runs/...
-      history.py      # Lesezugriff auf gespeicherte Laeufe (Seite 6)
+      history.py      # Lesezugriff auf gespeicherte Laeufe (Seiten 1 und 6)
+      preflight.py    # Vorabpruefung: Parameter, Geometrien, DEM - vor dem Download
     templates/
       report.html     # Jinja2 report template
   migrations/         # Alembic; `alembic upgrade head` gegen DATABASE_URL
