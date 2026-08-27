@@ -84,6 +84,7 @@ streamlit_app/
       db.py                   # Engine, Session, CRS-Transformation nach EPSG:4326
     services/
       pipeline.py     # end-to-end orchestration (DXF→DEM→Calc→Profiles→Report→Exports)
+      persistence.py  # RunRecorder: schreibt jeden Lauf nach projects/runs/...
     templates/
       report.html     # Jinja2 report template
   migrations/         # Alembic; `alembic upgrade head` gegen DATABASE_URL

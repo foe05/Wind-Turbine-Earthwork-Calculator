@@ -41,6 +41,7 @@ from ..core.phases import PhasePlanner, default_phases
 from ..core.profiles import generate_profiles_for_polygon
 from ..core.report import render_html_report, render_overview_map
 from ..core.strata import StrataCalculator, StratumMode, default_stack
+from .persistence import RunRecorder
 
 log = logging.getLogger(__name__)
 
@@ -153,7 +154,30 @@ def run_pipeline(
     inputs: PipelineInputs,
     progress: Optional[Callable[[str], None]] = None,
 ) -> PipelineOutputs:
-    """Komplett-Workflow. progress(message) wird optional aufgerufen."""
+    """Komplett-Workflow. progress(message) wird optional aufgerufen.
+
+    Der Lauf wird in der Datenbank mitgeschrieben, sofern `DATABASE_URL`
+    gesetzt ist — vorher als 'running', danach als 'succeeded' bzw. bei einer
+    Exception als 'failed'. Die Mitschrift ist Beiwerk: fehlt die Datenbank
+    oder ist sie nicht erreichbar, rechnet die Pipeline unveraendert weiter
+    (siehe `persistence.RunRecorder`).
+    """
+    recorder = RunRecorder(inputs)
+    recorder.start()
+    try:
+        outputs = _run_pipeline(inputs, progress=progress)
+    except BaseException as exc:
+        recorder.fail(exc)
+        raise
+    recorder.finish(outputs)
+    return outputs
+
+
+def _run_pipeline(
+    inputs: PipelineInputs,
+    progress: Optional[Callable[[str], None]] = None,
+) -> PipelineOutputs:
+    """Komplett-Workflow ohne Mitschrift. Siehe `run_pipeline`."""
 
     def _say(m: str):
         log.info(m)

@@ -56,9 +56,11 @@ alembic upgrade head
 alembic check          # Modelle vs. Migrationen deckungsgleich?
 ```
 
-Die Anwendung laeuft weiter, wenn `DATABASE_URL` fehlt — `db.is_configured()` pruefen,
-bevor eine Session geoeffnet wird. Die Pipeline schreibt derzeit **noch nicht** in die
-DB; das ist der naechste Schritt.
+`run_pipeline()` schreibt jeden Lauf mit (`services/persistence.py`): vorher als
+`running`, danach als `succeeded` bzw. bei einer Exception als `failed`. Die
+Mitschrift ist Beiwerk — ohne `DATABASE_URL` ist der Recorder ein No-op, und ein
+DB-Ausfall loggt eine Warnung, statt die Rechnung zu verlieren. Wer selbst eine
+Session oeffnet, prueft vorher `db.is_configured()`.
 
 ## Nicht anfassen
 
