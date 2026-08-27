@@ -52,7 +52,7 @@ streamlit_app/
   pyproject.toml      # streamlit, shapely, rasterio, geopandas, scipy, ezdxf, weasyprint, ...
   app/
     Home.py           # Streamlit entry: sidebar params, DXF upload, run-pipeline, results
-    pages/            # additional Streamlit pages (1-5: Varianten, Multi-Site, Unsicherheit, Boden, 3D)
+    pages/            # additional Streamlit pages (1-6: Varianten, Multi-Site, Unsicherheit, Boden, 3D, Laufhistorie)
     core/             # ported plugin modules (NO QGIS imports)
       geometry.py             # shapely port of utils/geometry_utils.py
       validation.py           # input validation, single-language German
@@ -85,6 +85,7 @@ streamlit_app/
     services/
       pipeline.py     # end-to-end orchestration (DXF→DEM→Calc→Profiles→Report→Exports)
       persistence.py  # RunRecorder: schreibt jeden Lauf nach projects/runs/...
+      history.py      # Lesezugriff auf gespeicherte Laeufe (Seite 6)
     templates/
       report.html     # Jinja2 report template
   migrations/         # Alembic; `alembic upgrade head` gegen DATABASE_URL

@@ -62,6 +62,12 @@ Mitschrift ist Beiwerk — ohne `DATABASE_URL` ist der Recorder ein No-op, und e
 DB-Ausfall loggt eine Warnung, statt die Rechnung zu verlieren. Wer selbst eine
 Session oeffnet, prueft vorher `db.is_configured()`.
 
+Gelesen wird ueber `services/history.py`; die Seite `pages/6_Laufhistorie.py` zeigt
+Laeufe, Flaechen (auf einer Folium-Karte — die 4326-Geometrien brauchen keine
+Transformation) und die erzeugten Dateien. Die Seite haelt beide Ausfaelle aus:
+ohne `DATABASE_URL` einen Hinweis, bei toter DB eine Fehlermeldung — beides statt
+eines Tracebacks, abgesichert per `AppTest` in `tests/test_history.py`.
+
 ## Nicht anfassen
 
 - `../windturbine_earthwork_calculator_v2/` — bleibt authoritative Plugin-Quelle. Modul-Portierungen entstehen als neue Dateien hier, nicht als Edits dort.
