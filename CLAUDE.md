@@ -48,11 +48,11 @@ Single Streamlit process + PostgreSQL (PostGIS) for persistence, single-tenant p
 streamlit_app/
   CLAUDE.md           # stack + conventions specific to the Streamlit app
   Dockerfile          # python:3.12-slim + GDAL + Pango/Cairo (for WeasyPrint)
-  docker-compose.yml  # app + postgis/postgis:16-3.4
+  docker-compose.yml  # app + postgis/postgis:16-3.5
   pyproject.toml      # streamlit, shapely, rasterio, geopandas, scipy, ezdxf, weasyprint, ...
   app/
     Home.py           # Streamlit entry: sidebar params, DXF upload, run-pipeline, results
-    pages/            # additional Streamlit pages (1-5: Varianten, Multi-Site, Unsicherheit, Boden, 3D)
+    pages/            # additional Streamlit pages (1-6: Varianten, Multi-Site, Unsicherheit, Boden, 3D, Laufhistorie)
     core/             # ported plugin modules (NO QGIS imports)
       geometry.py             # shapely port of utils/geometry_utils.py
       validation.py           # input validation, single-language German
@@ -80,10 +80,16 @@ streamlit_app/
       park_optimizer.py       # LP + MILP via scipy.optimize for park-wide transport
       site_data.py            # SiteData + MultiSiteProject aggregation
       multi_site_report.py    # HTML + XLSX multi-site comparison
+      models.py               # SQLAlchemy-Modelle: projects/runs/run_surfaces/run_artifacts
+      db.py                   # Engine, Session, CRS-Transformation nach EPSG:4326
     services/
       pipeline.py     # end-to-end orchestration (DXF→DEM→Calc→Profiles→Report→Exports)
+      persistence.py  # RunRecorder: schreibt jeden Lauf nach projects/runs/...
+      history.py      # Lesezugriff auf gespeicherte Laeufe (Seiten 1 und 6)
+      preflight.py    # Vorabpruefung: Parameter, Geometrien, DEM - vor dem Download
     templates/
       report.html     # Jinja2 report template
+  migrations/         # Alembic; `alembic upgrade head` gegen DATABASE_URL
   tests/
     regression/       # wea45 volume regression (same numbers as the plugin)
     test_*.py         # 140 tests across all 25 ported modules
