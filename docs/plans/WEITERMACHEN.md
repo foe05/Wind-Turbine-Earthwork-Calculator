@@ -133,7 +133,7 @@ allerdings, das ist Teil der Aufgabe und braucht eine bewusste Neufestlegung.
 Artefakte und DEM-Cache wachsen unbegrenzt. Die DB hält nur Pfade — die Historie
 zeigt fehlende Dateien bereits als `🚫` an, aber niemand räumt auf. `dem_cache`
 lag zuletzt bei ~10 MB, das ist noch kein Druck, wächst aber monoton. Der
-SaaS-Plan (§7) nennt 12 Monate Aufbewahrung.
+SaaS-Plan (§7, siehe Hinweis unten) nennt 12 Monate Aufbewahrung.
 
 ### 3.5 Kleinkram
 
@@ -148,10 +148,16 @@ SaaS-Plan (§7) nennt 12 Monate Aufbewahrung.
 ### 3.6 Ausdrücklich nicht jetzt
 
 **Multi-Tenancy / Row-Level-Security** aus `PLAN_SAAS_INTEGRATION.md` §7 und
-Etappe 3. Solange Läufe an einer Browser-Session hängen, ist RLS das Lösen des
-falschen Problems. Zur Warnung: Der Plan baute auf „zusätzlich zur heutigen
+Etappe 3 (siehe Hinweis unten). Solange Läufe an einer Browser-Session hängen,
+ist RLS das Lösen des falschen Problems. Zur Warnung: Der Plan baute auf „zusätzlich zur heutigen
 PostGIS-Welt" auf — diese Welt gab es beim Schreiben des Plans nicht, seine
 Aufwandsschätzung für Etappe 3 ist entsprechend zu optimistisch.
+
+> **Hinweis zu `PLAN_SAAS_INTEGRATION.md`:** Das Dokument liegt bewusst nur
+> lokal unter `docs/plans/` und ist **nicht** im Repository — dieses Repo ist
+> öffentlich, und der Plan enthält Wettbewerbsanalyse, Preis- und
+> Billing-Überlegungen. Wer die hier zitierten Abschnitte braucht, fragt die
+> Datei beim Maintainer an.
 
 ---
 
